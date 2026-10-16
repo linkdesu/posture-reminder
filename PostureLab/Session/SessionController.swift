@@ -259,6 +259,18 @@ final class SessionController: ObservableObject {
 
     restoreScreen()
     phase = .summary
+
+    // QA precondition P2 wants a screenshot of every key screen, and a scripted run never
+    // opens 设置 on its own. Show it once, after the summary shot has landed, then go home.
+    guard isSimulating else { return }
+    calibrationTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(1.6))
+      guard let self, !Task.isCancelled else { return }
+      self.phase = .settings
+      try? await Task.sleep(for: .seconds(1.6))
+      guard !Task.isCancelled else { return }
+      self.phase = .home
+    }
   }
 
   private func handle(_ sample: PostureSample) {

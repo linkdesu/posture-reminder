@@ -301,6 +301,7 @@ def main():
     parser.add_argument("--expect-level1", type=float)
     parser.add_argument("--expect-level2", type=float)
     parser.add_argument("--expect-no-reminders", action="store_true")
+    parser.add_argument("--expect-near-reminders", type=int)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -323,6 +324,14 @@ def main():
 
     if args.expect_no_reminders:
         results.append(check_no_reminders(rows))
+    if args.expect_near_reminders is not None:
+        near = [row for row in rows if row.get("event") == "reminder" and row.get("alert_type") == "near"]
+        matched = len(near) == args.expect_near_reminders
+        print(
+            f"AC3 {'PASS' if matched else 'FAIL'}: {len(near)} near reminder(s), "
+            f"wanted {args.expect_near_reminders}"
+        )
+        results.append(matched)
     results.append(check_pause(rows))
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
