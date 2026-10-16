@@ -1,0 +1,19 @@
+name: PostureLab
+options:
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  PostureLab:
+    type: application
+    platform: iOS
+    sources: [PostureLab]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab
+        DEVELOPMENT_TEAM: DFA8MZ9MZW
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: "用于检测阅读坐姿和眼睛到屏幕的距离（全部在本机处理）"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
