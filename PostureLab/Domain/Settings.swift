@@ -16,20 +16,40 @@ enum ReminderMode: String, CaseIterable, Equatable {
 
 final class Settings: ObservableObject {
   @Published var sensitivity: Sensitivity {
-    didSet { defaults.set(sensitivity.rawValue, forKey: Keys.sensitivity) }
+    didSet {
+      guard !suppressPersistence else { return }
+      defaults.set(sensitivity.rawValue, forKey: Keys.sensitivity)
+    }
   }
   @Published var reminderMode: ReminderMode {
-    didSet { defaults.set(reminderMode.rawValue, forKey: Keys.reminderMode) }
+    didSet {
+      guard !suppressPersistence else { return }
+      defaults.set(reminderMode.rawValue, forKey: Keys.reminderMode)
+    }
   }
   @Published var debugEnabled: Bool {
-    didSet { defaults.set(debugEnabled, forKey: Keys.debugEnabled) }
+    didSet {
+      guard !suppressPersistence else { return }
+      defaults.set(debugEnabled, forKey: Keys.debugEnabled)
+    }
   }
   @Published var baselineDistanceCM: Double? {
-    didSet { store(baselineDistanceCM, forKey: Keys.baselineDistanceCM) }
+    didSet {
+      guard !suppressPersistence else { return }
+      store(baselineDistanceCM, forKey: Keys.baselineDistanceCM)
+    }
   }
   @Published var baselinePitchDeg: Double? {
-    didSet { store(baselinePitchDeg, forKey: Keys.baselinePitchDeg) }
+    didSet {
+      guard !suppressPersistence else { return }
+      store(baselinePitchDeg, forKey: Keys.baselinePitchDeg)
+    }
   }
+
+  /// When true, assignments to the published settings still update the in-memory values but are
+  /// not written to `defaults`. Launch-argument overrides are per-run, so the app stages them
+  /// inside this window to keep them out of the user's saved settings.
+  var suppressPersistence = false
 
   var isCalibrated: Bool { baselineDistanceCM != nil && baselinePitchDeg != nil }
 
@@ -50,9 +70,14 @@ final class Settings: ObservableObject {
       : nil
   }
 
+  /// A real user action taken during calibration, so it persists even while launch overrides have
+  /// persistence suppressed.
   func setBaseline(distanceCM: Double, pitchDeg: Double) {
+    let wasSuppressed = suppressPersistence
+    suppressPersistence = false
     baselineDistanceCM = distanceCM
     baselinePitchDeg = pitchDeg
+    suppressPersistence = wasSuppressed
   }
 
   func clearBaseline() {

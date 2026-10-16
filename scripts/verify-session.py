@@ -126,6 +126,44 @@ def first_breach(times, predicate):
     return None
 
 
+def check_expected_kind(rows, kind):
+    """Without this, a session that fired nothing at all reported AC2 PASS."""
+    if kind is None:
+        return None
+    wanted = "near" if kind == "near" else "head_down"
+    ok = True
+    for level in (1, 2):
+        found = [
+            row
+            for row in rows
+            if row.get("event") == "reminder"
+            and row.get("alert_type") == wanted
+            and row.get("level") == level
+        ]
+        if not found:
+            print(f"AC2 FAIL: expected a level-{level} {wanted} reminder and the session has none")
+            ok = False
+    if ok:
+        print(f"AC2 PASS: {wanted} produced both reminder levels")
+    return ok
+
+
+def check_expected_sensitivity(rows, expected):
+    if expected is None:
+        return None
+    config = config_of(rows)
+    got = config.get("sensitivity")
+    table = {"low": (25.0, 25.0), "medium": (30.0, 20.0), "high": (35.0, 15.0)}
+    wanted = table[expected]
+    actual = (config.get("distance_threshold_cm"), config.get("pitch_threshold_deg"))
+    matched = got == expected and actual == wanted
+    print(
+        f"AC7 {'PASS' if matched else 'FAIL'}: sensitivity={got} thresholds={actual} "
+        f"(wanted {expected} {wanted})"
+    )
+    return matched
+
+
 def check_timing(rows, args):
     """AC2: the two levels land at the requested offsets from the first breach."""
     if args.expect_level1 is None:
@@ -154,6 +192,7 @@ def check_timing(rows, args):
     start_down = first_breach(times, head_down)
 
     ok = True
+    fired_any = False
     for kind, start in (("near", start_near), ("head_down", start_down)):
         fired = {
             row["level"]: row["t"]
@@ -162,6 +201,7 @@ def check_timing(rows, args):
         }
         if not fired:
             continue
+        fired_any = True
         if start is None:
             print(f"AC2 FAIL: {kind} reminders fired but no breach was found in the samples")
             ok = False
@@ -177,8 +217,10 @@ def check_timing(rows, args):
                 f"AC2 {verdict}: {kind} level {level} at t={fired[level]:.2f}, "
                 f"{delta:.2f}s after the breach at t={start:.2f} (wanted {expected:.1f}s +/-1.0)"
             )
-    if ok:
-        print("AC2 PASS")
+    if ok and fired_any:
+        print("AC2 PASS (timing)")
+    elif ok:
+        print("AC2 INFO: no reminder fired here; --expect-kind is what requires one")
     return ok
 
 
@@ -193,7 +235,7 @@ def check_no_reminders(rows):
     return True
 
 
-def check_pause(rows):
+def check_pause(rows, required=False):
     """AC5: a pause happens and the absent seconds stay out of the total."""
     paused = [row for row in rows if row.get("event") == "paused"]
     times = samples(rows)
@@ -202,6 +244,9 @@ def check_pause(rows):
         if d0 is None or p0 is None:
             absent += t1 - t0
     if not paused:
+        if required:
+            print(f"AC5 FAIL: this scenario should have paused, and no paused event exists ({absent:.1f}s absent)")
+            return False
         if absent > 0:
             print(f"AC5 FAIL: {absent:.1f}s with no face but no paused event")
             return False
@@ -315,6 +360,9 @@ def main():
     parser.add_argument("--expect-level2", type=float)
     parser.add_argument("--expect-no-reminders", action="store_true")
     parser.add_argument("--expect-near-reminders", type=int)
+    parser.add_argument("--expect-kind", choices=["near", "head_down"])
+    parser.add_argument("--expect-sensitivity", choices=["low", "medium", "high"])
+    parser.add_argument("--expect-pause", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -337,6 +385,9 @@ def main():
 
     if args.expect_no_reminders:
         results.append(check_no_reminders(rows))
+    for extra in (check_expected_kind(rows, args.expect_kind), check_expected_sensitivity(rows, args.expect_sensitivity)):
+        if extra is not None:
+            results.append(extra)
     if args.expect_near_reminders is not None:
         near = [row for row in rows if row.get("event") == "reminder" and row.get("alert_type") == "near"]
         matched = len(near) == args.expect_near_reminders
@@ -345,7 +396,7 @@ def main():
             f"wanted {args.expect_near_reminders}"
         )
         results.append(matched)
-    results.append(check_pause(rows))
+    results.append(check_pause(rows, required=args.expect_pause))
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
     results.append(check_screenshots(args.log, rows))

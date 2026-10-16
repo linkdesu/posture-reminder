@@ -9,6 +9,9 @@ struct PostureLabApp: App {
     let defaults = UserDefaults.standard
     let settings = Settings()
     let scenarios = PostureLabApp.scenarios(from: defaults)
+    // Launch arguments are per-run overrides: stage them without writing to the store, so they
+    // never become the user's saved settings on the next launch.
+    settings.suppressPersistence = true
     // Any -scenario launch argument means a QA replay, which needs the log.
     if defaults.string(forKey: "scenario") != nil {
       settings.debugEnabled = true
@@ -16,6 +19,7 @@ struct PostureLabApp: App {
     if let sensitivity = PostureLabApp.sensitivity(from: defaults) {
       settings.sensitivity = sensitivity
     }
+    settings.suppressPersistence = false
 
     let logger = FileDebugLogger(enabled: settings.debugEnabled)
     let store = SessionStore()

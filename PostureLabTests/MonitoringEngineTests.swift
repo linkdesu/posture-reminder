@@ -403,4 +403,26 @@ final class MonitoringEngineTests: XCTestCase {
       }
     }
   }
+
+  /// A `-sensitivity`/`-debug` launch argument is a per-run override, so applying it must not
+  /// become the user's saved setting on the next launch, while real user changes still persist.
+  func testLaunchOverridesDoNotPersist() throws {
+    let suiteName = "PostureLabTests.launchOverrides"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defaults.removePersistentDomain(forName: suiteName)
+
+    let launchSettings = Settings(defaults: defaults)
+    launchSettings.suppressPersistence = true
+    launchSettings.sensitivity = .high
+    launchSettings.debugEnabled = true
+    launchSettings.suppressPersistence = false
+
+    let afterLaunch = Settings(defaults: defaults)
+    XCTAssertEqual(afterLaunch.sensitivity, .medium)
+    XCTAssertFalse(afterLaunch.debugEnabled)
+
+    afterLaunch.sensitivity = .low
+    let afterUserChange = Settings(defaults: defaults)
+    XCTAssertEqual(afterUserChange.sensitivity, .low)
+  }
 }
