@@ -39,6 +39,9 @@ final class SessionController: ObservableObject {
   /// Non-empty means scripted replay instead of the camera.
   let scenarios: [Scenario]
 
+  /// Scripted runs only hop to 设置 after the summary when the launch argument asked for it.
+  let captureSettings: Bool
+
   private let player: ReminderPlayer
 
   private var engine: MonitoringEngine?
@@ -52,12 +55,17 @@ final class SessionController: ObservableObject {
   private var simulationClock: TimeInterval = 0
   private var savedBrightness: Double?
 
-  init(settings: Settings, store: SessionStore, logger: DebugLogging, scenarios: [Scenario] = []) {
+  init(settings: Settings,
+       store: SessionStore,
+       logger: DebugLogging,
+       scenarios: [Scenario] = [],
+       captureSettings: Bool = false) {
     self.settings = settings
     self.store = store
     self.logger = logger
     self.scenarios = scenarios
-    player = ReminderPlayer(settings: settings)
+    self.captureSettings = captureSettings
+    player = ReminderPlayer(settings: settings, logger: logger)
   }
 
   var isSimulating: Bool { !scenarios.isEmpty }
@@ -261,14 +269,17 @@ final class SessionController: ObservableObject {
     phase = .summary
 
     // QA precondition P2 wants a screenshot of every key screen, and a scripted run never
-    // opens 设置 on its own. Show it once, after the summary shot has landed, then go home.
+    // opens 设置 on its own, so that detour is opt-in via `-captureSettings`; a scripted run
+    // still returns home once the summary shot has landed.
     guard isSimulating else { return }
     calibrationTask = Task { [weak self] in
       try? await Task.sleep(for: .seconds(1.6))
       guard let self, !Task.isCancelled else { return }
-      self.phase = .settings
-      try? await Task.sleep(for: .seconds(1.6))
-      guard !Task.isCancelled else { return }
+      if self.captureSettings {
+        self.phase = .settings
+        try? await Task.sleep(for: .seconds(1.6))
+        guard !Task.isCancelled else { return }
+      }
       self.phase = .home
     }
   }

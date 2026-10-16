@@ -43,8 +43,8 @@ fi
 # name:duration:extra verify flags
 RUNS=(
   "approach:36:--expect-level1 5 --expect-level2 15"
-  "approach-high:36:--expect-level1 5 --expect-level2 15 -sensitivity high"
-  "approach-low:36:--expect-level1 5 --expect-level2 15 -sensitivity low"
+  "approach-high:36:--expect-level1 5 --expect-level2 15"
+  "approach-low:36:--expect-level1 5 --expect-level2 15"
   "headDown:22:--expect-level1 5 --expect-level2 15"
   "left:20:"
   "shortApproach:16:--expect-no-reminders"
@@ -62,7 +62,7 @@ for run in "${RUNS[@]}"; do
   duration="${rest%%:*}"
   flags="${rest#*:}"
   scenario="${label%%-*}"
-  launch_args=(-scenario "$scenario")
+  launch_args=(-scenario "$scenario" -captureSettings 1)
   case "$label" in
     approach-high) launch_args+=(-sensitivity high) ;;
     approach-low) launch_args+=(-sensitivity low) ;;

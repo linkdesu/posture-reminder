@@ -21,7 +21,7 @@ camera.
 
 - The JSONL log schema is a contract with QA — snake_case keys, `ts` in epoch
   milliseconds, full key set on every line. Change it only with QA awareness
-  (ADR-0002).
+  (ADR-0002); read `docs/qa-log-schema.md` to interpret a session log.
 - Domain vocabulary: see `GLOSSARY.md`.
 - Decisions that are expensive to reverse live in `docs/adr/`.
 

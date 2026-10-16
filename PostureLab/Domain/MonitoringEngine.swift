@@ -75,6 +75,9 @@ struct MonitoringEngine {
                                   headDownSeconds: 0,
                                   pausedSeconds: 0,
                                   tooCloseCount: 0,
+                                  tooCloseRemindCount: 0,
+                                  headDownCount: 0,
+                                  headDownRemindCount: 0,
                                   longestGoodStreakSeconds: 0)
   }
 
@@ -179,6 +182,7 @@ struct MonitoringEngine {
                           sample: sample)
     tooCloseEpisode = update.episode
     if update.firedGentle { summary.tooCloseCount += 1 }
+    if update.reminder != nil { summary.tooCloseRemindCount += 1 }
     return update.reminder
   }
 
@@ -188,6 +192,8 @@ struct MonitoringEngine {
                           kind: .headDown,
                           sample: sample)
     headDownEpisode = update.episode
+    if update.firedGentle { summary.headDownCount += 1 }
+    if update.reminder != nil { summary.headDownRemindCount += 1 }
     return update.reminder
   }
 

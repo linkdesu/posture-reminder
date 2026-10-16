@@ -269,6 +269,100 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(belowThreshold.engine.summary.tooCloseSeconds, 6.0, accuracy: 0.05)
   }
 
+  /// The breach clock starts at the first crossing sample and a single normal sample resets it, so
+  /// two separate 4 s breaches never add up to the 5 s gentle delay.
+  func testSingleGoodSampleResetsTheBreachTimer() throws {
+    var (engine, events) = run([Segment(duration: 1, distanceCM: 40, pitchDeg: 0),
+                                Segment(duration: 4, distanceCM: 20, pitchDeg: 0),
+                                Segment(duration: 0.1, distanceCM: 40, pitchDeg: 0),
+                                Segment(duration: 4, distanceCM: 20, pitchDeg: 0)])
+
+    XCTAssertEqual(reminders(in: events).count, 0)
+    XCTAssertEqual(engine.status, .tooClose)
+    XCTAssertEqual(engine.summary.tooCloseSeconds, 8.0, accuracy: 0.05)
+    XCTAssertEqual(engine.summary.tooCloseCount, 0)
+
+    // The second stretch restarts at 5.1 s, so the gentle reminder lands 5 s later.
+    for sample in sampleStream([Segment(duration: 6, distanceCM: 20, pitchDeg: 0)], from: 9.2) {
+      events += engine.ingest(sample)
+    }
+
+    let fired = reminders(in: events)
+    XCTAssertEqual(fired.count, 1)
+    let reminder = try XCTUnwrap(fired.first)
+    XCTAssertEqual(reminder.kind, .tooClose)
+    XCTAssertEqual(reminder.level, .gentle)
+    XCTAssertEqual(reminder.t, 10.1, accuracy: 0.15)
+    XCTAssertEqual(reminder.breachSeconds, 5.0, accuracy: 0.15)
+    XCTAssertEqual(engine.summary.tooCloseCount, 1)
+  }
+
+  /// Too-close and head-down are independent episodes, so one deep breach logs both reminders and
+  /// always emits the too-close one first within the same `ingest` return.
+  func testBothKindsFireAndLogOnTheSameSample() throws {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+    var sawTooCloseBeforeHeadDown = false
+
+    for sample in sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0),
+                                Segment(duration: 20, distanceCM: 20, pitchDeg: -25)]) {
+      let batch = engine.ingest(sample)
+      events += batch
+      let kinds = batch.compactMap { (event: MonitoringEvent) -> ReminderKind? in
+        if case .reminder(let kind, _, _, _, _, _) = event { return kind }
+        return nil
+      }
+      if kinds == [.tooClose, .headDown] {
+        sawTooCloseBeforeHeadDown = true
+      }
+    }
+
+    let fired = reminders(in: events)
+    let tooCloseGentle = fired.filter { $0.kind == .tooClose && $0.level == .gentle }
+    let headDownGentle = fired.filter { $0.kind == .headDown && $0.level == .gentle }
+    XCTAssertEqual(tooCloseGentle.count, 1)
+    XCTAssertEqual(headDownGentle.count, 1)
+    XCTAssertEqual(try XCTUnwrap(tooCloseGentle.first).t, 6.0, accuracy: 0.15)
+    XCTAssertEqual(try XCTUnwrap(headDownGentle.first).t, 6.0, accuracy: 0.15)
+    XCTAssertEqual(engine.summary.tooCloseSeconds, 20.0, accuracy: 0.05)
+    XCTAssertEqual(engine.summary.headDownSeconds, 20.0, accuracy: 0.05)
+    XCTAssertTrue(sawTooCloseBeforeHeadDown)
+  }
+
+  /// `pausedSeconds` accumulates the intervals whose start sample had no face, which is what the
+  /// coordinator compares against 300 s to end an idle session.
+  func testPausedSecondsAccumulatesAbsence() throws {
+    let result = run([Segment(duration: 2, distanceCM: 40, pitchDeg: 0),
+                      Segment(duration: 10, distanceCM: nil, pitchDeg: nil),
+                      Segment(duration: 2, distanceCM: 40, pitchDeg: 0)])
+
+    XCTAssertEqual(result.engine.summary.pausedSeconds, 10.0, accuracy: 0.2)
+    XCTAssertEqual(result.engine.summary.totalSeconds, 4.0, accuracy: 0.2)
+    XCTAssertEqual(result.engine.summary.goodSeconds, 4.0, accuracy: 0.2)
+    XCTAssertEqual(result.engine.summary.tooCloseSeconds, 0.0, accuracy: 0.001)
+    XCTAssertEqual(result.engine.summary.headDownSeconds, 0.0, accuracy: 0.001)
+    XCTAssertEqual(result.engine.summary.tooCloseCount, 0)
+  }
+
+  /// The episode counters count episodes (level 1 reached) while the remind counters count lines,
+  /// so an episode that escalates to voice contributes 1 to the former and 2 to the latter.
+  func testReminderCountsTrackEpisodesAndLines() {
+    let result = run([Segment(duration: 2, distanceCM: 40, pitchDeg: 0),
+                      Segment(duration: 6, distanceCM: 40, pitchDeg: -25),
+                      Segment(duration: 17, distanceCM: 20, pitchDeg: 0)])
+
+    let fired = reminders(in: result.events)
+    XCTAssertEqual(fired.filter { $0.kind == .tooClose }.count, 2)
+    XCTAssertEqual(fired.filter { $0.kind == .headDown }.count, 1)
+
+    XCTAssertEqual(result.engine.summary.tooCloseCount, 1)
+    XCTAssertEqual(result.engine.summary.tooCloseRemindCount, 2)
+    XCTAssertEqual(result.engine.summary.headDownCount, 1)
+    XCTAssertEqual(result.engine.summary.headDownRemindCount, 1)
+  }
+
   /// QA precondition P1: the same key set on every line, so a null value is fine and a missing key
   /// is not.
   func testLogRecordAlwaysCarriesRequiredKeys() throws {
@@ -279,6 +373,9 @@ final class MonitoringEngineTests: XCTestCase {
                                  headDownSeconds: 2,
                                  pausedSeconds: 1,
                                  tooCloseCount: 1,
+                                 tooCloseRemindCount: 2,
+                                 headDownCount: 1,
+                                 headDownRemindCount: 1,
                                  longestGoodStreakSeconds: 3)
     let events: [MonitoringEvent] = [
       .sessionStarted(scenario: "approach"),
@@ -288,11 +385,13 @@ final class MonitoringEngineTests: XCTestCase {
       .sample(t: 1.5, distanceCM: 40, pitchDeg: 0),
       .statusChanged(to: .headDown, t: 1.5, distanceCM: nil, pitchDeg: nil),
       .reminder(kind: .tooClose, level: .gentle, t: 1.5, breachSeconds: 5, distanceCM: 20, pitchDeg: 0),
+      .speechTimeout(kind: .tooClose, level: .voice),
+      .speechUnavailable(kind: .headDown),
       .paused(t: 1.5),
       .resumed(t: 1.5),
       .sessionEnded(summary: summary),
     ]
-    XCTAssertEqual(events.count, 10)
+    XCTAssertEqual(events.count, 12)
 
     let requiredKeys = ["ts", "event", "state", "screen", "distance_cm", "pitch_deg"]
     let now = Date()

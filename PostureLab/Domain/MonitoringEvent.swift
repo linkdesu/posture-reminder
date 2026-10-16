@@ -8,6 +8,10 @@ enum MonitoringEvent: Equatable {
   case sample(t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case statusChanged(to: PostureStatus, t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case reminder(kind: ReminderKind, level: ReminderLevel, t: TimeInterval, breachSeconds: Double, distanceCM: Double?, pitchDeg: Double?)
+  /// Speech watchdog: the player stopped awaiting synthesis for too long. The speaker has no
+  /// session clock, so these carry no `t`.
+  case speechTimeout(kind: ReminderKind, level: ReminderLevel)
+  case speechUnavailable(kind: ReminderKind)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
   case sessionEnded(summary: SessionSummary)
@@ -41,9 +45,14 @@ struct LogRecord: Codable {
     case head_down_seconds
     case paused_seconds
     case near_count
+    case near_remind_count
+    case head_down_count
+    case head_down_remind_count
     case longest_good_streak_seconds
     case scenario
     case message
+    case battery_level
+    case thermal_state
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -70,9 +79,16 @@ struct LogRecord: Codable {
   var head_down_seconds: Double?
   var paused_seconds: Double?
   var near_count: Int?
+  var near_remind_count: Int?
+  var head_down_count: Int?
+  var head_down_remind_count: Int?
   var longest_good_streak_seconds: Double?
   var scenario: String?
   var message: String?
+  /// Battery charge in 0...1; filled by the writer, not the event.
+  var battery_level: Double?
+  /// One of `nominal`, `fair`, `serious`, `critical`; filled by the writer, not the event.
+  var thermal_state: String?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -101,9 +117,14 @@ struct LogRecord: Codable {
     try container.encode(head_down_seconds, forKey: .head_down_seconds)
     try container.encode(paused_seconds, forKey: .paused_seconds)
     try container.encode(near_count, forKey: .near_count)
+    try container.encode(near_remind_count, forKey: .near_remind_count)
+    try container.encode(head_down_count, forKey: .head_down_count)
+    try container.encode(head_down_remind_count, forKey: .head_down_remind_count)
     try container.encode(longest_good_streak_seconds, forKey: .longest_good_streak_seconds)
     try container.encode(scenario, forKey: .scenario)
     try container.encode(message, forKey: .message)
+    try container.encode(battery_level, forKey: .battery_level)
+    try container.encode(thermal_state, forKey: .thermal_state)
   }
 }
 
@@ -164,6 +185,15 @@ extension MonitoringEvent {
       record.distance_cm = distanceCM
       record.pitch_deg = pitchDeg
 
+    case .speechTimeout(let kind, let level):
+      record.event = "speech_timeout"
+      record.alert_type = kind.rawValue
+      record.level = level.rawValue
+
+    case .speechUnavailable(let kind):
+      record.event = "speech_unavailable"
+      record.alert_type = kind.rawValue
+
     case .paused(let t):
       record.event = "paused"
       record.t = t
@@ -180,6 +210,9 @@ extension MonitoringEvent {
       record.head_down_seconds = summary.headDownSeconds
       record.paused_seconds = summary.pausedSeconds
       record.near_count = summary.tooCloseCount
+      record.near_remind_count = summary.tooCloseRemindCount
+      record.head_down_count = summary.headDownCount
+      record.head_down_remind_count = summary.headDownRemindCount
       record.longest_good_streak_seconds = summary.longestGoodStreakSeconds
     }
 

@@ -277,20 +277,33 @@ def check_summary(rows):
         if verdict == "FAIL":
             ok = False
         print(f"AC6 {verdict}: {key}: log says {claimed:.2f}, samples give {got:.2f} (delta {delta:.2f})")
-    counted = len([row for row in rows if row.get("event") == "reminder" and row.get("level") == 1])
-    claimed_count = ended.get("near_count")
-    if claimed_count is not None:
-        print(f"AC6 INFO: near_count={claimed_count}, level-1 reminder lines in the log={counted}")
+    for kind in ("near", "head_down"):
+        counted = len(
+            [
+                row
+                for row in rows
+                if row.get("event") == "reminder"
+                and row.get("level") == 1
+                and row.get("alert_type") == kind
+            ]
+        )
+        print(f"AC6 INFO: level-1 {kind} reminder lines in the log={counted}")
+    if ended.get("near_count") is not None:
+        print(f"AC6 INFO: session_ended near_count={ended.get('near_count')}")
     return ok
 
 
-def check_screenshots(log_path):
+def check_screenshots(log_path, rows):
     directory = os.path.join(os.path.dirname(os.path.abspath(log_path)), "screenshots")
-    missing = [name for name in SCREENSHOTS if not os.path.exists(os.path.join(directory, f"{name}.png"))]
+    # The reminder shot can only exist in a run where a level-1 reminder actually fired.
+    wanted = list(SCREENSHOTS)
+    if not any(row.get("event") == "reminder" and row.get("level") == 1 for row in rows):
+        wanted.remove("reminder")
+    missing = [name for name in wanted if not os.path.exists(os.path.join(directory, f"{name}.png"))]
     if missing:
         print(f"P2 FAIL: {directory} is missing {', '.join(missing)}.png")
         return False
-    print(f"P2 PASS: all {len(SCREENSHOTS)} screenshots present in {directory}")
+    print(f"P2 PASS: all {len(wanted)} expected screenshots present in {directory}")
     return True
 
 
@@ -335,7 +348,7 @@ def main():
     results.append(check_pause(rows))
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
-    results.append(check_screenshots(args.log))
+    results.append(check_screenshots(args.log, rows))
 
     print("\nRESULT:", "PASS" if all(results) else "FAIL")
     return 0 if all(results) else 1

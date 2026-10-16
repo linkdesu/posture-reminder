@@ -20,7 +20,11 @@ struct PostureLabApp: App {
     let logger = FileDebugLogger(enabled: settings.debugEnabled)
     let store = SessionStore()
     self.settings = settings
-    controller = SessionController(settings: settings, store: store, logger: logger, scenarios: scenarios)
+    controller = SessionController(settings: settings,
+                                   store: store,
+                                   logger: logger,
+                                   scenarios: scenarios,
+                                   captureSettings: PostureLabApp.captureSettings(from: defaults))
   }
 
   var body: some Scene {
@@ -41,5 +45,11 @@ struct PostureLabApp: App {
 
   private static func sensitivity(from defaults: UserDefaults) -> Sensitivity? {
     defaults.string(forKey: "sensitivity").flatMap { Sensitivity(rawValue: $0) }
+  }
+
+  /// `-captureSettings value` on the launch arguments; anything but `0`/`false` counts as on.
+  private static func captureSettings(from defaults: UserDefaults) -> Bool {
+    guard let raw = defaults.string(forKey: "captureSettings") else { return false }
+    return raw != "0" && raw.lowercased() != "false"
   }
 }

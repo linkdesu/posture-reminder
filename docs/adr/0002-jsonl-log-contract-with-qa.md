@@ -19,17 +19,20 @@ together by renaming code.
 
 The log schema (v2) is fixed as follows:
 
-- Keys are **snake_case**; every line carries the full key set (23 keys). `LogRecord`
+- Keys are **snake_case**; every line carries the full key set (30 keys). `LogRecord`
   has a custom `encode(to:)` that writes every key on every line — absent values are
   encoded as JSON `null` via `encodeNil()`. It must not be switched to
   `encodeIfPresent`, which would make the key set vary by line and break the
-  contract.
+  contract. The key-by-key reference lives in `docs/qa-log-schema.md`.
 - `ts` is the Unix epoch milliseconds when the line was produced; it is present on
   **every** line (filled from `now`), not only on lines that carry a session time.
 - `t` (seconds since session start) is filled only by events that carry a time.
 - The `event` values are the snake_case case names: `session_started`, `config`,
   `calibration_done`, `screen_shown`, `sample`, `status_changed`, `reminder`,
-  `paused`, `resumed`, `session_ended`.
+  `speech_timeout`, `speech_unavailable`, `paused`, `resumed`, `session_ended`.
+  The two speech events exist because a device with no Chinese voice, or a
+  synthesizer that never reports a finish, must still be visible from the log
+  rather than silently swallowing a reminder.
 - The **domain-vocabulary mapping happens at the log boundary only**: Swift
   identifiers keep their code names, and the mapping to log spellings lives in the
   `MonitoringEvent.logRecord(now:)` conversion (see the mapping table in

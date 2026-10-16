@@ -71,6 +71,13 @@ log lines.
 | `MonitoringEvent.calibrated(...)` | `calibration_done` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
 | `SessionSummary.tooCloseCount` | `near_count` |
+| `SessionSummary.tooCloseRemindCount` | `near_remind_count` |
+| `SessionSummary.headDownCount` | `head_down_count` |
+| `SessionSummary.headDownRemindCount` | `head_down_remind_count` |
 
-Every log line carries the full key set (25 keys); `ts` (epoch milliseconds) is present
-on every line. See ADR-0002.
+Every log line carries the full key set (30 keys); `ts` (epoch milliseconds) and `t`
+(seconds since session start) are different quantities and neither is renamed — see
+`docs/qa-log-schema.md`. Two of those keys — `battery_level` (0...1) and
+`thermal_state` (`nominal` / `fair` / `serious` / `critical`) — have no Swift event
+behind them: the `FileDebugLogger` samples them from the device and stamps every line.
+See ADR-0002.
