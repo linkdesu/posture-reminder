@@ -268,4 +268,40 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(belowThreshold.engine.status, .tooClose)
     XCTAssertEqual(belowThreshold.engine.summary.tooCloseSeconds, 6.0, accuracy: 0.05)
   }
+
+  /// QA precondition P1: the same key set on every line, so a null value is fine and a missing key
+  /// is not.
+  func testLogRecordAlwaysCarriesRequiredKeys() throws {
+    let summary = SessionSummary(startedAt: Date(),
+                                 totalSeconds: 10,
+                                 goodSeconds: 5,
+                                 tooCloseSeconds: 2,
+                                 headDownSeconds: 2,
+                                 pausedSeconds: 1,
+                                 tooCloseCount: 1,
+                                 longestGoodStreakSeconds: 3)
+    let events: [MonitoringEvent] = [
+      .sessionStarted(scenario: "approach"),
+      .config(sensitivity: .medium, distanceThresholdCM: 30, pitchThresholdDeg: 20),
+      .calibrated(baselineDistanceCM: 40, baselinePitchDeg: 0),
+      .screenShown(name: "monitoring"),
+      .sample(t: 1.5, distanceCM: 40, pitchDeg: 0),
+      .statusChanged(to: .headDown, t: 1.5, distanceCM: nil, pitchDeg: nil),
+      .reminder(kind: .tooClose, level: .gentle, t: 1.5, breachSeconds: 5, distanceCM: 20, pitchDeg: 0),
+      .paused(t: 1.5),
+      .resumed(t: 1.5),
+      .sessionEnded(summary: summary),
+    ]
+    XCTAssertEqual(events.count, 10)
+
+    let requiredKeys = ["ts", "event", "state", "screen", "distance_cm", "pitch_deg"]
+    let now = Date()
+    for event in events {
+      let data = try JSONEncoder().encode(event.logRecord(now: now))
+      let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+      for key in requiredKeys {
+        XCTAssertTrue(object.keys.contains(key), "\(event) dropped the \(key) key")
+      }
+    }
+  }
 }

@@ -9,12 +9,14 @@ struct PostureSample: Equatable {
   var facePresent: Bool { distanceCM != nil && pitchDeg != nil }
 }
 
-/// The single value the monitoring screen displays.
+/// The single value the monitoring screen displays. Raw values are the log vocabulary (v2), not
+/// display strings: `rawValue` goes to the `state` key of every log line and is read back by QA
+/// scripts.
 enum PostureStatus: String, Equatable, CaseIterable {
   case good = "good"
-  case tooClose = "too_close"
+  case tooClose = "near"
   case headDown = "head_down"
-  case absent = "absent"
+  case absent = "no_person"
 
   var displayName: String {
     switch self {
@@ -26,8 +28,9 @@ enum PostureStatus: String, Equatable, CaseIterable {
   }
 }
 
+/// Raw values are the log vocabulary (v2) written to the `alert_type` key.
 enum ReminderKind: String, Equatable, CaseIterable {
-  case tooClose = "too_close"
+  case tooClose = "near"
   case headDown = "head_down"
 }
 

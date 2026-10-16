@@ -73,6 +73,7 @@ struct MonitoringEngine {
                                   goodSeconds: 0,
                                   tooCloseSeconds: 0,
                                   headDownSeconds: 0,
+                                  pausedSeconds: 0,
                                   tooCloseCount: 0,
                                   longestGoodStreakSeconds: 0)
   }
@@ -148,9 +149,13 @@ struct MonitoringEngine {
     return .good
   }
 
-  /// An interval belongs to the sample at its start; a sample without a face accrues nothing.
+  /// An interval belongs to the sample at its start; the sample without a face accrues paused time
+  /// instead of reading time.
   private mutating func credit(_ sample: PostureSample, dt: TimeInterval) {
-    guard sample.facePresent else { return }
+    guard sample.facePresent else {
+      summary.pausedSeconds += dt
+      return
+    }
     summary.totalSeconds += dt
     let tooClose = isTooCloseViolation(sample)
     let headDown = isHeadDownViolation(sample)

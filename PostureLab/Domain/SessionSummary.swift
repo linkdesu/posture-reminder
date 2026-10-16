@@ -6,6 +6,8 @@ struct SessionSummary: Equatable, Codable {
   var goodSeconds: Double
   var tooCloseSeconds: Double
   var headDownSeconds: Double
+  /// Time the face was not detected; excluded from `totalSeconds`.
+  var pausedSeconds: Double
   var tooCloseCount: Int
   var longestGoodStreakSeconds: Double
 
