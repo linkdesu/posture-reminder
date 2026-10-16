@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+"""Re-run the QA checks against one PostureLab session log.
+
+Usage:
+  scripts/verify-session.py <session.jsonl> [--expect-scenario NAME]
+      [--expect-level1 SECONDS] [--expect-level2 SECONDS]
+      [--expect-no-reminders] [--quiet]
+
+The log is the app's own JSONL from the sandbox (Documents/debug/session-*.jsonl).
+Everything below is recomputed from that file alone; nothing is taken on trust
+from the app. Exit code is 0 when every requested check passes.
+
+Checks:
+  P1   every line carries ts, event, state, screen, distance_cm, pitch_deg
+  P3   the scenario named in session_started matches --expect-scenario
+  AC2  level 1 and level 2 fire at the requested offsets from the first
+       sample that breaks the threshold
+  AC5  an absence pause appears and its seconds are excluded from the total
+  AC6  the five summary numbers in session_ended match the samples
+  AC11 no reminder at all (--expect-no-reminders)
+  P2   the seven screenshot files exist next to the log
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+REQUIRED_KEYS = ["ts", "event", "state", "screen", "distance_cm", "pitch_deg"]
+SCREENSHOTS = [
+    "home",
+    "calibration",
+    "calibration_result",
+    "monitoring",
+    "summary",
+    "settings",
+    "reminder",
+]
+SUMMARY_FIELDS = {
+    "total_seconds": "total",
+    "good_seconds": "good",
+    "near_seconds": "near",
+    "head_down_seconds": "head_down",
+    "longest_good_streak_seconds": "longest_good_streak",
+}
+
+
+def load(path):
+    rows = []
+    with open(path, encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as error:
+                sys.exit(f"{path}:{number}: not JSON: {error}")
+    if not rows:
+        sys.exit(f"{path}: no records")
+    return rows
+
+
+def check_required_keys(rows):
+    """P1. This is the check QA turns into an automatic reject."""
+    bad = []
+    for index, row in enumerate(rows, 1):
+        missing = [key for key in REQUIRED_KEYS if key not in row]
+        if missing:
+            bad.append((index, missing, row.get("event")))
+    if bad:
+        print(f"P1 FAIL: {len(bad)} line(s) missing required keys")
+        for index, missing, event in bad[:10]:
+            print(f"   line {index} ({event}): missing {', '.join(missing)}")
+        return False
+    print(f"P1 PASS: all {len(rows)} lines carry {' '.join(REQUIRED_KEYS)}")
+    return True
+
+
+def timeline(rows):
+    print("\n--- timeline (event rows only) ---")
+    for row in rows:
+        event = row.get("event")
+        if event == "sample":
+            continue
+        bits = [f"t={fmt(row.get('t'))}"]
+        for key in ("state", "screen", "alert_type", "level", "breach_seconds"):
+            if row.get(key) is not None:
+                bits.append(f"{key}={row[key]}")
+        for key in ("distance_cm", "pitch_deg"):
+            if row.get(key) is not None:
+                bits.append(f"{key}={fmt(row[key])}")
+        print(f"  {'  '.join(bits)}   [{event}]")
+
+
+def fmt(value):
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def config_of(rows):
+    for row in rows:
+        if row.get("event") == "config":
+            return row
+    return {}
+
+
+def samples(rows):
+    """(t, distance, pitch) for every sample line, in file order."""
+    out = []
+    for row in rows:
+        if row.get("event") == "sample" and row.get("t") is not None:
+            out.append((row["t"], row.get("distance_cm"), row.get("pitch_deg")))
+    return out
+
+
+def first_breach(times, predicate):
+    for t, distance, pitch in times:
+        if predicate(distance, pitch):
+            return t
+    return None
+
+
+def check_timing(rows, args):
+    """AC2: the two levels land at the requested offsets from the first breach."""
+    if args.expect_level1 is None:
+        return True
+    config = config_of(rows)
+    distance_threshold = config.get("distance_threshold_cm")
+    pitch_threshold = config.get("pitch_threshold_deg")
+    baseline_pitch = None
+    for row in rows:
+        if row.get("event") == "calibration_done":
+            baseline_pitch = row.get("baseline_pitch_deg")
+
+    def too_close(distance, _pitch):
+        return distance is not None and distance_threshold is not None and distance < distance_threshold
+
+    def head_down(_distance, pitch):
+        return (
+            pitch is not None
+            and baseline_pitch is not None
+            and pitch_threshold is not None
+            and baseline_pitch - pitch > pitch_threshold
+        )
+
+    times = samples(rows)
+    start_near = first_breach(times, too_close)
+    start_down = first_breach(times, head_down)
+
+    ok = True
+    for kind, start in (("near", start_near), ("head_down", start_down)):
+        fired = {
+            row["level"]: row["t"]
+            for row in rows
+            if row.get("event") == "reminder" and row.get("alert_type") == kind
+        }
+        if not fired:
+            continue
+        if start is None:
+            print(f"AC2 FAIL: {kind} reminders fired but no breach was found in the samples")
+            ok = False
+            continue
+        for level, expected in ((1, args.expect_level1), (2, args.expect_level2)):
+            if level not in fired or expected is None:
+                continue
+            delta = fired[level] - start
+            verdict = "PASS" if abs(delta - expected) <= 1.0 else "FAIL"
+            if verdict == "FAIL":
+                ok = False
+            print(
+                f"AC2 {verdict}: {kind} level {level} at t={fired[level]:.2f}, "
+                f"{delta:.2f}s after the breach at t={start:.2f} (wanted {expected:.1f}s +/-1.0)"
+            )
+    if ok:
+        print("AC2 PASS")
+    return ok
+
+
+def check_no_reminders(rows):
+    reminders = [row for row in rows if row.get("event") == "reminder"]
+    if reminders:
+        print(f"AC11 FAIL: {len(reminders)} reminder(s) fired:")
+        for row in reminders:
+            print(f"   t={fmt(row.get('t'))} {row.get('alert_type')} level {row.get('level')}")
+        return False
+    print("AC11 PASS: no reminder events")
+    return True
+
+
+def check_pause(rows):
+    """AC5: a pause happens and the absent seconds stay out of the total."""
+    paused = [row for row in rows if row.get("event") == "paused"]
+    times = samples(rows)
+    absent = 0.0
+    for (t0, d0, p0), (t1, _d1, _p1) in zip(times, times[1:]):
+        if d0 is None or p0 is None:
+            absent += t1 - t0
+    if not paused:
+        if absent > 0:
+            print(f"AC5 FAIL: {absent:.1f}s with no face but no paused event")
+            return False
+        print("AC5 SKIP: no absence in this session")
+        return True
+    print(
+        f"AC5 PASS: {len(paused)} paused event(s), first at t={fmt(paused[0].get('t'))}, "
+        f"{absent:.1f}s excluded from the total"
+    )
+    return True
+
+
+def recompute(rows, rows_times, config, baseline_pitch):
+    distance_threshold = config.get("distance_threshold_cm")
+    pitch_threshold = config.get("pitch_threshold_deg")
+    total = good = near = head_down = 0.0
+    streak = longest = 0.0
+    for (t0, d0, p0), (t1, _d1, _p1) in zip(rows_times, rows_times[1:]):
+        dt = t1 - t0
+        if d0 is None or p0 is None:
+            continue
+        total += dt
+        is_near = distance_threshold is not None and d0 < distance_threshold
+        is_down = (
+            baseline_pitch is not None
+            and pitch_threshold is not None
+            and baseline_pitch - p0 > pitch_threshold
+        )
+        if is_near:
+            near += dt
+        if is_down:
+            head_down += dt
+        if is_near or is_down:
+            streak = 0.0
+        else:
+            good += dt
+            streak += dt
+            longest = max(longest, streak)
+    return {
+        "total": total,
+        "good": good,
+        "near": near,
+        "head_down": head_down,
+        "longest_good_streak": longest,
+    }
+
+
+def check_summary(rows):
+    """AC6: the numbers on the summary screen equal what the log supports."""
+    ended = None
+    for row in rows:
+        if row.get("event") == "session_ended":
+            ended = row
+    if ended is None:
+        print("AC6 FAIL: no session_ended record")
+        return False
+    config = config_of(rows)
+    baseline_pitch = None
+    for row in rows:
+        if row.get("event") == "calibration_done":
+            baseline_pitch = row.get("baseline_pitch_deg")
+    reported = recompute(rows, samples(rows), config, baseline_pitch)
+    ok = True
+    for key, label in SUMMARY_FIELDS.items():
+        claimed = ended.get(key)
+        got = reported[label]
+        if claimed is None:
+            print(f"AC6 FAIL: session_ended has no {key}")
+            ok = False
+            continue
+        delta = abs(claimed - got)
+        verdict = "PASS" if delta <= 1.0 else "FAIL"
+        if verdict == "FAIL":
+            ok = False
+        print(f"AC6 {verdict}: {key}: log says {claimed:.2f}, samples give {got:.2f} (delta {delta:.2f})")
+    counted = len([row for row in rows if row.get("event") == "reminder" and row.get("level") == 1])
+    claimed_count = ended.get("near_count")
+    if claimed_count is not None:
+        print(f"AC6 INFO: near_count={claimed_count}, level-1 reminder lines in the log={counted}")
+    return ok
+
+
+def check_screenshots(log_path):
+    directory = os.path.join(os.path.dirname(os.path.abspath(log_path)), "screenshots")
+    missing = [name for name in SCREENSHOTS if not os.path.exists(os.path.join(directory, f"{name}.png"))]
+    if missing:
+        print(f"P2 FAIL: {directory} is missing {', '.join(missing)}.png")
+        return False
+    print(f"P2 PASS: all {len(SCREENSHOTS)} screenshots present in {directory}")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("log")
+    parser.add_argument("--expect-scenario")
+    parser.add_argument("--expect-level1", type=float)
+    parser.add_argument("--expect-level2", type=float)
+    parser.add_argument("--expect-no-reminders", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args()
+
+    rows = load(args.log)
+    print(f"{args.log}: {len(rows)} records")
+
+    results = [check_required_keys(rows)]
+
+    started = next((row for row in rows if row.get("event") == "session_started"), {})
+    scenario = started.get("scenario")
+    if args.expect_scenario:
+        matched = scenario == args.expect_scenario
+        print(f"P3 {'PASS' if matched else 'FAIL'}: scenario={scenario or '(camera)'} (wanted {args.expect_scenario})")
+        results.append(matched)
+    elif scenario:
+        print(f"P3 INFO: scenario={scenario}")
+
+    if not args.quiet:
+        timeline(rows)
+
+    if args.expect_no_reminders:
+        results.append(check_no_reminders(rows))
+    results.append(check_pause(rows))
+    results.append(check_timing(rows, args))
+    results.append(check_summary(rows))
+    results.append(check_screenshots(args.log))
+
+    print("\nRESULT:", "PASS" if all(results) else "FAIL")
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

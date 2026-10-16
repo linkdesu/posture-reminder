@@ -4,9 +4,6 @@ import Foundation
 final class SimulatedSampleSource: SampleSource {
   var onSample: ((PostureSample) -> Void)?
 
-  /// Length of the replayed scenario; the coordinator ends the run with it.
-  var duration: TimeInterval { scenario.duration }
-
   private let scenario: Scenario
   private var timer: Timer?
   private var t: TimeInterval = 0

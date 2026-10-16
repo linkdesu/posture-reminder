@@ -100,6 +100,18 @@ final class SessionController: ObservableObject {
     }
   }
 
+  /// A scripted run walks 校准 -> 监测 -> 小结 on its own so QA can launch and walk away;
+  /// a real run waits for the 开始阅读 tap.
+  func autoStartIfSimulating() {
+    guard isSimulating else { return }
+    Task { [weak self] in
+      // Let the home screen render and its screenshot land before the first transition.
+      try? await Task.sleep(for: .seconds(1.2))
+      guard let self, self.phase == .home else { return }
+      self.startReading()
+    }
+  }
+
   // MARK: - Calibration
 
   func beginCalibration() {
