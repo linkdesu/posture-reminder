@@ -2,6 +2,7 @@ name: PostureLab
 options:
   deploymentTarget:
     iOS: "17.0"
+  createIntermediateGroups: true
 targets:
   PostureLab:
     type: application
@@ -15,5 +16,31 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSCameraUsageDescription: "用于检测阅读坐姿和眼睛到屏幕的距离（全部在本机处理）"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
+  PostureLabTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PostureLabTests]
+    dependencies:
+      - target: PostureLab
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.tests
+        GENERATE_INFOPLIST_FILE: YES
+        DEVELOPMENT_TEAM: DFA8MZ9MZW
+schemes:
+  PostureLab:
+    build:
+      targets:
+        PostureLab: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - PostureLabTests
