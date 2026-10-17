@@ -2,32 +2,54 @@ import Foundation
 
 /// Pure reminder state machine driven by externally injected time. Time comes only
 /// from `PostureSample.t`, so replaying a recorded sample stream is reproducible.
+///
+/// v0.3 runs one identical episode machine per `PostureKind` over the breaching flags that
+/// `PostureClassifier` produces, instead of a hand-written path per posture.
 struct MonitoringEngine {
   struct Config: Equatable {
-    var distanceThresholdCM: Double
-    var pitchThresholdDeg: Double
+    var thresholds: PostureThresholds
+    /// The calibrated reference the classifier measures deviations against.
+    var baseline: PostureBaseline
     var gentleDelay: TimeInterval
     var voiceDelay: TimeInterval
     var cooldown: TimeInterval
     var absencePauseDelay: TimeInterval
+    /// When on, the experimental tier may emit a level-1 reminder; it never reaches level 2
+    /// because `PostureKind.voiceLine` is nil for those kinds. Default off: detect-and-log only.
+    var speaksExperimentalPostures: Bool
 
-    init(distanceThresholdCM: Double,
-         pitchThresholdDeg: Double,
+    init(thresholds: PostureThresholds,
+         baseline: PostureBaseline,
          gentleDelay: TimeInterval = 5,
          voiceDelay: TimeInterval = 15,
          cooldown: TimeInterval = 30,
-         absencePauseDelay: TimeInterval = 3) {
-      self.distanceThresholdCM = distanceThresholdCM
-      self.pitchThresholdDeg = pitchThresholdDeg
+         absencePauseDelay: TimeInterval = 3,
+         speaksExperimentalPostures: Bool = false) {
+      self.thresholds = thresholds
+      self.baseline = baseline
       self.gentleDelay = gentleDelay
       self.voiceDelay = voiceDelay
       self.cooldown = cooldown
       self.absencePauseDelay = absencePauseDelay
+      self.speaksExperimentalPostures = speaksExperimentalPostures
     }
 
+    /// The v2 spellings of the two thresholds, read off the table.
+    var distanceThresholdCM: Double { thresholds.distanceCM }
+    var pitchThresholdDeg: Double { thresholds.pitchDeg }
+
+    /// Thresholds plus the upright reference baseline, with no measured distance or pitch: for
+    /// callers that inject the calibrated pair into `MonitoringEngine.init` themselves.
     static func forSensitivity(_ s: Sensitivity) -> Config {
-      Config(distanceThresholdCM: s.distanceThresholdCM,
-             pitchThresholdDeg: s.pitchThresholdDeg)
+      Config(thresholds: .forSensitivity(s),
+             baseline: PostureBaseline(distanceCM: 0,
+                                       pitchDeg: 0,
+                                       rollDeg: 0,
+                                       shoulderTiltDeg: 0,
+                                       headHeight: PostureBaseline.uprightHeadHeight,
+                                       headDepthM: PostureBaseline.uprightHeadDepthM,
+                                       shoulderWidth: PostureBaseline.uprightShoulderWidth,
+                                       neckToRoot: PostureBaseline.uprightNeckToRoot))
     }
   }
 
@@ -45,12 +67,20 @@ struct MonitoringEngine {
     var firedGentle: Bool
   }
 
+  /// One `features` line per this many samples: 5 samples at the 10 Hz tick is 2 Hz.
+  private static let samplesPerFeatureLine = 5
+
   private let config: Config
-  private let baselineDistanceCM: Double
-  private let baselinePitchDeg: Double
-  private var tooCloseEpisode = Episode()
-  private var headDownEpisode = Episode()
+  private let baseline: PostureBaseline
+  /// One episode machine per posture; `PostureKind.allCases` is the roster.
+  private var episodes: [PostureKind: Episode] = [:]
+  /// Episodes that reached level 1 and reminder lines emitted, per posture. Kept per kind rather
+  /// than only in the two `SessionSummary` fields so the log and the next slice can read them.
+  private var episodeCounts: [PostureKind: Int] = [:]
+  private var reminderCounts: [PostureKind: Int] = [:]
+  private var samplesSeen = 0
   private var previousSample: PostureSample?
+  private var previousAssessment: PostureAssessment?
   private var absentSince: TimeInterval?
   private var goodStreakSeconds: Double = 0
   private var lastEmittedStatus: PostureStatus = .good
@@ -58,14 +88,21 @@ struct MonitoringEngine {
   private(set) var status: PostureStatus
   private(set) var isPaused: Bool
   private(set) var summary: SessionSummary
+  /// The most recent assessment, so the controller can hand the overlay/avatar the exact readings
+  /// the engine judged from instead of re-running the classifier.
+  private(set) var latestAssessment: PostureAssessment?
 
+  /// The two baseline parameters are the calibrated face values; passing them overrides the ones
+  /// already in `config.baseline`, and omitting them uses the config as given.
   init(config: Config,
-       baselineDistanceCM: Double,
-       baselinePitchDeg: Double,
+       baselineDistanceCM: Double? = nil,
+       baselinePitchDeg: Double? = nil,
        startedAt: Date = Date()) {
+    var baseline = config.baseline
+    if let baselineDistanceCM { baseline.distanceCM = baselineDistanceCM }
+    if let baselinePitchDeg { baseline.pitchDeg = baselinePitchDeg }
     self.config = config
-    self.baselineDistanceCM = baselineDistanceCM
-    self.baselinePitchDeg = baselinePitchDeg
+    self.baseline = baseline
     self.status = .good
     self.isPaused = false
     self.summary = SessionSummary(startedAt: startedAt,
@@ -81,15 +118,23 @@ struct MonitoringEngine {
                                   longestGoodStreakSeconds: 0)
   }
 
+  /// Episodes of `kind` that reached level 1, whether or not the line was voiced.
+  func episodeCount(for kind: PostureKind) -> Int { episodeCounts[kind] ?? 0 }
+
+  /// Reminder lines actually emitted for `kind`.
+  func reminderCount(for kind: PostureKind) -> Int { reminderCounts[kind] ?? 0 }
+
   mutating func ingest(_ sample: PostureSample) -> [MonitoringEvent] {
     var events: [MonitoringEvent] = [
       .sample(t: sample.t, distanceCM: sample.distanceCM, pitchDeg: sample.pitchDeg)
     ]
 
-    if let previous = previousSample {
-      credit(previous, dt: sample.t - previous.t)
+    if let previous = previousSample, let priorAssessment = previousAssessment {
+      credit(previous, assessment: priorAssessment, dt: sample.t - previous.t)
     }
 
+    // Reading time is credited per face tick, which is what the v2 pause rule and the QA
+    // verifier (it only ever sees `distance_cm`/`pitch_deg`) agree on.
     if sample.facePresent {
       absentSince = nil
       if isPaused {
@@ -106,7 +151,12 @@ struct MonitoringEngine {
       }
     }
 
-    let next = status(for: sample)
+    let assessment = PostureClassifier.assess(sample,
+                                              baseline: baseline,
+                                              thresholds: config.thresholds)
+    latestAssessment = assessment
+
+    let next = status(for: assessment, personPresent: sample.facePresent || sample.bodyPresent)
     if next != lastEmittedStatus {
       lastEmittedStatus = next
       status = next
@@ -116,55 +166,98 @@ struct MonitoringEngine {
                                    pitchDeg: sample.pitchDeg))
     }
 
-    if let reminder = advanceTooClose(sample) {
-      events.append(reminder)
+    events += advance(sample, assessment: assessment)
+
+    if samplesSeen % Self.samplesPerFeatureLine == 0 {
+      events.append(.features(t: sample.t,
+                              readings: assessment.readings,
+                              highlighted: assessment.highlighted))
     }
-    if let reminder = advanceHeadDown(sample) {
-      events.append(reminder)
-    }
+    samplesSeen += 1
 
     previousSample = sample
+    previousAssessment = assessment
     return events
   }
 
   mutating func finish(at t: TimeInterval) -> [MonitoringEvent] {
-    if let previous = previousSample {
-      credit(previous, dt: t - previous.t)
+    if let previous = previousSample, let priorAssessment = previousAssessment {
+      credit(previous, assessment: priorAssessment, dt: t - previous.t)
       previousSample = nil
+      previousAssessment = nil
     }
     return [.sessionEnded(summary: summary)]
   }
 
-  private func isTooCloseViolation(_ sample: PostureSample) -> Bool {
-    guard let distance = sample.distanceCM else { return false }
-    return distance < config.distanceThresholdCM
+  /// The displayed state is the highest-priority breaching posture, `good` when nothing breaches,
+  /// and `no_person` when neither the face nor the body is in frame.
+  private func status(for assessment: PostureAssessment, personPresent: Bool) -> PostureStatus {
+    guard personPresent else { return .noPerson }
+    guard let dominant = assessment.dominant else { return .good }
+    return .posture(dominant)
   }
 
-  private func isHeadDownViolation(_ sample: PostureSample) -> Bool {
-    guard let pitch = sample.pitchDeg else { return false }
-    return baselinePitchDeg - pitch > config.pitchThresholdDeg
+  /// Steps every posture's episode machine over this sample's breach flags and returns the
+  /// reminders the child gets to hear.
+  ///
+  /// Every breaching, speakeable posture emits its own reminder and keeps its own clock, so each
+  /// kind is timed, logged and counted independently; the reminders of one tick are ordered by
+  /// `PostureKind.priority` ascending. Keeping them from overlapping is the player's job, not the
+  /// engine's. The experimental tier joins the stream only when `canSpeak` allows it, and never
+  /// gets past level 1 (see `advanced`).
+  private mutating func advance(_ sample: PostureSample,
+                                assessment: PostureAssessment) -> [MonitoringEvent] {
+    let breached = Set(PostureKind.allCases.filter { assessment.breached[$0] == true })
+
+    var events: [MonitoringEvent] = []
+    for kind in PostureKind.allCases.sorted(by: { $0.priority < $1.priority }) {
+      let update = advanced(episodes[kind] ?? Episode(),
+                            breached: breached.contains(kind),
+                            kind: kind,
+                            sample: sample)
+      episodes[kind] = update.episode
+      guard update.firedGentle || update.reminder != nil else { continue }
+      if update.firedGentle { episodeCounts[kind, default: 0] += 1 }
+      if let reminder = update.reminder, canSpeak(kind) {
+        reminderCounts[kind, default: 0] += 1
+        events.append(reminder)
+      }
+    }
+
+    // v0.3 keeps the two v2 summary fields; the rest of the per-kind counters stay above.
+    summary.tooCloseCount = episodeCounts[.near] ?? 0
+    summary.tooCloseRemindCount = reminderCounts[.near] ?? 0
+    summary.headDownCount = episodeCounts[.headDown] ?? 0
+    summary.headDownRemindCount = reminderCounts[.headDown] ?? 0
+    return events
   }
 
-  private func status(for sample: PostureSample) -> PostureStatus {
-    guard sample.facePresent else { return .absent }
-    if isTooCloseViolation(sample) { return .tooClose }
-    if isHeadDownViolation(sample) { return .headDown }
-    return .good
+  /// The experimental tier is display-and-log only unless the experimental flag is on. This is the
+  /// single place that keeps a kind out of the reminder stream: a non-experimental kind always may
+  /// speak, an experimental one only when the flag is set. It still breaches, still moves `status`,
+  /// still reaches `features` either way.
+  private func canSpeak(_ kind: PostureKind) -> Bool {
+    kind.tier == .experimental ? config.speaksExperimentalPostures : true
   }
 
   /// An interval belongs to the sample at its start; the sample without a face accrues paused time
   /// instead of reading time.
-  private mutating func credit(_ sample: PostureSample, dt: TimeInterval) {
+  private mutating func credit(_ sample: PostureSample,
+                              assessment: PostureAssessment,
+                              dt: TimeInterval) {
     guard sample.facePresent else {
       summary.pausedSeconds += dt
       return
     }
     summary.totalSeconds += dt
-    let tooClose = isTooCloseViolation(sample)
-    let headDown = isHeadDownViolation(sample)
+    let tooClose = assessment.breached[.near] == true
+    let headDown = assessment.breached[.headDown] == true
     if tooClose { summary.tooCloseSeconds += dt }
     if headDown { summary.headDownSeconds += dt }
-    if tooClose || headDown {
+    // Good reading time is "the face is present and nothing breaches at all" — the same condition
+    // as `status == .good`. Judging it from the two v2 kinds alone made every session in a newer
+    // posture read back as perfect in exactly the sessions the app had intervened in.
+    if assessment.dominant != nil {
       goodStreakSeconds = 0
     } else {
       summary.goodSeconds += dt
@@ -175,31 +268,9 @@ struct MonitoringEngine {
     }
   }
 
-  private mutating func advanceTooClose(_ sample: PostureSample) -> MonitoringEvent? {
-    let update = advanced(tooCloseEpisode,
-                          breached: sample.facePresent && isTooCloseViolation(sample),
-                          kind: .tooClose,
-                          sample: sample)
-    tooCloseEpisode = update.episode
-    if update.firedGentle { summary.tooCloseCount += 1 }
-    if update.reminder != nil { summary.tooCloseRemindCount += 1 }
-    return update.reminder
-  }
-
-  private mutating func advanceHeadDown(_ sample: PostureSample) -> MonitoringEvent? {
-    let update = advanced(headDownEpisode,
-                          breached: sample.facePresent && isHeadDownViolation(sample),
-                          kind: .headDown,
-                          sample: sample)
-    headDownEpisode = update.episode
-    if update.firedGentle { summary.headDownCount += 1 }
-    if update.reminder != nil { summary.headDownRemindCount += 1 }
-    return update.reminder
-  }
-
   private func advanced(_ episode: Episode,
                         breached: Bool,
-                        kind: ReminderKind,
+                        kind: PostureKind,
                         sample: PostureSample) -> EpisodeUpdate {
     var next = episode
 
@@ -238,6 +309,12 @@ struct MonitoringEngine {
       }
     } else if !next.hasFiredVoice, let gentleFiredAt = next.gentleFiredAt,
               sample.t - gentleFiredAt >= config.voiceDelay - config.gentleDelay {
+      // Level 2 exists only to speak. A kind without a voice line (the experimental tier) is
+      // capped at level 1 here, so the tier never has to be special-cased a second time.
+      guard kind.voiceLine != nil else {
+        next.hasFiredVoice = true
+        return EpisodeUpdate(episode: next, reminder: nil, firedGentle: false)
+      }
       next.hasFiredVoice = true
       next.lastReminderAt = sample.t
       let reminder = MonitoringEvent.reminder(kind: kind,

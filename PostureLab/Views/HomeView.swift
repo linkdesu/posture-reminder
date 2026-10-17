@@ -9,6 +9,8 @@ struct HomeView: View {
       Text("PostureLab")
         .font(.largeTitle.bold())
 
+      placementHint
+
       Button {
         controller.startReading()
       } label: {
@@ -35,15 +37,26 @@ struct HomeView: View {
     .padding(24)
   }
 
+  /// The PRD's first user story: how to set the phone up before reading.
+  private var placementHint: some View {
+    VStack(spacing: 6) {
+      Text("手机这样摆")
+        .font(.headline)
+      Text("把手机支起来，放在面前。让孩子坐正对着手机，书放在中间。")
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+    }
+  }
+
   @ViewBuilder private var summaryCard: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("上次小结")
         .font(.headline)
 
       if let summary = controller.previousSummary {
-        summaryRow("时长", durationText(summary.totalSeconds))
+        summaryRow("阅读时长", durationText(summary.totalSeconds))
         summaryRow("太近次数", "\(summary.tooCloseCount) 次")
-        summaryRow("良好占比", percentText(summary.goodRatio))
+        summaryRow("坐姿良好占比", percentText(summary.goodRatio))
       } else {
         Text("还没有记录")
           .foregroundStyle(.secondary)
@@ -65,7 +78,7 @@ struct HomeView: View {
 
   private func durationText(_ seconds: Double) -> String {
     let total = Int(seconds.rounded())
-    return String(format: "%d:%02d", total / 60, total % 60)
+    return String(format: "%02d:%02d", total / 60, total % 60)
   }
 
   private func percentText(_ ratio: Double) -> String {

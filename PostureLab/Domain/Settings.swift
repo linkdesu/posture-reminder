@@ -45,6 +45,18 @@ final class Settings: ObservableObject {
       store(baselinePitchDeg, forKey: Keys.baselinePitchDeg)
     }
   }
+  @Published var avatarEnabled: Bool {
+    didSet {
+      guard !suppressPersistence else { return }
+      defaults.set(avatarEnabled, forKey: Keys.avatarEnabled)
+    }
+  }
+  @Published var experimentalPostures: Bool {
+    didSet {
+      guard !suppressPersistence else { return }
+      defaults.set(experimentalPostures, forKey: Keys.experimentalPostures)
+    }
+  }
 
   /// When true, assignments to the published settings still update the in-memory values but are
   /// not written to `defaults`. Launch-argument overrides are per-run, so the app stages them
@@ -68,6 +80,11 @@ final class Settings: ObservableObject {
     baselinePitchDeg = defaults.object(forKey: Keys.baselinePitchDeg) != nil
       ? defaults.double(forKey: Keys.baselinePitchDeg)
       : nil
+    // Avatar mode is on by default, so absence of the key must read as true, not `bool`'s false.
+    avatarEnabled = defaults.object(forKey: Keys.avatarEnabled) != nil
+      ? defaults.bool(forKey: Keys.avatarEnabled)
+      : true
+    experimentalPostures = defaults.bool(forKey: Keys.experimentalPostures)
   }
 
   /// A real user action taken during calibration, so it persists even while launch overrides have
@@ -85,7 +102,11 @@ final class Settings: ObservableObject {
     baselinePitchDeg = nil
   }
 
-  var engineConfig: MonitoringEngine.Config { .forSensitivity(sensitivity) }
+  var engineConfig: MonitoringEngine.Config {
+    var config = MonitoringEngine.Config.forSensitivity(sensitivity)
+    config.speaksExperimentalPostures = experimentalPostures
+    return config
+  }
 
   private func store(_ value: Double?, forKey key: String) {
     if let value {
@@ -101,5 +122,7 @@ final class Settings: ObservableObject {
     static let debugEnabled = "settings.debugEnabled"
     static let baselineDistanceCM = "settings.baselineDistanceCM"
     static let baselinePitchDeg = "settings.baselinePitchDeg"
+    static let avatarEnabled = "settings.avatarEnabled"
+    static let experimentalPostures = "settings.experimentalPostures"
   }
 }

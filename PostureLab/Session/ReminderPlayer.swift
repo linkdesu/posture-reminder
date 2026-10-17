@@ -3,21 +3,23 @@ import Foundation
 
 /// Plays reminder audio: a short tone for the gentle level, Chinese speech for the voice level.
 ///
-/// Voice lines are serialized — one at a time, `near` ahead of `head_down`, the next starting when
-/// the previous finishes. Gentle tones skip the queue and are never blocked by it.
+/// Voice lines are serialized — one at a time, in `PostureKind.priority` order, the next starting
+/// when the previous finishes. Gentle tones skip the queue and are never blocked by it.
 @MainActor
 final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
   private let settings: Settings
   private let logger: DebugLogging
   private var player: AVAudioPlayer?
   private let synthesizer = AVSpeechSynthesizer()
-  private var pendingVoices: [ReminderKind] = []
+  private var pendingVoices: [PostureKind] = []
   private var isSpeaking = false
   /// Ticks down while an utterance is in flight; see `armWatchdog`.
   private var watchdog: Task<Void, Never>?
   private var currentUtterance: AVSpeechUtterance?
   private var cachedTone: Data?
   private var didConfigureSession = false
+  /// When the last gentle tone started; `playTone` drops anything inside `toneCoalesceWindow` of it.
+  private var lastToneStart: TimeInterval = -TimeInterval.infinity
 
   init(settings: Settings, logger: DebugLogging) {
     self.settings = settings
@@ -26,7 +28,7 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
     synthesizer.delegate = self
   }
 
-  func play(kind: ReminderKind, level: ReminderLevel) {
+  func play(kind: PostureKind, level: ReminderLevel) {
     guard shouldPlay(level) else { return }
     configureSessionIfNeeded()
     switch level {
@@ -40,6 +42,8 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
   func stop() {
     player?.stop()
     player = nil
+    // Nothing is audible any more, so the next tone is not an overlap of the one just stopped.
+    lastToneStart = -TimeInterval.infinity
     pendingVoices.removeAll()
     isSpeaking = false
     cancelWatchdog()
@@ -59,19 +63,23 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
   }
 
-  /// `near` jumps ahead of any queued `head_down`; within one kind arrival order is kept.
-  private func enqueue(_ kind: ReminderKind) {
-    if kind == .tooClose, let headDown = pendingVoices.firstIndex(of: .headDown) {
-      pendingVoices.insert(kind, at: headDown)
-    } else {
-      pendingVoices.append(kind)
-    }
+  /// A higher-priority kind jumps ahead of every lower-priority entry already queued; entries of
+  /// equal priority keep arrival order.
+  private func enqueue(_ kind: PostureKind) {
+    let insertAt = pendingVoices.firstIndex { $0.priority > kind.priority } ?? pendingVoices.endIndex
+    pendingVoices.insert(kind, at: insertAt)
     playNextVoice()
   }
 
   private func playNextVoice() {
     guard !isSpeaking, !pendingVoices.isEmpty else { return }
     let kind = pendingVoices.removeFirst()
+    // An experimental posture has no line to say (`voiceLine == nil`), and the right amount of
+    // speech for it is none: the entry is dropped instead of being faked with a tone.
+    guard let text = kind.voiceLine else {
+      playNextVoice()
+      return
+    }
     // No zh-CN voice on this device: the synthesizer would never call back, so the reminder falls
     // back to the tone (silence is worse than a beep) and the queue carries on.
     guard let voice = AVSpeechSynthesisVoice(language: "zh-CN") else {
@@ -81,7 +89,7 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
       return
     }
     isSpeaking = true
-    speak(kind, voice: voice)
+    speak(kind, text: text, voice: voice)
   }
 
   /// The utterance is done — normally or by watchdog — so the next queued line may start.
@@ -109,19 +117,25 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
     try? session.setActive(true)
   }
 
+  /// Tones deliberately skip the voice queue, so nothing below settles the reminders that land in the
+  /// same tick — and the desk-lean scenario breaches desk-lean, near and head-down together, which is
+  /// three gentle reminders at one instant. Layering them is a fault to the ear, not a stronger hint,
+  /// so a tone that would start inside this window of the previous one is dropped instead. The window
+  /// is the 0.15s tone plus a little slack, short enough that a reminder from a later tick still gets
+  /// its own cue. Voices keep their own serialization and are not affected.
+  private static let toneCoalesceWindow: TimeInterval = 0.25
+
   private func playTone() {
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastToneStart >= Self.toneCoalesceWindow else { return }
     guard let player = try? AVAudioPlayer(data: toneData()) else { return }
     player.prepareToPlay()
     player.play()
     self.player = player
+    lastToneStart = now
   }
 
-  private func speak(_ kind: ReminderKind, voice: AVSpeechSynthesisVoice) {
-    let text: String
-    switch kind {
-    case .tooClose: text = "离书太近啦，坐直一点哦"
-    case .headDown: text = "头抬起来一点哦"
-    }
+  private func speak(_ kind: PostureKind, text: String, voice: AVSpeechSynthesisVoice) {
     let utterance = AVSpeechUtterance(string: text)
     utterance.voice = voice
     currentUtterance = utterance
@@ -134,7 +148,7 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
   /// `AVSpeechUtterance` exposes no duration, so the expected length is estimated from the
   /// character count at a deliberately slow 0.3s per character plus 2s: over-estimating only
   /// delays the recovery, under-estimating would cut a normal line short.
-  private func armWatchdog(kind: ReminderKind, text: String) {
+  private func armWatchdog(kind: PostureKind, text: String) {
     cancelWatchdog()
     watchdog = Task { [weak self] in
       try? await Task.sleep(for: .seconds(Double(text.count) * 0.3 + 2))

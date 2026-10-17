@@ -5,7 +5,7 @@ struct CalibrationView: View {
 
   var body: some View {
     VStack(spacing: 32) {
-      Text("把手机固定好，让孩子坐正，看着书")
+      Text("把手机支起来，放在面前。让孩子坐正对着手机，书放在中间。")
         .font(.title3)
         .multilineTextAlignment(.center)
 
@@ -36,7 +36,7 @@ struct CalibrationView: View {
       VStack(spacing: 12) {
         ProgressView(value: progress)
           .frame(maxWidth: 240)
-        Text("正在采集坐姿，保持不动")
+        Text("正在记下你坐正的样子，保持不动")
           .foregroundStyle(.secondary)
       }
 
@@ -44,8 +44,8 @@ struct CalibrationView: View {
       VStack(spacing: 20) {
         VStack(spacing: 8) {
           Text("校准完成").font(.headline)
-          Text("基准距离 \(result.distanceCM, specifier: "%.1f") cm")
-          Text("基准俯仰角度 \(result.pitchDeg, specifier: "%.1f")°")
+          Text("坐正时距离 \(result.distanceCM, specifier: "%.1f") cm")
+          Text("坐正时低头角度 \(result.pitchDeg, specifier: "%.1f")°")
         }
         HStack(spacing: 16) {
           Button("重新校准") { controller.retryCalibration() }

@@ -4,9 +4,12 @@ import SwiftUI
 /// Reminders never take over the center of the screen; they are sound plus this border.
 struct MonitoringView: View {
   @EnvironmentObject private var controller: SessionController
+  @EnvironmentObject private var settings: Settings
 
+  /// Any breaching posture earns the edge alert; `.good` and `.noPerson` do not.
   private var showsAlertBorder: Bool {
-    controller.status == .tooClose || controller.status == .headDown
+    if case .posture = controller.status { return true }
+    return false
   }
 
   var body: some View {
@@ -14,6 +17,18 @@ struct MonitoringView: View {
       Color.black
         .ignoresSafeArea()
 
+      // Board mode is the black background plus the readout below, unchanged from r1.
+      if settings.avatarEnabled {
+        AvatarView(geometry: controller.latestGeometry, assessment: controller.latestAssessment)
+      }
+
+      if settings.debugEnabled {
+        DebugOverlayView(geometry: controller.latestGeometry, assessment: controller.latestAssessment)
+          .allowsHitTesting(false)
+      }
+
+      // Timer, status, paused marker and the exit button stay above the avatar and overlay so
+      // nothing the child needs is ever covered. In board mode this is the only content.
       VStack(spacing: 0) {
         exitRow
         Spacer()
@@ -25,6 +40,7 @@ struct MonitoringView: View {
         Rectangle()
           .strokeBorder(Color.orange, lineWidth: 12)
           .ignoresSafeArea()
+          .allowsHitTesting(false)
       }
     }
   }

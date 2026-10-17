@@ -30,11 +30,36 @@ struct SettingsView: View {
         }
 
         Section {
+          Toggle(isOn: $settings.avatarEnabled) {
+            settingLabel(
+              title: "形象模式",
+              subtitle: "让孩子看到自己的坐姿形象，不显示真实画面"
+            )
+          }
+
+          Toggle(isOn: $settings.experimentalPostures) {
+            settingLabel(
+              title: "实验性体态",
+              subtitle: "头前伸和驼背只做提示和记录，不发出声音"
+            )
+          }
+        }
+
+        Section {
           Button("重新校准") { controller.showCalibration() }
           Button("返回") { controller.showHome() }
         }
       }
       .navigationTitle("设置")
+    }
+  }
+
+  private func settingLabel(title: String, subtitle: String) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title)
+      Text(subtitle)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
   }
 }

@@ -5,6 +5,9 @@ Usage:
   scripts/verify-session.py <session.jsonl> [--expect-scenario NAME]
       [--expect-level1 SECONDS] [--expect-level2 SECONDS]
       [--expect-no-reminders] [--quiet]
+      [--expect-feature-over FEATURE] [--expect-feature-under FEATURE]
+      [--expect-highlight FEATURE] [--expect-features]
+      [--expect-view-mode MODE] [--expect-overlay]
 
 The log is the app's own JSONL from the sandbox (Documents/debug/session-*.jsonl).
 Everything below is recomputed from that file alone; nothing is taken on trust
@@ -18,7 +21,16 @@ Checks:
   AC5  an absence pause appears and its seconds are excluded from the total
   AC6  the five summary numbers in session_ended match the samples
   AC11 no reminder at all (--expect-no-reminders)
+  AC13 a view_mode line reports the overlay on, and the monitoring screenshot
+       exists when --expect-overlay is given
+  AC17 --expect-feature-over / --expect-feature-under read the features lines'
+       feature_values and fail loudly when there is no features line to read
+  AC18 at least one features line exists, carries highlighted_feature, and
+       highlights the requested feature
   P2   the seven screenshot files exist next to the log
+
+Every new check fails when its subject is absent: no features or view_mode line
+is a failure, never a quiet pass.
 """
 
 from __future__ import annotations
@@ -45,6 +57,18 @@ SUMMARY_FIELDS = {
     "head_down_seconds": "head_down",
     "longest_good_streak_seconds": "longest_good_streak",
 }
+# The `alert_type` / `state` vocabulary: `PostureKind.rawValue` in the app.
+POSTURE_KINDS = [
+    "desk_lean",
+    "near",
+    "head_forward",
+    "slouch",
+    "head_down",
+    "head_tilt",
+    "chin_rest",
+]
+# The `view_mode` vocabulary.
+VIEW_MODES = ["avatar", "board"]
 
 
 def load(path):
@@ -130,7 +154,8 @@ def check_expected_kind(rows, kind):
     """Without this, a session that fired nothing at all reported AC2 PASS."""
     if kind is None:
         return None
-    wanted = "near" if kind == "near" else "head_down"
+    # `--expect-kind` takes a `PostureKind` rawValue, which is exactly what `alert_type` carries.
+    wanted = kind
     ok = True
     for level in (1, 2):
         found = [
@@ -259,14 +284,42 @@ def check_pause(rows, required=False):
     return True
 
 
+def status_timeline(rows):
+    """(t, state) for every `status_changed` line, in file order.
+
+    The engine starts on `good` and only logs a change away from it, so a session in no posture at
+    all has no `status_changed` line and the state stays `good` throughout.
+    """
+    out = []
+    for row in rows:
+        if row.get("event") == "status_changed" and row.get("t") is not None:
+            out.append((row["t"], row.get("state")))
+    return out
+
+
 def recompute(rows, rows_times, config, baseline_pitch):
     distance_threshold = config.get("distance_threshold_cm")
     pitch_threshold = config.get("pitch_threshold_deg")
-    total = good = near = head_down = 0.0
+    total = near = head_down = 0.0
+    # `good` and the good streak come from the event timeline rather than the two-threshold rule
+    # below, so this check does not repeat the engine's own arithmetic back at it. The engine earns
+    # good time whenever the face is present and nothing breaches at all, which is what its
+    # `status == .good` means; the old mirrored rule knew only `near` and `head_down` and so agreed
+    # with a wrong `good_seconds` on every session in one of the five newer postures.
+    good = 0.0
     streak = longest = 0.0
+    states = status_timeline(rows)
+    state_index = 0
+    state = "good"
     for (t0, d0, p0), (t1, _d1, _p1) in zip(rows_times, rows_times[1:]):
+        # The state in force over [t0, t1] is the last change logged at or before t0.
+        while state_index < len(states) and states[state_index][0] <= t0:
+            state = states[state_index][1]
+            state_index += 1
         dt = t1 - t0
         if d0 is None or p0 is None:
+            # No face over this interval: the engine credits paused time, and a pause neither adds
+            # to nor resets the good streak.
             continue
         total += dt
         is_near = distance_threshold is not None and d0 < distance_threshold
@@ -279,12 +332,12 @@ def recompute(rows, rows_times, config, baseline_pitch):
             near += dt
         if is_down:
             head_down += dt
-        if is_near or is_down:
-            streak = 0.0
-        else:
+        if state == "good":
             good += dt
             streak += dt
             longest = max(longest, streak)
+        else:
+            streak = 0.0
     return {
         "total": total,
         "good": good,
@@ -352,6 +405,123 @@ def check_screenshots(log_path, rows):
     return True
 
 
+def event_lines(rows, event):
+    return [row for row in rows if row.get("event") == event]
+
+
+def feature_over(row, feature):
+    """The `over` flag for one feature on one `features` line, or None if the line does not read it."""
+    values = row.get("feature_values")
+    if not isinstance(values, dict):
+        return None
+    entry = values.get(feature)
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("over")
+
+
+def check_feature_over(rows, feature):
+    """AC17/AC18 (experimental positives): the feature must read over threshold on the features lines."""
+    lines = event_lines(rows, "features")
+    if not lines:
+        print(f"AC18 FAIL: no features lines in this log, so nothing can report {feature} over threshold")
+        return False
+    over = [row for row in lines if feature_over(row, feature) is True]
+    if not over:
+        print(f"AC18 FAIL: {len(lines)} features line(s) and none reports {feature} over threshold")
+        return False
+    print(f"AC18 PASS: {feature} reads over threshold on {len(over)} of {len(lines)} features line(s)")
+    return True
+
+
+def check_feature_under(rows, feature):
+    """AC17 counter-examples: no features line may report the feature over threshold."""
+    lines = event_lines(rows, "features")
+    if not lines:
+        print(f"AC17 FAIL: no features lines in this log, so nothing can show {feature} staying under threshold")
+        return False
+    readings = [feature_over(row, feature) for row in lines]
+    present = [flag for flag in readings if flag is not None]
+    if not present:
+        print(f"AC17 FAIL: {len(lines)} features line(s) and none reads {feature}, so its staying under is unproven")
+        return False
+    over = sum(1 for flag in present if flag is True)
+    if over:
+        print(f"AC17 FAIL: {feature} went over threshold on {over} of {len(present)} features line(s) that read it")
+        return False
+    print(f"AC17 PASS: {feature} stayed under threshold on all {len(present)} features line(s) that read it")
+    return True
+
+
+def check_highlight(rows, feature):
+    """AC18: at least one features line highlights the requested feature."""
+    lines = event_lines(rows, "features")
+    if not lines:
+        print(f"AC18 FAIL: no features lines in this log, so nothing can carry highlighted_feature {feature}")
+        return False
+    matching = [row for row in lines if row.get("highlighted_feature") == feature]
+    if not matching:
+        seen = sorted({str(row.get("highlighted_feature")) for row in lines})
+        print(f"AC18 FAIL: no features line highlights {feature} (saw {', '.join(seen)})")
+        return False
+    print(f"AC18 PASS: {feature} is highlighted on {len(matching)} of {len(lines)} features line(s)")
+    return True
+
+
+def check_features_log(rows):
+    """AC18, machine form: at least one features line exists and every one carries highlighted_feature."""
+    lines = event_lines(rows, "features")
+    if not lines:
+        print("AC18 FAIL: no features lines in this log, so which feature is highlighted is unrecorded")
+        return False
+    missing = [index for index, row in enumerate(lines, 1) if "highlighted_feature" not in row]
+    if missing:
+        print(f"AC18 FAIL: {len(missing)} of {len(lines)} features line(s) do not carry the highlighted_feature key")
+        return False
+    print(f"AC18 PASS: {len(lines)} features line(s), each carrying highlighted_feature")
+    return True
+
+
+def check_view_mode(rows, mode, expect_overlay):
+    """AC13: a view_mode line reports the requested mode, and the overlay when --expect-overlay is set."""
+    lines = event_lines(rows, "view_mode")
+    if not lines:
+        print(f"AC13 FAIL: no view_mode lines in this log, so the view mode cannot be confirmed (wanted {mode})")
+        return False
+    matching = [row for row in lines if row.get("view_mode") == mode]
+    if not matching:
+        seen = sorted({str(row.get("view_mode")) for row in lines})
+        print(f"AC13 FAIL: no view_mode line says {mode} (saw {', '.join(seen)})")
+        return False
+    if expect_overlay and not any(row.get("overlay_on") is True for row in matching):
+        print(f"AC13 FAIL: view_mode {mode} lines exist but none reports overlay_on true")
+        return False
+    print(f"AC13 PASS: view_mode={mode} present on {len(matching)} line(s)")
+    return True
+
+
+def check_overlay_evidence(log_path, rows):
+    """AC13: the overlay is on in the log and the monitoring screenshot exists.
+
+    Whether the overlay is *visibly drawn* in the PNG is a human check, not something
+    this script can read out of the file.
+    """
+    lines = event_lines(rows, "view_mode")
+    if not lines:
+        print("AC13 FAIL: no view_mode lines in this log, so the overlay cannot be confirmed on")
+        return False
+    if not any(row.get("overlay_on") is True for row in lines):
+        print("AC13 FAIL: no view_mode line reports overlay_on true")
+        return False
+    shot = os.path.join(os.path.dirname(os.path.abspath(log_path)), "screenshots", "monitoring.png")
+    if not os.path.exists(shot):
+        print(f"AC13 FAIL: {shot} is missing")
+        return False
+    print(f"AC13 PASS: a view_mode line reports overlay_on true and {shot} exists")
+    print("AC13 HUMAN: whether the overlay is visibly drawn in the PNG is a human check")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("log")
@@ -360,9 +530,15 @@ def main():
     parser.add_argument("--expect-level2", type=float)
     parser.add_argument("--expect-no-reminders", action="store_true")
     parser.add_argument("--expect-near-reminders", type=int)
-    parser.add_argument("--expect-kind", choices=["near", "head_down"])
+    parser.add_argument("--expect-kind", choices=POSTURE_KINDS)
     parser.add_argument("--expect-sensitivity", choices=["low", "medium", "high"])
     parser.add_argument("--expect-pause", action="store_true")
+    parser.add_argument("--expect-feature-over")
+    parser.add_argument("--expect-feature-under")
+    parser.add_argument("--expect-highlight")
+    parser.add_argument("--expect-features", action="store_true")
+    parser.add_argument("--expect-view-mode", choices=VIEW_MODES)
+    parser.add_argument("--expect-overlay", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -400,6 +576,19 @@ def main():
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
     results.append(check_screenshots(args.log, rows))
+
+    if args.expect_feature_over:
+        results.append(check_feature_over(rows, args.expect_feature_over))
+    if args.expect_feature_under:
+        results.append(check_feature_under(rows, args.expect_feature_under))
+    if args.expect_highlight:
+        results.append(check_highlight(rows, args.expect_highlight))
+    if args.expect_features:
+        results.append(check_features_log(rows))
+    if args.expect_view_mode:
+        results.append(check_view_mode(rows, args.expect_view_mode, args.expect_overlay))
+    if args.expect_overlay:
+        results.append(check_overlay_evidence(args.log, rows))
 
     print("\nRESULT:", "PASS" if all(results) else "FAIL")
     return 0 if all(results) else 1

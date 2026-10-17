@@ -20,7 +20,9 @@ camera.
 ## Conventions
 
 - The JSONL log schema is a contract with QA — snake_case keys, `ts` in epoch
-  milliseconds, full key set on every line. Change it only with QA awareness
+  milliseconds, the full 35-key set on every line (v0.3 adds the `features` and
+  `view_mode` events with `highlighted_feature`/`feature_values`/`view_mode`/`overlay_on`/
+  `avatar_on`, and experimental postures never speak). Change it only with QA awareness
   (ADR-0002); read `docs/qa-log-schema.md` to interpret a session log.
 - Domain vocabulary: see `GLOSSARY.md`.
 - Decisions that are expensive to reverse live in `docs/adr/`.
