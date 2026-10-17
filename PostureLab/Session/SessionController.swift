@@ -58,6 +58,7 @@ final class SessionController: ObservableObject {
   private var calibrationDistances: [Double] = []
   private var calibrationPitches: [Double] = []
   private var didCaptureReminderScreenshot = false
+  private var didCaptureHighlightScreenshot = false
   private var lastSampleT: TimeInterval = 0
   /// Wall-clock position in the scripted stream, independent of the engine's credited time.
   private var simulationClock: TimeInterval = 0
@@ -248,6 +249,7 @@ final class SessionController: ObservableObject {
     lastSampleT = 0
     simulationClock = 0
     didCaptureReminderScreenshot = false
+    didCaptureHighlightScreenshot = false
 
     logger.log(.sessionStarted(scenario: simulatedScenario?.rawValue))
     // A fresh run starts with a fresh layer baseline, so the first `view_mode` line always lands.
@@ -326,6 +328,13 @@ final class SessionController: ObservableObject {
 
     status = engine.status
     isPaused = engine.isPaused
+    // One shot of the overlay's first highlighted feature per run. Experimental postures
+    // never fire a reminder, so without this they would have no screenshot at the moment
+    // their feature is actually over threshold, and AC13 asks for one.
+    if let highlighted = latestAssessment?.highlighted, !didCaptureHighlightScreenshot {
+      didCaptureHighlightScreenshot = true
+      logger.screenshot("highlight")
+    }
     elapsedSeconds = engine.summary.totalSeconds
     latestGeometry = PoseGeometry(joints: sample.joints, depth: sample.depth)
     latestAssessment = engine.latestAssessment

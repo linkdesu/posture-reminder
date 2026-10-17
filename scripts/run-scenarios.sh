@@ -141,6 +141,16 @@ run_case() {
     echo "SANDBOX AUDIT FAILED"
     FAILED=1
   fi
+
+  # AC13 also says the highlight is visible in a screenshot, which no log can show.
+  local overlay overlay_status
+  overlay=$(python3 scripts/check-overlay.py "$log" --quiet 2>&1)
+  overlay_status=$?
+  echo "$overlay"
+  if [[ "$overlay_status" != 0 ]]; then
+    echo "OVERLAY COLOUR CHECK FAILED"
+    FAILED=1
+  fi
 }
 
 run_case approach     medium         36 --expect-level1 5 --expect-level2 15 --expect-kind near --expect-sensitivity medium
