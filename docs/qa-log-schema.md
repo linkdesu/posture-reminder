@@ -56,7 +56,7 @@ does both and then feeds the newest `session-*.jsonl` to `scripts/verify-session
 
 ## Line format and the full key set
 
-One JSON object per line, UTF-8, newline-terminated. **Every line carries all 30 keys.**
+One JSON object per line, UTF-8, newline-terminated. **Every line carries all 35 keys.**
 The writer encodes the complete key set on every line, with `null` for values that do
 not apply, so a reader **never has to test for key presence** — a key that is not
 meaningful for a given event is present as JSON `null`, not absent. The only per-line
@@ -71,14 +71,14 @@ six are non-null on every line.
 | Key | Type | Meaning |
 |---|---|---|
 | `ts` | Int64 | Unix epoch **milliseconds** when the line was produced. Present and non-null on every line. |
-| `t` | Double? | **Seconds since session start.** Filled only on events that carry a time (`sample`, `status_changed`, `reminder`, `paused`, `resumed`); `null` on the rest. |
+| `t` | Double? | **Seconds since session start.** Filled only on events that carry a time (`sample`, `status_changed`, `features`, `reminder`, `paused`, `resumed`); `null` on the rest. |
 | `wall_clock` | String? | The same instant as `ts` rendered as ISO8601 (`withInternetDateTime`). Human-readable; use `ts` for arithmetic. |
 | `event` | String? | The event kind. See the event table. |
 | `state` | String? | Posture state after this line. On `status_changed` lines it is the new state; on every other line the writer stamps the last state it saw (initial `good`). Never `null`. |
 | `screen` | String? | Visible screen for this line. On `screen_shown` lines it is the screen just shown; elsewhere the writer stamps the last screen it saw (initial `home`). Never `null`. |
 | `distance_cm` | Double? | Distance to the book in cm, for the sample/status/reminder at this tick; `null` when no face was detected or the event carries no sample. |
 | `pitch_deg` | Double? | Head pitch in degrees for the same ticks; `null` when the face was not detected. |
-| `alert_type` | String? | Reminder kind: `near` or `head_down`. Filled on `reminder`, `speech_timeout` and `speech_unavailable` lines. |
+| `alert_type` | String? | Reminder posture: one of the seven `PostureKind` rawValues (see the `alert_type` vocabulary). Filled on `reminder`, `speech_timeout` and `speech_unavailable` lines. |
 | `level` | Int? | Reminder level: `1` (gentle) or `2` (voice). Filled on `reminder` lines and on `speech_timeout`. |
 | `breach_seconds` | Double? | On a `reminder` line, seconds from the episode's breach start to this reminder (`t − breachStart`). |
 | `sensitivity` | String? | On the `config` line: `low` / `medium` / `high`. |
@@ -100,6 +100,27 @@ six are non-null on every line.
 | `message` | String? | Reserved. No event fills it today, so it is `null` on every line. |
 | `battery_level` | Double? | Battery charge in `0...1`. **Writer-sampled**, not event-driven — see below. |
 | `thermal_state` | String? | `nominal` / `fair` / `serious` / `critical`. **Writer-sampled** — see below. |
+| `highlighted_feature` | String? | On a `features` line: the `PostureFeature` rawValue the debug overlay is highlighting right now, or `null` when nothing is highlighted. |
+| `feature_values` | Object? | On a `features` line: one entry per feature, keyed by `PostureFeature` rawValue, each `{"value": …, "threshold": …, "over": …}` (see below). `null` on every other line — but the key itself is present on every line like the rest. |
+| `view_mode` | String? | On a `view_mode` line: `avatar` (point-cloud avatar) or `board` (the black-board fallback). |
+| `overlay_on` | Bool? | On a `view_mode` line: whether the debug skeleton/feature overlay is on. |
+| `avatar_on` | Bool? | On a `view_mode` line: whether avatar mode is on. |
+
+### The `feature_values` nested shape
+
+`feature_values` is the one key whose value is an object rather than a scalar. Its keys are the eight `PostureFeature` rawValues (`distance`, `head_pitch`, `head_roll`, `shoulder_tilt`, `head_height_drop`, `hand_to_face`, `head_forward`, `slouch`); each maps to a fixed triple:
+
+```json
+"feature_values": {
+  "distance": { "value": 24.3, "threshold": 30.0, "over": true }
+}
+```
+
+- `value` — this sample's reading of the feature, in the feature's own unit (cm, degrees, metres, or a normalized ratio; see `PostureFeature` in `GLOSSARY.md`).
+- `threshold` — the threshold that value was judged against for this session.
+- `over` — whether the value breached its threshold.
+
+The baseline a reading was measured against is deliberately **not** in the triple; QA reads it off the `calibration_done` line. A feature whose inputs were missing is still present, with its `value` set to half the threshold and `over` `false` — an absent measurement is never recorded as a breach.
 
 ## Events
 
@@ -111,6 +132,8 @@ six are non-null on every line.
 | `screen_shown` | A screen appeared. | `screen` |
 | `sample` | One camera tick (10 Hz in a scripted run). | `t`, `distance_cm`, `pitch_deg` |
 | `status_changed` | The displayed posture state changed. | `t`, `state`, `distance_cm`, `pitch_deg` |
+| `features` | A feature sample line — one per five samples (2 Hz at the 10 Hz tick). Enough to reconstruct a decision, not enough to flood the log. | `t`, `highlighted_feature`, `feature_values` |
+| `view_mode` | A layer-state change: the avatar / black-board mode or either overlay switch changed. | `view_mode`, `overlay_on`, `avatar_on` |
 | `reminder` | A reminder fired (level 1 gentle or level 2 voice). | `t`, `alert_type`, `level`, `breach_seconds`, `distance_cm`, `pitch_deg` |
 | `speech_timeout` | The speech watchdog fired: synthesis started but never called back within the estimate + 2 s, so the voice queue was advanced anyway. | `alert_type`, `level` (no `t` — the speaker has no session clock) |
 | `speech_unavailable` | No `zh-CN` voice is installed, so the voice reminder could not be spoken; the player falls back to the gentle tone. | `alert_type` (no `t`, no `level`) |
@@ -119,14 +142,20 @@ six are non-null on every line.
 | `session_ended` | The session ended; carries the summary. | `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `paused_seconds`, `near_count`, `near_remind_count`, `head_down_count`, `head_down_remind_count`, `longest_good_streak_seconds` |
 
 Ordering within one tick follows the engine: `sample`, then `paused`/`resumed`, then
-`status_changed` (only when the state changes), then any `reminder`s (`near` before
-`head_down` when both fire on the same tick).
+`status_changed` (only when the state changes), then any `reminder`s, then the `features`
+line when the tick is a feature sample (every fifth). When several postures fire
+`reminder`s on the same tick they appear in ascending `PostureKind.priority` order, one
+line per posture.
 
 ## Vocabularies
 
 ### `state`
 
-`good`, `near`, `head_down`, `no_person`.
+`good`, `no_person`, plus the seven posture rawValues: `desk_lean`, `near`,
+`head_forward`, `slouch`, `head_down`, `head_tilt`, `chin_rest`.
+
+The nine values come from `PostureStatus` (`good`, `no_person`, or `posture(kind)`) and
+its rawValues are exactly `PostureKind`'s — there is one posture vocabulary, not two.
 
 ### `screen`
 
@@ -136,7 +165,8 @@ directly without a `screen_shown` line, so it never contaminates the `screen` ke
 
 ### `alert_type`
 
-`near`, `head_down` (the two reminder kinds).
+The same seven posture rawValues as `state`: `desk_lean`, `near`, `head_forward`,
+`slouch`, `head_down`, `head_tilt`, `chin_rest`.
 
 ### `level`
 
@@ -157,12 +187,13 @@ The code keeps its own identifiers; the mapping happens only at the log boundary
 | Swift (code) | Log (JSONL) |
 |---|---|
 | `PostureStatus.good` | `good` |
-| `PostureStatus.tooClose` | `near` |
-| `PostureStatus.headDown` | `head_down` |
-| `PostureStatus.absent` | `no_person` |
-| `ReminderKind.tooClose` | `near` |
-| `ReminderKind.headDown` | `head_down` |
+| `PostureStatus.noPerson` | `no_person` |
+| `PostureStatus.posture(kind)` | `kind.rawValue` (one of the seven postures) |
+| `PostureKind.near` / `.headDown` / … | `near` / `head_down` / … (all seven rawValues) |
+| `PostureFeature.distance` / `.handToFace` / … | `distance` / `hand_to_face` / … (all eight rawValues) |
 | `MonitoringEvent.calibrated(...)` | `calibration_done` |
+| `MonitoringEvent.features(...)` | `features` |
+| `MonitoringEvent.viewMode(...)` | `view_mode` |
 | `MonitoringEvent.speechTimeout(...)` | `speech_timeout` |
 | `MonitoringEvent.speechUnavailable(...)` | `speech_unavailable` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
@@ -171,9 +202,38 @@ The code keeps its own identifiers; the mapping happens only at the log boundary
 | `SessionSummary.headDownCount` | `head_down_count` |
 | `SessionSummary.headDownRemindCount` | `head_down_remind_count` |
 
+## Every posture is timed, logged and counted on its own
+
+v0.3 runs **one episode machine per `PostureKind`**, so each of the seven postures keeps
+its own breach clock, its own level-1/level-2 escalation and its own counters. The
+consequences for reading a log:
+
+- **A tick can carry more than one `reminder` line.** Every breaching, speakable posture
+  emits its own `reminder`; several fire on the same tick when several postures breach at
+  once, in ascending `PostureKind.priority` order. Nothing is suppressed to leave room
+  for another.
+- **The priority order only sequences the voice queue, it does not select one posture.**
+  `PostureKind.priority` (deskLean 1, near 2, headForward 3, slouch 4, headDown 5,
+  headTilt 6, chinRest 7) orders the *speech* queue so the player speaks one line at a
+  time; it never causes a breaching posture to go untimed, unlogged or uncounted. `state`
+  still reports only the single highest-priority breaching posture (`dominant`), which is
+  why `state` is coarser than the `reminder` lines.
+- **Experimental postures (head-forward, slouch) never speak.** At the default setting
+  (`experimentalPostures` off) they produce **no `reminder` at all** — not even a tone —
+  while still moving `state`, still writing `features` lines and still counting episodes
+  internally. With the experimental toggle on they enter the reminder stream but are
+  **capped at level 1**: at most one gentle tone, never a level-2 voice line, because
+  `PostureKind.voiceLine` is `nil` for them. So a `reminder` line whose `alert_type` is
+  `head_forward` or `slouch` is always `level` 1.
+- **`speech_unavailable` / `speech_timeout` follow the same `alert_type` rules** and are
+  only ever emitted for a kind that was allowed to speak.
+
 ## The counting convention: episodes vs reminder lines
 
-Each posture has **two** counters, and they are counted differently:
+Every posture tracked by the engine has **two** counters, and they are counted
+differently. Only the `near` and `head_down` pair reaches the `session_ended` summary
+today, but the engine keeps a pair per `PostureKind` internally for the log and the next
+slice:
 
 - The `*_count` key (`near_count`, `head_down_count`) counts **episodes that reached
   level 1** — one per episode, no matter how high it escalated.

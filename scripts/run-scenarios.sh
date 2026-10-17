@@ -8,9 +8,15 @@
 # override, but an earlier round leaked one scenario's sensitivity into the next through
 # UserDefaults and a head-down run silently fired nothing.
 #
-# Evidence lands in artifacts/r1-sim/ or artifacts/r1-device/ depending on the surface,
+# Evidence lands in artifacts/r2-v03-sim/ or artifacts/r1-device/ depending on the surface,
 # each run carrying a provenance.txt, so a device pass can never be confused with a
 # simulator one.
+#
+# Every run also asks verify-session.py for the v0.3 evidence: a features line log
+# (--expect-features, AC18), the avatar view mode with the debug overlay on
+# (--expect-view-mode avatar --expect-overlay, AC13), and -captureSettings so the
+# settings screenshot is grabbed. After each log the sandbox is audited for anything
+# the privacy rules forbid (AC14/AC19); a non-zero audit exit fails the round.
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
@@ -34,7 +40,7 @@ if [[ "$ON_DEVICE" == 1 ]]; then
   OUT="${OUT:-artifacts/r1-device}"
 else
   SURFACE=simulator
-  OUT="${OUT:-artifacts/r1-sim}"
+  OUT="${OUT:-artifacts/r2-v03-sim}"
 fi
 mkdir -p "$OUT"
 
@@ -124,7 +130,17 @@ run_case() {
   } >"$target/provenance.txt"
 
   # shellcheck disable=SC2086
-  python3 scripts/verify-session.py "$log" --expect-scenario "$scenario" --quiet "$@" || FAILED=1
+  python3 scripts/verify-session.py "$log" --expect-scenario "$scenario" --quiet \
+    --expect-features --expect-view-mode avatar --expect-overlay "$@" || FAILED=1
+
+  local audit audit_status
+  audit=$(python3 scripts/audit-sandbox.py "$target" --json "$target/sandbox-audit.json" 2>&1)
+  audit_status=$?
+  echo "$audit"
+  if [[ "$audit_status" != 0 ]]; then
+    echo "SANDBOX AUDIT FAILED"
+    FAILED=1
+  fi
 }
 
 run_case approach     medium         36 --expect-level1 5 --expect-level2 15 --expect-kind near --expect-sensitivity medium
@@ -135,6 +151,24 @@ run_case left         medium         20 --expect-pause
 run_case shortApproach medium        16 --expect-no-reminders
 run_case occlusion    medium         20 --expect-pause --expect-no-reminders
 run_case cooldown     medium         45 --expect-level1 5 --expect-level2 15 --expect-kind near --expect-near-reminders 2
+
+# New v0.3 scenarios, in the contract's order: each positive is followed by its near-miss.
+# The positives reach both reminder levels; the misses are the AC17 counter-examples and
+# must fire nothing, so each names the feature its positive breaches.
+run_case headTilt     medium         26 --expect-level1 5 --expect-level2 15 --expect-kind head_tilt
+run_case headTiltMiss medium         26 --expect-no-reminders --expect-feature-under head_roll
+run_case deskLean     medium         26 --expect-level1 5 --expect-level2 15 --expect-kind desk_lean
+run_case deskLeanMiss medium         26 --expect-no-reminders --expect-feature-under head_height_drop
+run_case chinRest     medium         30 --expect-level1 5 --expect-level2 15 --expect-kind chin_rest
+run_case chinRestMiss medium         30 --expect-no-reminders --expect-feature-under hand_to_face
+
+# Experimental tier (headForward, slouch) is detect-only by default: the feature must read
+# over threshold and be highlighted, and nothing may be spoken.
+run_case headForward  medium         26 --expect-no-reminders --expect-feature-over head_forward --expect-highlight head_forward
+run_case headForwardMiss medium      26 --expect-no-reminders --expect-feature-under head_forward
+run_case slouch       medium         26 --expect-no-reminders --expect-feature-over slouch --expect-highlight slouch
+run_case slouchMiss   medium         26 --expect-no-reminders --expect-feature-under slouch
+
 if [[ "$DO_LONG" == 1 ]]; then
   run_case longRun medium 1800
 fi
