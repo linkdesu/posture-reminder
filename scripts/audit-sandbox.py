@@ -16,7 +16,17 @@ imagery or raw sensor data, and prints a manifest as the evidence.
 
 Allowed: the JSONL session logs, the debug screenshots (PNG, written from the
 artistic canvas), the session summary file, and the app's own preferences. Anything
-else is a finding. Exit code 0 only when there are no findings.
+else is a finding, apart from the system-owned paths described below. Exit code 0 only
+when there are no findings.
+
+AC19 also asks whether *anything* was left behind, so the runner points this at the
+whole container rather than only at the Documents subtree it collects as evidence. A
+whole container holds files the app never wrote: iOS fills Library/ with saved-state
+blobs, Metal caches and a SplashBoard snapshot of the app's own rendered UI, and drops
+a .com.apple.* metadata plist at the container root. Those paths are classified as
+system-owned and listed as such instead of being reported as findings -- but the
+suffix and name-hint checks still run on them, because a frame dumped into Library/ is
+exactly the case that has to be caught.
 """
 
 from __future__ import annotations
@@ -29,6 +39,18 @@ import sys
 
 ALLOWED_SUFFIXES = {".jsonl", ".json", ".plist", ".png", ".txt"}
 ALLOWED_NAMES = {"sessions.json"}
+# Suffixes iOS itself creates under Library/: .ktx is the SplashBoard snapshot, .data and
+# .list are the Metal cache, .db/.sqlite/.strings are caches and localised strings. Some
+# entries (the container's own metadata) carry no suffix at all, which is allowed too.
+SYSTEM_SUFFIXES = {".ktx", ".data", ".list", ".db", ".sqlite", ".strings"}
+SYSTEM_ALLOWED_SUFFIXES = ALLOWED_SUFFIXES | SYSTEM_SUFFIXES
+SYSTEM_DIRS = (
+    "Library/Caches/",
+    "Library/SplashBoard/",
+    "Library/Saved Application State/",
+    "Library/Preferences/",
+)
+SYSTEM_BASENAME_PREFIX = ".com.apple."
 # Anything here means a real frame or raw sensor data reached the disk.
 FORBIDDEN_SUFFIXES = {
     ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".bmp", ".gif", ".webp",
@@ -61,6 +83,20 @@ def walk(root: str):
             yield os.path.join(base, name)
 
 
+def is_system_owned(rel: str) -> bool:
+    """Whether iOS, not the app, is the writer of this container-relative path.
+
+    The app only ever writes under Documents/ and its own preferences; the caches,
+    SplashBoard snapshots, saved-state blobs and plists under Library/, plus the
+    container's own .com.apple.* metadata, are the system's. Such files are classified
+    as system-owned instead of being failed on for their type -- the forbidden-suffix
+    and name-hint checks still apply to them.
+    """
+    if os.path.basename(rel).startswith(SYSTEM_BASENAME_PREFIX):
+        return True
+    return any(rel.startswith(prefix) for prefix in SYSTEM_DIRS)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("root")
@@ -72,17 +108,31 @@ def main():
 
     findings = []
     manifest = []
-    counts = {"jsonl": 0, "png": 0, "other": 0}
+    counts = {"jsonl": 0, "png": 0, "other": 0, "system": 0}
+    splashboard = []
 
     for path in walk(args.root):
         rel = os.path.relpath(path, args.root)
         name = os.path.basename(path)
         suffix = os.path.splitext(name)[1].lower()
+        system_owned = is_system_owned(rel)
         size = os.path.getsize(path)
-        entry = {"path": rel, "bytes": size, "sha256_16": digest(path)}
+        entry = {
+            "path": rel,
+            "bytes": size,
+            "sha256_16": digest(path),
+            "classification": "system" if system_owned else "app",
+        }
+        if system_owned:
+            counts["system"] += 1
+            if rel.startswith("Library/SplashBoard/"):
+                splashboard.append(rel)
 
         if suffix in FORBIDDEN_SUFFIXES:
             findings.append(f"{rel}: {suffix} can hold imagery or raw sensor data")
+        elif system_owned:
+            if suffix and suffix not in SYSTEM_ALLOWED_SUFFIXES:
+                findings.append(f"{rel}: unexpected file type under a system-owned directory")
         elif suffix not in ALLOWED_SUFFIXES and name not in ALLOWED_NAMES:
             findings.append(f"{rel}: unexpected file type")
 
@@ -117,6 +167,12 @@ def main():
 
     print(f"audited {len(manifest)} file(s) under {args.root}")
     print(f"  jsonl {counts['jsonl']}, png {counts['png']}, other {counts['other']}")
+    print(f"  system-owned {counts['system']} (iOS-written; classified per file, not reported as a finding)")
+    if splashboard:
+        print(f"    {len(splashboard)} of them under Library/SplashBoard: UIKit's own snapshot of this app's")
+        print("    rendered UI. The app does not create it, and it is harmless only because the UI")
+        print("    never renders a camera image; it is listed as system-owned, not as a violation,")
+        print("    and the suffix and name-hint checks above still ran on it.")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump({"root": args.root, "files": manifest, "findings": findings}, handle, indent=2)

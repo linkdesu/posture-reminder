@@ -259,7 +259,8 @@ enum Scenario: String, CaseIterable, Equatable {
 
   /// The counter-example stops short of *every* medium threshold, not just its own posture's:
   /// 37.5 cm is 30 / 0.8, outside the distance threshold, and −16° is 0.8x the 20° pitch threshold.
-  /// At high sensitivity the smaller thresholds move under it and it is meant to breach.
+  /// These anchors are pinned against the medium thresholds and are outside them at low and high
+  /// too, because `PostureThresholds.forSensitivity` moves only distance and pitch (contract §16.2).
   private static let nearMissDistanceCM: Double = 37.5
   private static let nearMissDeskLeanPitchDeg: Double = -16
 }

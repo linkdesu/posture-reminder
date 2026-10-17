@@ -15,8 +15,10 @@
 # Every run also asks verify-session.py for the v0.3 evidence: a features line log
 # (--expect-features, AC18), the avatar view mode with the debug overlay on
 # (--expect-view-mode avatar --expect-overlay, AC13), and -captureSettings so the
-# settings screenshot is grabbed. After each log the sandbox is audited for anything
-# the privacy rules forbid (AC14/AC19); a non-zero audit exit fails the round.
+# settings screenshot is grabbed. On the simulator the live app container -- the whole
+# sandbox, not just Documents -- is audited for anything the privacy rules forbid
+# (AC14/AC19) before the evidence is copied out; the phone audits the pulled copy. A
+# non-zero audit exit fails the round.
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
@@ -103,12 +105,34 @@ run_case() {
   local target="$OUT/$label"
   rm -rf "$target"
   mkdir -p "$target"
+
+  # AC19 asks what the sandbox holds, not only what we collect from it, so the simulator
+  # audits the live container -- the whole sandbox, Library/ and tmp/ included -- before
+  # Documents is copied out. On the phone only the pulled copy is reachable, and the
+  # output says so. Either way the manifest lands in the run's evidence directory.
+  local container="" audit_root audit_note
   if [[ "$SURFACE" == device ]]; then
     xcrun devicectl device copy from --device "$DEVICE" --domain-type appDataContainer \
       --domain-identifier "$BUNDLE" --source Documents --destination "$target" >/dev/null 2>&1
+    audit_root="$target"
+    audit_note="audited the pulled Documents copy only; devicectl cannot reach Library/ or tmp/"
   else
-    local container
     container=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data)
+    audit_root="$container"
+    audit_note="audited the live container before copying Documents out: $container"
+  fi
+
+  local audit audit_status
+  audit=$(python3 scripts/audit-sandbox.py "$audit_root" --json "$target/sandbox-audit.json" 2>&1)
+  audit_status=$?
+  echo "$audit"
+  echo "sandbox audit: $audit_note"
+  if [[ "$audit_status" != 0 ]]; then
+    echo "SANDBOX AUDIT FAILED"
+    FAILED=1
+  fi
+
+  if [[ "$SURFACE" != device ]]; then
     cp -R "$container/Documents" "$target/"
   fi
 
@@ -132,15 +156,6 @@ run_case() {
   # shellcheck disable=SC2086
   python3 scripts/verify-session.py "$log" --expect-scenario "$scenario" --quiet \
     --expect-features --expect-view-mode avatar --expect-overlay "$@" || FAILED=1
-
-  local audit audit_status
-  audit=$(python3 scripts/audit-sandbox.py "$target" --json "$target/sandbox-audit.json" 2>&1)
-  audit_status=$?
-  echo "$audit"
-  if [[ "$audit_status" != 0 ]]; then
-    echo "SANDBOX AUDIT FAILED"
-    FAILED=1
-  fi
 
   # AC13 also says the highlight is visible in a screenshot, which no log can show.
   local overlay overlay_status

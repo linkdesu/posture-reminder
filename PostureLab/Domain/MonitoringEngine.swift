@@ -254,7 +254,10 @@ struct MonitoringEngine {
     let headDown = assessment.breached[.headDown] == true
     if tooClose { summary.tooCloseSeconds += dt }
     if headDown { summary.headDownSeconds += dt }
-    if tooClose || headDown {
+    // Good reading time is "the face is present and nothing breaches at all" — the same condition
+    // as `status == .good`. Judging it from the two v2 kinds alone made every session in a newer
+    // posture read back as perfect in exactly the sessions the app had intervened in.
+    if assessment.dominant != nil {
       goodStreakSeconds = 0
     } else {
       summary.goodSeconds += dt

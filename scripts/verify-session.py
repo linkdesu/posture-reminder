@@ -284,14 +284,42 @@ def check_pause(rows, required=False):
     return True
 
 
+def status_timeline(rows):
+    """(t, state) for every `status_changed` line, in file order.
+
+    The engine starts on `good` and only logs a change away from it, so a session in no posture at
+    all has no `status_changed` line and the state stays `good` throughout.
+    """
+    out = []
+    for row in rows:
+        if row.get("event") == "status_changed" and row.get("t") is not None:
+            out.append((row["t"], row.get("state")))
+    return out
+
+
 def recompute(rows, rows_times, config, baseline_pitch):
     distance_threshold = config.get("distance_threshold_cm")
     pitch_threshold = config.get("pitch_threshold_deg")
-    total = good = near = head_down = 0.0
+    total = near = head_down = 0.0
+    # `good` and the good streak come from the event timeline rather than the two-threshold rule
+    # below, so this check does not repeat the engine's own arithmetic back at it. The engine earns
+    # good time whenever the face is present and nothing breaches at all, which is what its
+    # `status == .good` means; the old mirrored rule knew only `near` and `head_down` and so agreed
+    # with a wrong `good_seconds` on every session in one of the five newer postures.
+    good = 0.0
     streak = longest = 0.0
+    states = status_timeline(rows)
+    state_index = 0
+    state = "good"
     for (t0, d0, p0), (t1, _d1, _p1) in zip(rows_times, rows_times[1:]):
+        # The state in force over [t0, t1] is the last change logged at or before t0.
+        while state_index < len(states) and states[state_index][0] <= t0:
+            state = states[state_index][1]
+            state_index += 1
         dt = t1 - t0
         if d0 is None or p0 is None:
+            # No face over this interval: the engine credits paused time, and a pause neither adds
+            # to nor resets the good streak.
             continue
         total += dt
         is_near = distance_threshold is not None and d0 < distance_threshold
@@ -304,12 +332,12 @@ def recompute(rows, rows_times, config, baseline_pitch):
             near += dt
         if is_down:
             head_down += dt
-        if is_near or is_down:
-            streak = 0.0
-        else:
+        if state == "good":
             good += dt
             streak += dt
             longest = max(longest, streak)
+        else:
+            streak = 0.0
     return {
         "total": total,
         "good": good,

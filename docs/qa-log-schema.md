@@ -271,17 +271,22 @@ log that satisfies them is a log whose summary is derivable:
   resets.
 - **`total_seconds` is face-present time**: it adds `dt` over exactly the intervals
   whose start sample had a detected face.
-- **`good_seconds` excludes both violations**: it adds `dt` only when the start sample
-  had a face and was neither near nor head-down.
+- **`good_seconds` excludes every posture, not just the first two.** It adds `dt` only
+  when the start sample had a face and **no posture breached at all** — the same condition
+  as `state = good`. Before v0.3 this counted only near and head-down, so a session spent
+  chin-resting reported itself as entirely good; if you are reading an older log, expect
+  that number to disagree with the `status_changed` timeline.
 - **The two violation counters are independent and may overlap.** `near_seconds` and
   `head_down_seconds` each add `dt` whenever their own predicate holds, so a sample
   that is both too close and head-down contributes the same `dt` to **both**. It is
   therefore normal for `near_seconds + head_down_seconds + good_seconds` to exceed
   `total_seconds`. The predicates are strict: near is `distance_cm <
   distance_threshold_cm` (equal is not a violation), head-down is `baseline_pitch_deg −
-  pitch_deg > pitch_threshold_deg`.
-- **`longest_good_streak_seconds`** is the longest unbroken run of good intervals; any
-  violation interval (near or head-down) resets the running streak to 0.
+  pitch_deg > pitch_threshold_deg`. The other five postures have no `*_seconds` counter yet;
+  their time shows up as absent from `good_seconds` and as `reminder` lines.
+- **`longest_good_streak_seconds`** is the longest unbroken run of good intervals; a breach
+  of **any** posture resets the running streak to 0, and absence neither extends it nor
+  resets it.
 - **Thresholds come from the log, not from constants**: the checker reads
   `distance_threshold_cm` and `pitch_threshold_deg` from the `config` line and
   `baseline_pitch_deg` from the `calibration_done` line.

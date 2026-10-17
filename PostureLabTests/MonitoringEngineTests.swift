@@ -454,6 +454,51 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertTrue(try reading(line.readings, .slouch).isOverThreshold)
   }
 
+  /// Good reading time is earned when the face is present and nothing breaches at all, not when the
+  /// two v2 kinds happen to be quiet. A session the app interrupted because of a newer posture must
+  /// not read back as a perfect run.
+  func testGoodSecondsCountsEveryPostureNotOnlyTheTwoV2Kinds() throws {
+    func runSamples(_ samples: [PostureSample]) -> (engine: MonitoringEngine, events: [MonitoringEvent]) {
+      var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                    baselineDistanceCM: 40,
+                                    baselinePitchDeg: 0)
+      var events: [MonitoringEvent] = []
+      for sample in samples {
+        events += engine.ingest(sample)
+      }
+      return (engine, events)
+    }
+
+    // The chin rest holds for the whole 30 s run, so every tick breaches `chin_rest` and the session
+    // speaks twice. The v2 kinds stay quiet throughout, which is what made the old rule call all
+    // 30 s good.
+    let (held, heldEvents) = runSamples(posing([Segment(duration: 30, distanceCM: 40, pitchDeg: 0)],
+                                               as: .chinRest))
+    XCTAssertEqual(reminders(in: heldEvents).map(\.kind), [.chinRest, .chinRest])
+    XCTAssertEqual(held.status, .posture(.chinRest))
+    XCTAssertEqual(held.summary.totalSeconds, 30.0, accuracy: 0.05)
+    XCTAssertNotEqual(held.summary.goodSeconds, held.summary.totalSeconds)
+    XCTAssertEqual(held.summary.goodSeconds, 0.0, accuracy: 0.05)
+
+    // The shipped `chinRest` scenario opens upright for 2 s, so exactly those 2 s of its 30 s are good.
+    let (scenario, _) = runSamples(
+      posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)], as: .upright)
+        + posing([Segment(duration: 28, distanceCM: 40, pitchDeg: 0)], as: .chinRest, from: 2.0)
+    )
+    XCTAssertEqual(scenario.summary.totalSeconds, 30.0, accuracy: 0.05)
+    XCTAssertEqual(scenario.summary.goodSeconds, 2.0, accuracy: 0.05)
+    XCTAssertLessThan(scenario.summary.goodSeconds, scenario.summary.totalSeconds)
+
+    // The mirror: the same length sitting upright is a clean run, so all of it is good.
+    let (upright, uprightEvents) = runSamples(posing([Segment(duration: 30, distanceCM: 40, pitchDeg: 0)],
+                                                     as: .upright))
+    XCTAssertEqual(reminders(in: uprightEvents).count, 0)
+    XCTAssertEqual(upright.status, .good)
+    XCTAssertEqual(upright.summary.totalSeconds, 30.0, accuracy: 0.05)
+    XCTAssertEqual(upright.summary.goodSeconds, 30.0, accuracy: 0.05)
+    XCTAssertEqual(upright.summary.goodSeconds, upright.summary.totalSeconds, accuracy: 0.05)
+  }
+
   /// `pausedSeconds` accumulates the intervals whose start sample had no face, which is what the
   /// coordinator compares against 300 s to end an idle session.
   func testPausedSecondsAccumulatesAbsence() throws {

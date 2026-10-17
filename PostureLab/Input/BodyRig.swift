@@ -27,16 +27,22 @@ enum BodyPose: String, CaseIterable, Equatable {
 /// Poses a `BodyPose` into joints plus one coarse depth frame. Pure and deterministic: the same pose
 /// and the same distance always give the same geometry, so a scripted scenario replays exactly.
 ///
-/// Every pose is built from two hard-coded anchors, and both are pinned to the *medium* sensitivity
+/// Every pose is built from two hard-coded anchors, and both come from the *medium* sensitivity
 /// table — the table QA replays and the one the classifier tests measure against:
 ///
 /// - a counter-example (`nearMiss…`) sits at 0.8x a medium threshold, so it stays just inside it;
 /// - a positive pose clears the medium threshold.
 ///
-/// Those numbers describe behaviour at medium sensitivity, not physical truth. Replayed at high
-/// sensitivity, where the thresholds are smaller, a counter-example is *supposed* to breach: that is
-/// what raising sensitivity is for, which is also why AC17 only asks for the counter-examples at
-/// medium.
+/// Pinning the anchors to medium does not make them a medium-only artefact, because
+/// `PostureThresholds.forSensitivity` reads the level into exactly two thresholds, `distanceCM` and
+/// `pitchDeg`, and leaves the other six constant at all three levels. None of the five
+/// counter-examples AC17 runs — `headTilt`, `deskLean`, `chinRest`, `headForward`, `slouch` — reaches
+/// its own posture's threshold at `low` or `high` either, and the desk-lean one never even consults
+/// the pitch half of its rule: it stops at the fixed 0.10 head-height drop. The corollary is the part
+/// worth remembering: the three-level setting changes nothing for five of the seven postures, whose
+/// deciding threshold is constant, and only reaches `near` (distance), `headDown` (pitch) and the
+/// `2 x pitchDeg` deep-dip gate inside the desk-lean rule. Whether the other six thresholds should
+/// scale with the level too is an open question in `tmp/handoff/omp-questions.md`.
 enum BodyRig {
 
   /// Normalized image coordinates (0...1, y downwards) and metres to the camera. `distanceCM` is the

@@ -18,6 +18,8 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
   private var currentUtterance: AVSpeechUtterance?
   private var cachedTone: Data?
   private var didConfigureSession = false
+  /// When the last gentle tone started; `playTone` drops anything inside `toneCoalesceWindow` of it.
+  private var lastToneStart: TimeInterval = -TimeInterval.infinity
 
   init(settings: Settings, logger: DebugLogging) {
     self.settings = settings
@@ -40,6 +42,8 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
   func stop() {
     player?.stop()
     player = nil
+    // Nothing is audible any more, so the next tone is not an overlap of the one just stopped.
+    lastToneStart = -TimeInterval.infinity
     pendingVoices.removeAll()
     isSpeaking = false
     cancelWatchdog()
@@ -113,11 +117,22 @@ final class ReminderPlayer: NSObject, AVSpeechSynthesizerDelegate {
     try? session.setActive(true)
   }
 
+  /// Tones deliberately skip the voice queue, so nothing below settles the reminders that land in the
+  /// same tick — and the desk-lean scenario breaches desk-lean, near and head-down together, which is
+  /// three gentle reminders at one instant. Layering them is a fault to the ear, not a stronger hint,
+  /// so a tone that would start inside this window of the previous one is dropped instead. The window
+  /// is the 0.15s tone plus a little slack, short enough that a reminder from a later tick still gets
+  /// its own cue. Voices keep their own serialization and are not affected.
+  private static let toneCoalesceWindow: TimeInterval = 0.25
+
   private func playTone() {
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastToneStart >= Self.toneCoalesceWindow else { return }
     guard let player = try? AVAudioPlayer(data: toneData()) else { return }
     player.prepareToPlay()
     player.play()
     self.player = player
+    lastToneStart = now
   }
 
   private func speak(_ kind: PostureKind, text: String, voice: AVSpeechSynthesisVoice) {
