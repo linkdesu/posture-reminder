@@ -31,6 +31,10 @@ final class SessionController: ObservableObject {
   @Published private(set) var elapsedSeconds: Double = 0
   @Published private(set) var calibrationState: CalibrationState = .idle
   @Published private(set) var lastSummary: SessionSummary?
+  /// The latest sample's body geometry and its assessment, for the avatar and the debug overlay.
+  /// Both are cleared when the run ends or the source stops.
+  @Published private(set) var latestGeometry: PoseGeometry?
+  @Published private(set) var latestAssessment: PostureAssessment?
 
   let settings: Settings
   let store: SessionStore
@@ -46,6 +50,10 @@ final class SessionController: ObservableObject {
 
   private var engine: MonitoringEngine?
   private var inputSource: SampleSource?
+  /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
+  /// the visible layers. Reset at the start of every run.
+  private var lastViewMode: (mode: String, overlay: Bool, avatar: Bool)?
+  private var viewModeObservers: Set<AnyCancellable> = []
   private var calibrationTask: Task<Void, Never>?
   private var calibrationDistances: [Double] = []
   private var calibrationPitches: [Double] = []
@@ -66,6 +74,17 @@ final class SessionController: ObservableObject {
     self.scenarios = scenarios
     self.captureSettings = captureSettings
     player = ReminderPlayer(settings: settings, logger: logger)
+
+    // Both switches change the visible layers, so each logs a `view_mode` line while a session runs.
+    for publisher in [settings.$avatarEnabled.eraseToAnyPublisher(),
+                      settings.$debugEnabled.eraseToAnyPublisher()] {
+      publisher
+        .dropFirst()
+        .sink { [weak self] _ in
+          Task { @MainActor in self?.logViewModeChange() }
+        }
+        .store(in: &viewModeObservers)
+    }
   }
 
   var isSimulating: Bool { !scenarios.isEmpty }
@@ -231,6 +250,9 @@ final class SessionController: ObservableObject {
     didCaptureReminderScreenshot = false
 
     logger.log(.sessionStarted(scenario: simulatedScenario?.rawValue))
+    // A fresh run starts with a fresh layer baseline, so the first `view_mode` line always lands.
+    lastViewMode = nil
+    logViewModeChange()
     let config = settings.engineConfig
     logger.log(.config(sensitivity: settings.sensitivity,
                        distanceThresholdCM: config.distanceThresholdCM,
@@ -305,6 +327,8 @@ final class SessionController: ObservableObject {
     status = engine.status
     isPaused = engine.isPaused
     elapsedSeconds = engine.summary.totalSeconds
+    latestGeometry = PoseGeometry(joints: sample.joints, depth: sample.depth)
+    latestAssessment = engine.latestAssessment
 
     // Pauses adding up past five minutes end the session on their own (PRD v0.2).
     if engine.summary.pausedSeconds > 300 {
@@ -320,6 +344,17 @@ final class SessionController: ObservableObject {
   }
 
   // MARK: - Screens
+
+  /// Writes a `view_mode` line when the visible layers change during a run, so the avatar/overlay
+  /// switches are captured without a line per sample. No-op outside monitoring.
+  private func logViewModeChange() {
+    guard phase == .monitoring else { return }
+    let mode = settings.avatarEnabled ? "avatar" : "board"
+    let current = (mode: mode, overlay: settings.debugEnabled, avatar: settings.avatarEnabled)
+    guard lastViewMode == nil || lastViewMode! != current else { return }
+    lastViewMode = current
+    logger.log(.viewMode(mode: mode, overlay: current.overlay, avatar: current.avatar))
+  }
 
   func didShow(_ screen: String) {
     logger.log(.screenShown(name: screen))
@@ -341,6 +376,9 @@ final class SessionController: ObservableObject {
   private func stopInput() {
     inputSource?.stop()
     inputSource = nil
+    // No source means no fresh geometry; drop the last frame so a stale avatar cannot linger.
+    latestGeometry = nil
+    latestAssessment = nil
   }
 
   private func cancelCalibration() {

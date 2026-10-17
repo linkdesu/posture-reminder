@@ -6,7 +6,7 @@ struct SummaryView: View {
 
   var body: some View {
     VStack(spacing: 28) {
-      Text("本次小结")
+      Text("这次小结")
         .font(.largeTitle.bold())
 
       if let summary = controller.lastSummary {

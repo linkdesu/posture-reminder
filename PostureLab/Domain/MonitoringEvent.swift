@@ -7,14 +7,28 @@ enum MonitoringEvent: Equatable {
   case screenShown(name: String)
   case sample(t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case statusChanged(to: PostureStatus, t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
-  case reminder(kind: ReminderKind, level: ReminderLevel, t: TimeInterval, breachSeconds: Double, distanceCM: Double?, pitchDeg: Double?)
+  case reminder(kind: PostureKind, level: ReminderLevel, t: TimeInterval, breachSeconds: Double, distanceCM: Double?, pitchDeg: Double?)
+  /// Feature sample line, one per five samples (2 Hz at the 10 Hz tick): enough for QA to
+  /// reconstruct a decision, not enough to flood the log.
+  case features(t: TimeInterval, readings: [FeatureReading], highlighted: PostureFeature?)
+  /// Layer state, written when the avatar/black-board mode or either overlay switch changes.
+  case viewMode(mode: String, overlay: Bool, avatar: Bool)
   /// Speech watchdog: the player stopped awaiting synthesis for too long. The speaker has no
   /// session clock, so these carry no `t`.
-  case speechTimeout(kind: ReminderKind, level: ReminderLevel)
-  case speechUnavailable(kind: ReminderKind)
+  case speechTimeout(kind: PostureKind, level: ReminderLevel)
+  case speechUnavailable(kind: PostureKind)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
   case sessionEnded(summary: SessionSummary)
+}
+
+/// One feature's reading on a `features` line, `{"value": …, "threshold": …, "over": …}`.
+/// It is the wire shape of `FeatureReading`: the baseline is dropped because QA can read it off
+/// the `calibration_done` line.
+struct FeatureLogValue: Codable, Equatable {
+  var value: Double
+  var threshold: Double
+  var over: Bool
 }
 
 /// One log line, schema v2. Properties are named after their JSON keys because the wire format is
@@ -53,6 +67,11 @@ struct LogRecord: Codable {
     case message
     case battery_level
     case thermal_state
+    case highlighted_feature
+    case feature_values
+    case view_mode
+    case overlay_on
+    case avatar_on
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -89,6 +108,14 @@ struct LogRecord: Codable {
   var battery_level: Double?
   /// One of `nominal`, `fair`, `serious`, `critical`; filled by the writer, not the event.
   var thermal_state: String?
+  /// The feature the debug overlay highlights, on `features` lines.
+  var highlighted_feature: String?
+  /// Per-feature readings of a `features` line, keyed by `PostureFeature.rawValue`.
+  var feature_values: [String: FeatureLogValue]?
+  /// Layer state, on `view_mode` lines.
+  var view_mode: String?
+  var overlay_on: Bool?
+  var avatar_on: Bool?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -125,6 +152,11 @@ struct LogRecord: Codable {
     try container.encode(message, forKey: .message)
     try container.encode(battery_level, forKey: .battery_level)
     try container.encode(thermal_state, forKey: .thermal_state)
+    try container.encode(highlighted_feature, forKey: .highlighted_feature)
+    try container.encode(feature_values, forKey: .feature_values)
+    try container.encode(view_mode, forKey: .view_mode)
+    try container.encode(overlay_on, forKey: .overlay_on)
+    try container.encode(avatar_on, forKey: .avatar_on)
   }
 }
 
@@ -175,6 +207,24 @@ extension MonitoringEvent {
       record.state = to.rawValue
       record.distance_cm = distanceCM
       record.pitch_deg = pitchDeg
+
+    case .features(let t, let readings, let highlighted):
+      record.event = "features"
+      record.t = t
+      record.highlighted_feature = highlighted?.rawValue
+      var values: [String: FeatureLogValue] = [:]
+      for reading in readings {
+        values[reading.feature.rawValue] = FeatureLogValue(value: reading.value,
+                                                          threshold: reading.threshold,
+                                                          over: reading.isOverThreshold)
+      }
+      record.feature_values = values
+
+    case .viewMode(let mode, let overlay, let avatar):
+      record.event = "view_mode"
+      record.view_mode = mode
+      record.overlay_on = overlay
+      record.avatar_on = avatar
 
     case .reminder(let kind, let level, let t, let breachSeconds, let distanceCM, let pitchDeg):
       record.event = "reminder"

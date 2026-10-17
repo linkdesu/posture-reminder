@@ -29,7 +29,7 @@ private func sampleStream(_ segments: [Segment], from start: TimeInterval = 0) -
 }
 
 private struct FiredReminder: Equatable {
-  var kind: ReminderKind
+  var kind: PostureKind
   var level: ReminderLevel
   var t: TimeInterval
   var breachSeconds: Double
@@ -42,6 +42,38 @@ private func reminders(in events: [MonitoringEvent]) -> [FiredReminder] {
     }
     return FiredReminder(kind: kind, level: level, t: t, breachSeconds: breachSeconds)
   }
+}
+
+/// The same 10 Hz stream with one pose's joints and depth on every sample. This is the data QA's
+/// scripted replays hand the engine, so the engine rules are pinned against the rig itself.
+private func posing(_ segments: [Segment],
+                    as pose: BodyPose,
+                    from start: TimeInterval = 0) -> [PostureSample] {
+  sampleStream(segments, from: start).map { sample in
+    let geometry = BodyRig.geometry(pose, distanceCM: sample.distanceCM)
+    return PostureSample(t: sample.t,
+                         distanceCM: sample.distanceCM,
+                         pitchDeg: sample.pitchDeg,
+                         joints: geometry.joints,
+                         depth: geometry.depth,
+                         depthAvailable: geometry.depth != nil)
+  }
+}
+
+/// The last feature line the engine wrote; QA reads it to attribute a reminder to a feature.
+private func lastFeatureLine(in events: [MonitoringEvent])
+  -> (readings: [FeatureReading], highlighted: PostureFeature?)? {
+  var last: (readings: [FeatureReading], highlighted: PostureFeature?)?
+  for event in events {
+    if case .features(_, let readings, let highlighted) = event {
+      last = (readings, highlighted)
+    }
+  }
+  return last
+}
+
+private func reading(_ readings: [FeatureReading], _ feature: PostureFeature) throws -> FeatureReading {
+  try XCTUnwrap(readings.first { $0.feature == feature })
 }
 
 final class MonitoringEngineTests: XCTestCase {
@@ -68,7 +100,7 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(result.engine.summary.tooCloseSeconds, 4.0, accuracy: 0.05)
     XCTAssertEqual(result.engine.status, .good)
     let tooCloseShown = result.events.contains { (event: MonitoringEvent) in
-      if case .statusChanged(let to, _, _, _) = event { return to == .tooClose }
+      if case .statusChanged(let to, _, _, _) = event { return to == .posture(.near) }
       return false
     }
     XCTAssertTrue(tooCloseShown)
@@ -83,7 +115,7 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(fired.count, 2)
     let gentle = try XCTUnwrap(fired.first)
     let voice = try XCTUnwrap(fired.last)
-    XCTAssertEqual(gentle.kind, .tooClose)
+    XCTAssertEqual(gentle.kind, .near)
     XCTAssertEqual(gentle.level, .gentle)
     XCTAssertEqual(voice.level, .voice)
     XCTAssertLessThan(gentle.t, voice.t)
@@ -113,11 +145,11 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(fired.count, 2)
     XCTAssertEqual(fired.filter { $0.t > 12.0 && $0.t < 36.9 }.count, 0)
     let second = try XCTUnwrap(fired.last)
-    XCTAssertEqual(second.kind, .tooClose)
+    XCTAssertEqual(second.kind, .near)
     XCTAssertEqual(second.level, .gentle)
     XCTAssertEqual(second.t, first.t + 30.0, accuracy: 1.0)
     XCTAssertEqual(engine.summary.tooCloseCount, 2)
-    XCTAssertEqual(engine.status, .tooClose)
+    XCTAssertEqual(engine.status, .posture(.near))
   }
 
   func testHeadDownRespectsSensitivity() throws {
@@ -132,7 +164,7 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(reminder.level, .gentle)
     XCTAssertEqual(reminder.t, 7.0, accuracy: 1.0)
     XCTAssertEqual(reminder.breachSeconds, 5.0, accuracy: 1.0)
-    XCTAssertEqual(medium.engine.status, .headDown)
+    XCTAssertEqual(medium.engine.status, .posture(.headDown))
     XCTAssertEqual(medium.engine.summary.headDownSeconds, 6.0, accuracy: 0.05)
     XCTAssertEqual(medium.engine.summary.tooCloseCount, 0)
 
@@ -265,7 +297,7 @@ final class MonitoringEngineTests: XCTestCase {
 
     let belowThreshold = run([Segment(duration: 2, distanceCM: 40, pitchDeg: 0),
                               Segment(duration: 6, distanceCM: threshold - 0.1, pitchDeg: 0)])
-    XCTAssertEqual(belowThreshold.engine.status, .tooClose)
+    XCTAssertEqual(belowThreshold.engine.status, .posture(.near))
     XCTAssertEqual(belowThreshold.engine.summary.tooCloseSeconds, 6.0, accuracy: 0.05)
   }
 
@@ -278,7 +310,7 @@ final class MonitoringEngineTests: XCTestCase {
                                 Segment(duration: 4, distanceCM: 20, pitchDeg: 0)])
 
     XCTAssertEqual(reminders(in: events).count, 0)
-    XCTAssertEqual(engine.status, .tooClose)
+    XCTAssertEqual(engine.status, .posture(.near))
     XCTAssertEqual(engine.summary.tooCloseSeconds, 8.0, accuracy: 0.05)
     XCTAssertEqual(engine.summary.tooCloseCount, 0)
 
@@ -290,45 +322,136 @@ final class MonitoringEngineTests: XCTestCase {
     let fired = reminders(in: events)
     XCTAssertEqual(fired.count, 1)
     let reminder = try XCTUnwrap(fired.first)
-    XCTAssertEqual(reminder.kind, .tooClose)
+    XCTAssertEqual(reminder.kind, .near)
     XCTAssertEqual(reminder.level, .gentle)
     XCTAssertEqual(reminder.t, 10.1, accuracy: 0.15)
     XCTAssertEqual(reminder.breachSeconds, 5.0, accuracy: 0.15)
     XCTAssertEqual(engine.summary.tooCloseCount, 1)
   }
 
-  /// Too-close and head-down are independent episodes, so one deep breach logs both reminders and
-  /// always emits the too-close one first within the same `ingest` return.
+  /// Too-close and head-down stay independent episodes with their own clocks, and both speak: the
+  /// engine emits one reminder per breaching speakeable kind, ordered by `PostureKind.priority`
+  /// ascending within a tick. Playing them one at a time is the player's job, not the engine's.
   func testBothKindsFireAndLogOnTheSameSample() throws {
     var engine = MonitoringEngine(config: .forSensitivity(.medium),
                                   baselineDistanceCM: 40,
                                   baselinePitchDeg: 0)
     var events: [MonitoringEvent] = []
-    var sawTooCloseBeforeHeadDown = false
+    var batchesWithTwoReminders = 0
 
     for sample in sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0),
                                 Segment(duration: 20, distanceCM: 20, pitchDeg: -25)]) {
       let batch = engine.ingest(sample)
       events += batch
-      let kinds = batch.compactMap { (event: MonitoringEvent) -> ReminderKind? in
-        if case .reminder(let kind, _, _, _, _, _) = event { return kind }
-        return nil
-      }
-      if kinds == [.tooClose, .headDown] {
-        sawTooCloseBeforeHeadDown = true
+      if reminders(in: batch).count > 1 {
+        batchesWithTwoReminders += 1
       }
     }
 
+    // Both kinds breach from the same sample, so the gentle tick and the voice tick each carry two
+    // reminders rather than one.
+    XCTAssertEqual(batchesWithTwoReminders, 2)
+
     let fired = reminders(in: events)
-    let tooCloseGentle = fired.filter { $0.kind == .tooClose && $0.level == .gentle }
-    let headDownGentle = fired.filter { $0.kind == .headDown && $0.level == .gentle }
-    XCTAssertEqual(tooCloseGentle.count, 1)
-    XCTAssertEqual(headDownGentle.count, 1)
-    XCTAssertEqual(try XCTUnwrap(tooCloseGentle.first).t, 6.0, accuracy: 0.15)
-    XCTAssertEqual(try XCTUnwrap(headDownGentle.first).t, 6.0, accuracy: 0.15)
+    XCTAssertEqual(fired.map(\.kind), [.near, .headDown, .near, .headDown])
+    XCTAssertEqual(fired.map(\.level), [.gentle, .gentle, .voice, .voice])
+    // Within a tick the reminders are ordered near (2) before head-down (5); each kind keeps its own
+    // timing, 5 s of breach for the gentle line and 15 s for the voice line.
+    XCTAssertEqual(fired[0].t, 6.0, accuracy: 0.15)
+    XCTAssertEqual(fired[1].t, 6.0, accuracy: 0.15)
+    XCTAssertEqual(fired[2].t, 16.0, accuracy: 0.15)
+    XCTAssertEqual(fired[3].t, 16.0, accuracy: 0.15)
+
     XCTAssertEqual(engine.summary.tooCloseSeconds, 20.0, accuracy: 0.05)
     XCTAssertEqual(engine.summary.headDownSeconds, 20.0, accuracy: 0.05)
-    XCTAssertTrue(sawTooCloseBeforeHeadDown)
+    XCTAssertEqual(engine.summary.tooCloseCount, 1)
+    XCTAssertEqual(engine.summary.tooCloseRemindCount, 2)
+    XCTAssertEqual(engine.summary.headDownCount, 1)
+    XCTAssertEqual(engine.summary.headDownRemindCount, 2)
+    XCTAssertEqual(engine.episodeCount(for: .near), 1)
+    XCTAssertEqual(engine.reminderCount(for: .near), 2)
+    XCTAssertEqual(engine.episodeCount(for: .headDown), 1)
+    XCTAssertEqual(engine.reminderCount(for: .headDown), 2)
+    XCTAssertEqual(engine.status, .posture(.near))
+  }
+
+  /// Three kinds breach one leaning pose: desk-lean, near and head-down each keep their own episode
+  /// and each emit their own reminder, ordered by `PostureKind.priority` within a tick — desk-lean
+  /// (1), near (2), head-down (5). The experimental head-forward kind also breaches here but stays
+  /// silent.
+  func testEveryBreachingKindOnOneSampleFiresInPriorityOrder() throws {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    let upright = sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)])
+    let leaning = posing([Segment(duration: 20, distanceCM: 20, pitchDeg: -45)],
+                         as: .deskLean,
+                         from: 1.0)
+    for sample in upright + leaning {
+      events += engine.ingest(sample)
+    }
+
+    let fired = reminders(in: events)
+    XCTAssertEqual(fired.map(\.kind),
+                   [.deskLean, .near, .headDown, .deskLean, .near, .headDown])
+    XCTAssertEqual(fired.map(\.level),
+                   [.gentle, .gentle, .gentle, .voice, .voice, .voice])
+    // Each kind keeps its own timing: gentle at 5 s of breach, voice at 15 s.
+    for (index, _) in [PostureKind.deskLean, .near, .headDown].enumerated() {
+      XCTAssertEqual(fired[index].t, 6.0, accuracy: 0.15)
+      XCTAssertEqual(fired[index + 3].t, 16.0, accuracy: 0.15)
+    }
+
+    XCTAssertEqual(engine.episodeCount(for: .deskLean), 1)
+    XCTAssertEqual(engine.reminderCount(for: .deskLean), 2)
+    XCTAssertEqual(engine.episodeCount(for: .near), 1)
+    XCTAssertEqual(engine.reminderCount(for: .near), 2)
+    XCTAssertEqual(engine.episodeCount(for: .headDown), 1)
+    XCTAssertEqual(engine.reminderCount(for: .headDown), 2)
+    // Head-forward breaches the same pose but is experimental, so it never leaves a reminder.
+    XCTAssertEqual(engine.episodeCount(for: .headForward), 1)
+    XCTAssertEqual(engine.reminderCount(for: .headForward), 0)
+
+    XCTAssertEqual(engine.summary.tooCloseRemindCount, 2)
+    XCTAssertEqual(engine.summary.headDownRemindCount, 2)
+    XCTAssertEqual(engine.summary.tooCloseSeconds, 20.0, accuracy: 0.05)
+    XCTAssertEqual(engine.status, .posture(.deskLean))
+    XCTAssertEqual(engine.status.rawValue, "desk_lean")
+  }
+
+  /// An experimental kind still runs its episode, still moves the status and still writes feature
+  /// lines; only the reminder is dropped, because its `voiceLine` is nil.
+  func testExperimentalKindLogsWithoutAReminder() throws {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    // 20 s of slouch is four times the gentle delay, so a stable kind would have spoken twice.
+    let upright = sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)])
+    let slouching = posing([Segment(duration: 20, distanceCM: 40, pitchDeg: 0)],
+                           as: .slouch,
+                           from: 1.0)
+    for sample in upright + slouching {
+      events += engine.ingest(sample)
+    }
+
+    XCTAssertEqual(reminders(in: events).count, 0)
+    XCTAssertEqual(engine.episodeCount(for: .slouch), 1)
+    XCTAssertEqual(engine.reminderCount(for: .slouch), 0)
+    XCTAssertEqual(engine.status, .posture(.slouch))
+    XCTAssertEqual(engine.status.rawValue, "slouch")
+    XCTAssertTrue(events.contains { (event: MonitoringEvent) in
+      if case .statusChanged(let to, _, _, _) = event { return to == .posture(.slouch) }
+      return false
+    })
+
+    let line = try XCTUnwrap(lastFeatureLine(in: events))
+    XCTAssertEqual(line.highlighted, .slouch)
+    XCTAssertEqual(try reading(line.readings, .slouch).value, 0.15, accuracy: 0.005)
+    XCTAssertTrue(try reading(line.readings, .slouch).isOverThreshold)
   }
 
   /// `pausedSeconds` accumulates the intervals whose start sample had no face, which is what the
@@ -354,7 +477,7 @@ final class MonitoringEngineTests: XCTestCase {
                       Segment(duration: 17, distanceCM: 20, pitchDeg: 0)])
 
     let fired = reminders(in: result.events)
-    XCTAssertEqual(fired.filter { $0.kind == .tooClose }.count, 2)
+    XCTAssertEqual(fired.filter { $0.kind == .near }.count, 2)
     XCTAssertEqual(fired.filter { $0.kind == .headDown }.count, 1)
 
     XCTAssertEqual(result.engine.summary.tooCloseCount, 1)
@@ -383,9 +506,9 @@ final class MonitoringEngineTests: XCTestCase {
       .calibrated(baselineDistanceCM: 40, baselinePitchDeg: 0),
       .screenShown(name: "monitoring"),
       .sample(t: 1.5, distanceCM: 40, pitchDeg: 0),
-      .statusChanged(to: .headDown, t: 1.5, distanceCM: nil, pitchDeg: nil),
-      .reminder(kind: .tooClose, level: .gentle, t: 1.5, breachSeconds: 5, distanceCM: 20, pitchDeg: 0),
-      .speechTimeout(kind: .tooClose, level: .voice),
+      .statusChanged(to: .posture(.headDown), t: 1.5, distanceCM: nil, pitchDeg: nil),
+      .reminder(kind: .near, level: .gentle, t: 1.5, breachSeconds: 5, distanceCM: 20, pitchDeg: 0),
+      .speechTimeout(kind: .near, level: .voice),
       .speechUnavailable(kind: .headDown),
       .paused(t: 1.5),
       .resumed(t: 1.5),
