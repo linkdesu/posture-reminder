@@ -11,6 +11,10 @@ import SwiftUI
 /// adjacent timeline segments stay distinguishable.
 enum PosturePalette {
   static let colors: [String: Color] = [
+    // Good posture is the band's substance, so it is solid; "nobody here" is the empty state, so
+    // it is light. Before this entry existed, good posture fell through to `calm` and came out all
+    // but identical to the absence colour, which put two indistinguishable rows in one legend.
+    PostureStatus.good.rawValue: Color(.sRGB, red: 0.42, green: 0.47, blue: 0.44, opacity: 1),
     PostureKind.deskLean.rawValue: Color(.sRGB, red: 0.97, green: 0.62, blue: 0.24, opacity: 1),
     PostureKind.near.rawValue: Color(.sRGB, red: 0.94, green: 0.35, blue: 0.34, opacity: 1),
     PostureKind.headForward.rawValue: Color(.sRGB, red: 0.90, green: 0.42, blue: 0.72, opacity: 1),
@@ -18,7 +22,7 @@ enum PosturePalette {
     PostureKind.headDown.rawValue: Color(.sRGB, red: 0.40, green: 0.66, blue: 0.97, opacity: 1),
     PostureKind.headTilt.rawValue: Color(.sRGB, red: 0.26, green: 0.78, blue: 0.75, opacity: 1),
     PostureKind.chinRest.rawValue: Color(.sRGB, red: 0.50, green: 0.83, blue: 0.40, opacity: 1),
-    PostureStatus.noPerson.rawValue: Color(.sRGB, red: 0.46, green: 0.51, blue: 0.60, opacity: 1),
+    PostureStatus.noPerson.rawValue: Color(.sRGB, red: 0.80, green: 0.81, blue: 0.83, opacity: 1),
   ]
 
   /// The calm colour for a segment whose posture has no entry, so a caller never has to unwrap.
@@ -28,8 +32,11 @@ enum PosturePalette {
     colors[rawValue] ?? calm
   }
 
-  /// The postures a legend lists, in the order the domain ranks them.
+  /// The states a legend lists, good posture first so a good day reads top-down, then the postures
+  /// in the order the domain ranks them, then the absence band.
   static var legendOrder: [String] {
-    PostureKind.allCases.map(\.rawValue) + [PostureStatus.noPerson.rawValue]
+    [PostureStatus.good.rawValue]
+      + PostureKind.allCases.map(\.rawValue)
+      + [PostureStatus.noPerson.rawValue]
   }
 }

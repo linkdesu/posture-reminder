@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Capture the five v0.5 screens Link reviews: the child's screen, the settings page, and the
-# day, week and month reports.
+# Capture the v0.5 screens Link reviews: the child's screen (idle and mid-focus), the settings
+# page, and the day, week and month reports.
 #
 #   scripts/capture-screens.sh [--build]
 #
-# Each screen is reached by a launch argument rather than by tapping, because the app already
-# photographs a screen shortly after it appears and a simulator has no scriptable tap. The app
-# is reinstalled before every shot so the seeded history and the stored settings cannot leak
-# from one capture into the next.
+# Each screen is reached by a launch argument rather than by tapping, because a simulator has no
+# scriptable tap, and the shot is taken with `simctl io screenshot`, which photographs whatever
+# is on screen at that moment. The app's own per-screen screenshot cannot be used here: it fires a
+# fraction of a second after a screen appears, so it can only ever show the entry state — fine as
+# evidence that a screen was visited, useless for showing a running countdown over a live cloud.
 #
-# Output: artifacts/r4-pomodoro/screenshots/01-main.png ... 05-report-month.png, each beside
-# the session log it came from.
+# The app is reinstalled before every shot so the seeded history and the stored settings cannot
+# leak from one capture into the next.
+#
+# Output: artifacts/r4-pomodoro/screenshots/*.png, each beside the log it came from.
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
@@ -33,19 +36,20 @@ xcrun simctl bootstatus "$SIM" -b >/dev/null 2>&1 || true
 mkdir -p "$OUT/screenshots"
 FAILED=0
 
-# target-file-name | launch arguments
+# output name | seconds to wait | launch arguments
 CASES=(
-  "pomodoro_main|1-main|-pomodoro 1 -seedHistory 1"
-  "pomodoro_settings|2-settings|-pomodoro 1 -settings 1"
-  "report_day|3-report-day|-pomodoro 1 -seedHistory 30 -report day"
-  "report_week|4-report-week|-pomodoro 1 -seedHistory 30 -report week"
-  "report_month|5-report-month|-pomodoro 1 -seedHistory 30 -report month"
+  "1-main-idle|10|-pomodoro 1"
+  "2-main-focus|26|-pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
+  "3-settings|10|-pomodoro 1 -settings 1"
+  "4-report-day|10|-pomodoro 1 -seedHistory 30 -report day"
+  "5-report-week|10|-pomodoro 1 -seedHistory 30 -report week"
+  "6-report-month|10|-pomodoro 1 -seedHistory 30 -report month"
 )
 
 for entry in "${CASES[@]}"; do
-  screen="${entry%%|*}"
+  name="${entry%%|*}"
   rest="${entry#*|}"
-  name="${rest%%|*}"
+  wait_seconds="${rest%%|*}"
   launch="${rest#*|}"
 
   echo
@@ -62,25 +66,33 @@ for entry in "${CASES[@]}"; do
     FAILED=1
     continue
   fi
-  sleep 12
+  sleep "$wait_seconds"
 
-  container=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data)
-  shot="$container/Documents/debug/screenshots/$screen.png"
-  if [[ ! -f "$shot" ]]; then
-    echo "MISSING SCREENSHOT $screen.png; present:"
-    ls "$container/Documents/debug/screenshots" 2>&1 | tr '\n' ' '
-    echo
+  # The simulator's screenshot helper is refused write access to this volume, so it writes to
+  # /tmp and a normal process copies the file into the evidence directory.
+  scratch="$(mktemp -t posturelab-shot).png"
+  if ! xcrun simctl io "$SIM" screenshot "$scratch" >/dev/null 2>&1; then
+    echo "SCREENSHOT FAILED"
+    rm -f "$scratch"
     FAILED=1
     continue
   fi
-  cp "$shot" "$OUT/screenshots/$name.png"
+  if ! cp "$scratch" "$OUT/screenshots/$name.png"; then
+    echo "COPY FAILED"
+    rm -f "$scratch"
+    FAILED=1
+    continue
+  fi
+  rm -f "$scratch"
 
   # Keep the log beside the shot so a reviewer can see what the screen was showing.
+  container=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data)
   mkdir -p "$OUT/$name"
   cp -R "$container/Documents" "$OUT/$name/" 2>/dev/null
   {
-    echo "screen:  $screen"
+    echo "screen:  $name"
     echo "launch:  $launch"
+    echo "waited:  ${wait_seconds}s"
     echo "commit:  $(git rev-parse HEAD)"
     echo "when:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >"$OUT/$name/provenance.txt"
