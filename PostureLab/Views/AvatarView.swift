@@ -24,10 +24,14 @@ enum PoseProjection {
   }
 }
 
-/// An artistic body built only from the coarse depth grid and the joints: a depth-shaded particle
-/// cloud with a soft, denser face mask. It never renders an image, never touches a camera and never
-/// writes to disk; RGB is not an input it can even express. Pure, so the same inputs draw the same
-/// picture.
+/// A cartoon child built only from the coarse depth grid and the joints: a head, a torso and two upper
+/// arms drawn as round-cornered outlines with a soft fill, and a sparse, depth-shaded scan of the
+/// depth frame over the top. The parts the dominant posture blames take that posture's colour from
+/// `PosturePalette`, so the part that lights up here wears the colour the report gives the same
+/// posture; everything else stays calm.
+///
+/// It never renders an image, never touches a camera and never writes to disk; RGB is not an input it
+/// can even express. Pure, so the same inputs draw the same picture.
 struct AvatarView: View {
   private let geometry: PoseGeometry?
   private let assessment: PostureAssessment?
@@ -56,19 +60,195 @@ struct AvatarView: View {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
 
-    let alertJoints = Self.alertJoints(for: assessment?.dominant)
-    let alertPositions = JointID.allCases
-      .filter { alertJoints.contains($0) }
-      .compactMap { geometry.joints[$0]?.position }
+    let dominant = assessment?.dominant
+    let alertJoints = Self.alertJoints(for: dominant)
+    let alertInk = Self.alertInk(for: dominant)
+    let parts = Self.figureParts(joints: geometry.joints,
+                                rect: rect,
+                                alertJoints: alertJoints,
+                                alertInk: alertInk)
+    let style = StrokeStyle(lineWidth: Self.strokeWidth(in: rect), lineCap: .round, lineJoin: .round)
 
-    drawCloud(in: &context, rect: rect, depth: geometry.depth, alertPositions: alertPositions)
-    drawAlertGlows(in: &context, rect: rect, positions: alertPositions)
-    drawFaceMask(in: &context, rect: rect, joints: geometry.joints,
-                 isAlert: alertJoints.contains { Self.headJoints.contains($0) })
-    drawAlertDots(in: &context, rect: rect, joints: geometry.joints, alertJoints: alertJoints)
+    // Fill, then the scan, then the outline: the points sit inside the silhouette and the cartoon line
+    // stays crisp on top of them.
+    for part in parts where part.isClosed {
+      context.fill(part.path, with: .color(part.ink.opacity(Self.fillOpacity)))
+    }
+
+    drawCloud(in: &context, rect: rect, depth: geometry.depth,
+              alertPositions: Self.positions(of: alertJoints, in: geometry.joints),
+              alertInk: alertInk)
+
+    for part in parts {
+      context.stroke(part.path, with: .color(part.ink.opacity(Self.strokeOpacity)), style: style)
+    }
+
+    drawAlertMarkers(in: &context, rect: rect, joints: geometry.joints,
+                     alertJoints: alertJoints, alertInk: alertInk, stroke: style.lineWidth)
   }
 
-  // MARK: - Depth cloud
+  // MARK: - Cartoon figure
+
+  /// One piece of the drawing. The closed pieces — the head and the torso — get a fill as well as an
+  /// outline; the upper arms are a single open stroke.
+  private struct FigurePart {
+    var path: Path
+    var ink: Color
+    var isClosed: Bool
+  }
+
+  private static let headJoints: [JointID] = [.nose, .leftEye, .rightEye, .leftEar, .rightEar]
+  private static let torsoJoints: [JointID] = [.neck, .leftShoulder, .rightShoulder,
+                                              .root, .leftHip, .rightHip]
+  /// Head, torso, then one upper arm per side: the whole figure is these five pieces.
+  private static let upperArms: [(shoulder: JointID, elbow: JointID)] = [
+    (.leftShoulder, .leftElbow),
+    (.rightShoulder, .rightElbow),
+  ]
+
+  /// Every piece the available joints can place. A frame whose skeleton is missing joints loses the
+  /// pieces it cannot place rather than drawing a wrong body.
+  private static func figureParts(joints: [JointID: JointSample],
+                                  rect: CGRect,
+                                  alertJoints: Set<JointID>,
+                                  alertInk: Color?) -> [FigurePart] {
+    var parts: [FigurePart] = []
+
+    if let head = headPath(joints: joints, rect: rect) {
+      let blamed = headJoints.contains { alertJoints.contains($0) }
+      parts.append(FigurePart(path: head, ink: ink(for: blamed, alertInk: alertInk), isClosed: true))
+    }
+
+    if let torso = torsoPath(joints: joints, rect: rect) {
+      let blamed = torsoJoints.contains { alertJoints.contains($0) }
+      parts.append(FigurePart(path: torso, ink: ink(for: blamed, alertInk: alertInk), isClosed: true))
+    }
+
+    for arm in upperArms {
+      guard let shoulder = joints[arm.shoulder], let elbow = joints[arm.elbow] else { continue }
+      var path = Path()
+      path.move(to: PoseProjection.point(shoulder.position, in: rect))
+      path.addLine(to: PoseProjection.point(elbow.position, in: rect))
+      parts.append(FigurePart(path: path,
+                              ink: ink(for: alertJoints.contains(arm.shoulder), alertInk: alertInk),
+                              isClosed: false))
+    }
+
+    return parts
+  }
+
+  /// The posture's own colour when the piece carries the blame, the calm slate otherwise. A piece can
+  /// only be blamed while some posture dominates, which is also the only time `alertInk` exists.
+  private static func ink(for isBlamed: Bool, alertInk: Color?) -> Color {
+    isBlamed ? (alertInk ?? calmInk) : calmInk
+  }
+
+  /// The head: a circle around the face joints. Its radius follows how far apart they sit — the ear
+  /// line is the widest part of a face — and the vertical one is squeezed by the grid's 3:4 aspect, so
+  /// the head comes out round on screen rather than as a tall oval.
+  private static func headPath(joints: [JointID: JointSample], rect: CGRect) -> Path? {
+    let samples = headJoints.compactMap { joints[$0] }
+    guard !samples.isEmpty else { return nil }
+
+    let centreX = samples.map(\.x).reduce(0, +) / Double(samples.count)
+    let centreY = samples.map(\.y).reduce(0, +) / Double(samples.count)
+    let halfWidth = max(minimumHeadHalfWidth, (samples.map { abs($0.x - centreX) }.max() ?? 0) * 1.5)
+    let halfHeight = halfWidth * rect.width / rect.height * 1.15
+
+    return Path(ellipseIn: projected(CGRect(x: centreX - halfWidth,
+                                            y: centreY - halfHeight,
+                                            width: halfWidth * 2,
+                                            height: halfHeight * 2),
+                                     in: rect))
+  }
+
+  /// The torso: the shoulder line, flared out from the neck, into a rounded trapezoid that reaches
+  /// down past the hips. Every corner is pushed out from the joints by `torsoMargin`, so the outline
+  /// wraps the shoulders instead of cutting through them, and the bottom edge is narrower than the top
+  /// one because shoulders are the widest part of a seated child. That taper is also what leaves the
+  /// upper arms hanging outside the outline instead of being swallowed by it.
+  private static func torsoPath(joints: [JointID: JointSample], rect: CGRect) -> Path? {
+    guard let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+
+    let centreX = (left.x + right.x) / 2
+    let topY = min(left.y, right.y, joints[.neck]?.y ?? Double.infinity) - torsoMargin
+    // With no hip or root joint the trapezoid still gets a plausible shoulder-to-hip span instead of
+    // collapsing into a sliver.
+    let lower = [joints[.leftHip]?.y, joints[.rightHip]?.y, joints[.root]?.y]
+      .compactMap { $0 }.max() ?? (max(left.y, right.y) + torsoDropWithoutHips)
+    let bottomY = max(topY + torsoMargin, lower) + torsoMargin
+
+    let halfTop = max(abs(left.x - centreX), abs(right.x - centreX)) + torsoMargin
+    let hipHalf = [joints[.leftHip]?.x, joints[.rightHip]?.x]
+      .compactMap { $0 }
+      .map { abs($0 - centreX) }
+      .max() ?? (halfTop - torsoMargin) * torsoHipRatio
+    let halfBottom = min(halfTop, hipHalf + torsoMargin)
+
+    let corners = [
+      CGPoint(x: centreX - halfTop, y: topY),
+      CGPoint(x: centreX + halfTop, y: topY),
+      CGPoint(x: centreX + halfBottom, y: bottomY),
+      CGPoint(x: centreX - halfBottom, y: bottomY),
+    ]
+    return roundedPath(corners.map { PoseProjection.point($0, in: rect) })
+  }
+
+  /// A closed outline that walks past every corner on a quadratic curve, so the trapezoid is a drawn
+  /// cartoon shape rather than a ruler-drawn one. A corner rounds over a quarter of its shorter edge at
+  /// most, which is what keeps two neighbouring corners from swallowing each other.
+  private static func roundedPath(_ corners: [CGPoint]) -> Path {
+    guard corners.count >= 3 else { return Path() }
+
+    var path = Path()
+    for index in corners.indices {
+      let previous = corners[(index + corners.count - 1) % corners.count]
+      let current = corners[index]
+      let next = corners[(index + 1) % corners.count]
+      let round = min(length(from: previous, to: current), length(from: current, to: next)) * 0.25
+      let entry = point(from: current, towards: previous, distance: round)
+      let exit = point(from: current, towards: next, distance: round)
+
+      if index == 0 {
+        path.move(to: entry)
+      }
+      path.addQuadCurve(to: exit, control: current)
+    }
+    path.closeSubpath()
+    return path
+  }
+
+  /// A point `distance` along the way from `origin` to `target`, clamped to the segment's own length.
+  private static func point(from origin: CGPoint, towards target: CGPoint, distance: CGFloat) -> CGPoint {
+    let segment = length(from: origin, to: target)
+    guard segment > 0 else { return origin }
+    let step = min(distance, segment) / segment
+    return CGPoint(x: origin.x + (target.x - origin.x) * step,
+                   y: origin.y + (target.y - origin.y) * step)
+  }
+
+  private static func length(from a: CGPoint, to b: CGPoint) -> CGFloat {
+    let dx = Double(b.x - a.x)
+    let dy = Double(b.y - a.y)
+    return CGFloat((dx * dx + dy * dy).squareRoot())
+  }
+
+  /// The model rect for a normalized box. The projection is a scale plus an offset, so a box projects
+  /// into a box.
+  private static func projected(_ box: CGRect, in rect: CGRect) -> CGRect {
+    let origin = PoseProjection.point(box.origin, in: rect)
+    let corner = PoseProjection.point(CGPoint(x: box.maxX, y: box.maxY), in: rect)
+    return CGRect(x: origin.x, y: origin.y,
+                  width: corner.x - origin.x, height: corner.y - origin.y)
+  }
+
+  /// One fixed line width for the whole figure: uniform strokes are what makes a drawing read as a
+  /// cartoon rather than as an analysis.
+  private static func strokeWidth(in rect: CGRect) -> CGFloat {
+    max(2, min(rect.width, rect.height) * 0.014)
+  }
+
+  // MARK: - Depth scan
 
   private struct CloudCell {
     var x: Double
@@ -76,6 +256,12 @@ struct AvatarView: View {
     var depth: Double
     var order: Int
   }
+
+  /// Every third cell in each direction: 8 columns by 11 rows over the 24 by 32 grid. The stride is
+  /// the whole trick — one point per three cells reads as a scan of a body, where one per cell read as
+  /// a solid mass. Cells whose reading the frame's own edge fade has swallowed are skipped, so a real
+  /// frame shows a few dozen points rather than all 88.
+  private static let particleStride = 3
 
   /// Reading closer than this is indistinguishable from the edge fade of the fake depth frame, so
   /// it is treated as no reading rather than as an extremely close point.
@@ -86,13 +272,13 @@ struct AvatarView: View {
   private func drawCloud(in context: inout GraphicsContext,
                          rect: CGRect,
                          depth: DepthFrame?,
-                         alertPositions: [CGPoint]) {
+                         alertPositions: [CGPoint],
+                         alertInk: Color?) {
     guard let depth else { return }
 
     var cells: [CloudCell] = []
-    cells.reserveCapacity(DepthFrame.width * DepthFrame.height)
-    for y in 0..<DepthFrame.height {
-      for x in 0..<DepthFrame.width {
+    for y in stride(from: 1, to: DepthFrame.height, by: Self.particleStride) {
+      for x in stride(from: 1, to: DepthFrame.width, by: Self.particleStride) {
         let metres = Double(depth.value(x: x, y: y))
         guard metres >= Self.minimumReadableDepth else { continue }
         cells.append(CloudCell(x: (Double(x) + 0.5) / Double(DepthFrame.width),
@@ -119,116 +305,50 @@ struct AvatarView: View {
         return dx * dx + dy * dy <= alertRadiusSquared
       }
 
-      let ink = isAlert
-        ? Self.alertFarInk.mixed(with: Self.alertNearInk, nearness)
-        : Self.farInk.mixed(with: Self.nearInk, nearness)
-      let radius = spacing * CGFloat(0.24 + 0.34 * nearness)
+      let radius = spacing * CGFloat(0.22 + 0.30 * nearness)
       let centre = PoseProjection.point(CGPoint(x: cell.x, y: cell.y), in: rect)
       let dot = CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2)
+      let opacity = Self.particleMinOpacity + Self.particleMaxOpacity * nearness
 
-      context.fill(Path(ellipseIn: dot), with: .color(ink.color(opacity: 0.22 + 0.66 * nearness)))
-    }
-  }
-
-  // MARK: - Face mask
-
-  private static let headJoints: [JointID] = [.nose, .leftEye, .rightEye, .leftEar, .rightEar]
-
-  /// A soft, denser mask over the head joints: a low radial wash plus a fixed lattice of bright
-  /// points inside it. No randomness, so the mask is identical every frame for the same joints.
-  private func drawFaceMask(in context: inout GraphicsContext,
-                            rect: CGRect,
-                            joints: [JointID: JointSample],
-                            isAlert: Bool) {
-    let head = Self.headJoints.compactMap { joints[$0] }
-    guard let reference = joints[.nose] ?? head.first else { return }
-
-    let centreX = head.map(\.x).reduce(0, +) / Double(head.count)
-    let centreY = head.map(\.y).reduce(0, +) / Double(head.count)
-    let halfWidth = max(0.05, head.map { abs($0.x - centreX) }.max() ?? 0) + 0.02
-    let halfHeight = halfWidth * 1.2
-
-    let nearness = min(1, max(0, (Self.depthFar - (reference.depthM ?? Self.depthFar)) /
-                                (Self.depthFar - Self.depthNear)))
-    let ink = isAlert
-      ? Self.alertFarInk.mixed(with: Self.alertNearInk, nearness)
-      : Self.farInk.mixed(with: Self.maskNearInk, nearness)
-
-    let centre = PoseProjection.point(CGPoint(x: centreX, y: centreY), in: rect)
-    let halfWidthPoints = CGFloat(halfWidth) * rect.width
-    let halfHeightPoints = CGFloat(halfHeight) * rect.height
-    let wash = CGRect(x: centre.x - halfWidthPoints,
-                      y: centre.y - halfHeightPoints,
-                      width: halfWidthPoints * 2,
-                      height: halfHeightPoints * 2)
-
-    context.fill(Path(ellipseIn: wash), with: .radialGradient(
-      Gradient(colors: [ink.color(opacity: 0.24), ink.color(opacity: 0)]),
-      center: centre,
-      startRadius: 0,
-      endRadius: max(halfWidthPoints, halfHeightPoints)
-    ))
-
-    for row in 0...6 {
-      for column in 0...6 {
-        let dx = Double(column) / 3 - 1
-        let dy = Double(row) / 3 - 1
-        let radiusSquared = dx * dx + dy * dy
-        guard radiusSquared <= 1.05 else { continue }
-
-        let point = CGPoint(x: centre.x + CGFloat(dx) * halfWidthPoints * 0.88,
-                            y: centre.y + CGFloat(dy) * halfHeightPoints)
-        let radius: CGFloat = CGFloat(1.3 + 0.9 * nearness)
-        let dot = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-        let opacity = 0.85 * (1 - radiusSquared * 0.4)
+      if isAlert, let alertInk {
+        context.fill(Path(ellipseIn: dot), with: .color(alertInk.opacity(opacity)))
+      } else {
+        let ink = Self.farInk.mixed(with: Self.nearInk, nearness)
         context.fill(Path(ellipseIn: dot), with: .color(ink.color(opacity: opacity)))
       }
     }
-
-    for id in Self.headJoints {
-      guard let joint = joints[id] else { continue }
-      let point = PoseProjection.point(joint.position, in: rect)
-      let radius: CGFloat = CGFloat(2.4 + 1.2 * nearness)
-      let dot = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-      context.fill(Path(ellipseIn: dot), with: .color(ink.color(opacity: 0.9)))
-    }
   }
 
-  // MARK: - Alert parts
+  // MARK: - Alert markers
 
-  private func drawAlertGlows(in context: inout GraphicsContext,
-                              rect: CGRect,
-                              positions: [CGPoint]) {
-    guard !positions.isEmpty else { return }
-    let radius = min(rect.width, rect.height) * 0.07
+  /// A soft halo and an anchor dot on every blamed joint the outline does not already carry — the
+  /// wrists, and the neck and shoulder ends of the torso — so a hand on a cheek or a shoulder tilt
+  /// still reads as changed even where the scan is sparse.
+  private func drawAlertMarkers(in context: inout GraphicsContext,
+                                rect: CGRect,
+                                joints: [JointID: JointSample],
+                                alertJoints: Set<JointID>,
+                                alertInk: Color?,
+                                stroke: CGFloat) {
+    guard let alertInk else { return }
 
-    for position in positions {
-      let centre = PoseProjection.point(position, in: rect)
-      let wash = CGRect(x: centre.x - radius, y: centre.y - radius,
-                        width: radius * 2, height: radius * 2)
-      context.fill(Path(ellipseIn: wash), with: .radialGradient(
-        Gradient(colors: [Self.alertNearInk.color(opacity: 0.32),
-                          Self.alertNearInk.color(opacity: 0)]),
-        center: centre,
-        startRadius: 0,
-        endRadius: radius
-      ))
-    }
-  }
-
-  /// A small anchor dot on every alert joint outside the face, so the wrist and shoulder parts read
-  /// as changed even where the cloud is sparse.
-  private func drawAlertDots(in context: inout GraphicsContext,
-                             rect: CGRect,
-                             joints: [JointID: JointSample],
-                             alertJoints: Set<JointID>) {
     for id in JointID.allCases where alertJoints.contains(id) && !Self.headJoints.contains(id) {
       guard let joint = joints[id] else { continue }
       let centre = PoseProjection.point(joint.position, in: rect)
-      let radius: CGFloat = 2.2
+
+      let halo = stroke * 2.4
+      let wash = CGRect(x: centre.x - halo, y: centre.y - halo, width: halo * 2, height: halo * 2)
+      context.fill(Path(ellipseIn: wash), with: .radialGradient(
+        Gradient(colors: [alertInk.opacity(0.30), alertInk.opacity(0)]),
+        center: centre,
+        startRadius: 0,
+        endRadius: halo
+      ))
+
+      let radius = stroke * 0.55
       let dot = CGRect(x: centre.x - radius, y: centre.y - radius,
                        width: radius * 2, height: radius * 2)
-      context.fill(Path(ellipseIn: dot), with: .color(Self.alertNearInk.color(opacity: 0.9)))
+      context.fill(Path(ellipseIn: dot), with: .color(alertInk.opacity(0.95)))
     }
   }
 
@@ -252,9 +372,17 @@ struct AvatarView: View {
     }
   }
 
+  /// Where the blamed joints sit in normalized coordinates, for the scan's own "is this point near a
+  /// blamed part" test.
+  private static func positions(of ids: Set<JointID>,
+                                in joints: [JointID: JointSample]) -> [CGPoint] {
+    JointID.allCases.filter { ids.contains($0) }.compactMap { joints[$0]?.position }
+  }
+
   // MARK: - Empty state
 
-  /// A quiet ring of dim dots: honest about having nothing to show without looking broken.
+  /// A quiet ring of dim dots: honest about having nothing to show without looking broken, and
+  /// deliberately without a face, since there is no one to draw one for.
   private func drawEmptyState(in context: inout GraphicsContext, size: CGSize) {
     let centre = CGPoint(x: size.width / 2, y: size.height / 2)
     let ink = Color.white.opacity(0.10)
@@ -289,9 +417,33 @@ private struct Ink {
 }
 
 private extension AvatarView {
-  static let farInk = Ink(r: 0.09, g: 0.20, b: 0.40)
-  static let nearInk = Ink(r: 0.66, g: 0.92, b: 1.00)
-  static let maskNearInk = Ink(r: 0.84, g: 0.98, b: 1.00)
-  static let alertFarInk = Ink(r: 0.42, g: 0.14, b: 0.04)
-  static let alertNearInk = Ink(r: 1.00, g: 0.60, b: 0.20)
+  /// The calm body: a cool, desaturated slate that belongs to no posture, which keeps the palette the
+  /// only place a posture colour is written down.
+  static let calmInk = Color(.sRGB, red: 0.62, green: 0.68, blue: 0.78, opacity: 1)
+
+  /// The scan's depth ramp, far to near: a dark slate brightening to a near white, so depth reads from
+  /// brightness and size without competing with the palette.
+  static let farInk = Ink(r: 0.24, g: 0.29, b: 0.37)
+  static let nearInk = Ink(r: 0.86, g: 0.91, b: 0.97)
+
+  /// The dominant posture's own colour, straight out of the single palette, so the part that lights up
+  /// on the avatar wears the colour that posture wears in the report. Nil when nothing breaches.
+  static func alertInk(for kind: PostureKind?) -> Color? {
+    guard let kind else { return nil }
+    return PosturePalette.color(for: kind.rawValue)
+  }
+
+  static let fillOpacity = 0.13
+  static let strokeOpacity = 0.90
+  static let particleMinOpacity = 0.28
+  static let particleMaxOpacity = 0.62
+
+  /// The figure's proportions in normalized grid units: how far the torso outline is pushed out past
+  /// the joints, how wide its bottom edge falls back to when the hips are missing, the shoulder-to-hip
+  /// span it falls back to when the lower body is missing, and the smallest head the face joints are
+  /// allowed.
+  static let torsoMargin = 0.022
+  static let torsoHipRatio = 0.80
+  static let torsoDropWithoutHips = 0.30
+  static let minimumHeadHalfWidth = 0.07
 }

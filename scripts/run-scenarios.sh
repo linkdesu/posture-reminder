@@ -63,6 +63,12 @@ fi
 FAILED=0
 RAN=0
 
+# AC8 is a static property of the sources rather than of a run, so one check covers the round.
+if ! python3 scripts/audit-offline.py; then
+  echo "OFFLINE AUDIT FAILED"
+  FAILED=1
+fi
+
 run_case() {
   local scenario="$1" sensitivity="$2" duration="$3"
   shift 3
@@ -74,6 +80,16 @@ run_case() {
   RAN=$((RAN + 1))
 
   local launch=(-scenario "$scenario" -sensitivity "$sensitivity" -captureSettings 1)
+  # A scenario that is about a layer rather than a posture also switches that layer off.
+  local extra_verify=(--expect-view-mode avatar --expect-overlay)
+  local pomodoro_run=0
+  case "$scenario" in
+    avatarOffMonitoring) launch+=(-avatar 0); extra_verify=(--expect-view-mode board --expect-overlay) ;;
+    debugOffMonitoring) launch+=(-debug 0); extra_verify=(--expect-view-mode avatar --expect-overlay-off) ;;
+    # A live three-pomodoro day. Shortened clocks keep the round to six minutes, and the
+    # pomodoro verifier reads the history file instead of a single reading session.
+    pomodoroDay) launch+=(-pomodoro 1 -focusMinutes 1 -shortBreakMinutes 1); pomodoro_run=1 ;;
+  esac
   if [[ "$SURFACE" == device ]]; then
     if ! xcrun devicectl device install app --device "$DEVICE" "$DEV_APP" >/dev/null 2>&1; then
       echo "INSTALL FAILED"
@@ -154,8 +170,13 @@ run_case() {
   } >"$target/provenance.txt"
 
   # shellcheck disable=SC2086
-  python3 scripts/verify-session.py "$log" --expect-scenario "$scenario" --quiet \
-    --expect-features --expect-view-mode avatar --expect-overlay "$@" || FAILED=1
+  if [[ "$pomodoro_run" == 1 ]]; then
+    python3 scripts/verify-pomodoro.py "$log" --quiet \
+      --expect-records 3 --expect-focus-seconds 60 || FAILED=1
+  else
+    python3 scripts/verify-session.py "$log" --expect-scenario "$scenario" --quiet \
+      --expect-features --expect-posture-stats "${extra_verify[@]}" "$@" || FAILED=1
+  fi
 
   # AC13 also says the highlight is visible in a screenshot, which no log can show.
   local overlay overlay_status
@@ -193,6 +214,21 @@ run_case headForward  medium         26 --expect-no-reminders --expect-feature-o
 run_case headForwardMiss medium      26 --expect-no-reminders --expect-feature-under head_forward
 run_case slouch       medium         26 --expect-no-reminders --expect-feature-over slouch --expect-highlight slouch
 run_case slouchMiss   medium         26 --expect-no-reminders --expect-feature-under slouch
+
+# v0.4: the pause gate and the layer scenarios.
+# pauseWhileBreach expects exactly one reminder, and deliberately not `--expect-kind`, which
+# would demand a level 2 that cannot exist here: the breach is already at level 1 when the
+# pause hits, and the cooldown that reminder started is still running after a one-second
+# pause, so the post-resume episode is suppressed. That absence is the evidence that a pause
+# does not clear the cooldown, which is why the count is pinned instead of the levels.
+run_case pauseWhileBreach medium    30 --expect-near-reminders 1 --expect-pause --expect-no-reminders-during-pause --expect-posture-stats
+run_case pauseResumeStillNear medium 30 --expect-level1 5 --expect-level2 15 --expect-kind near --expect-pause --expect-not-good-after-resume --expect-posture-stats
+run_case avatarOffMonitoring medium 20 --expect-kind near --expect-view-mode board --expect-posture-stats
+run_case debugOffMonitoring medium  20 --expect-kind near --expect-overlay-off --expect-posture-stats
+
+# v0.5: one live pomodoro day, three focuses with different postures, checked against the
+# history file rather than a single session log.
+run_case pomodoroDay  medium        360 --expect-posture-stats
 
 if [[ "$DO_LONG" == 1 ]]; then
   run_case longRun medium 1800

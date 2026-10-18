@@ -56,7 +56,7 @@ does both and then feeds the newest `session-*.jsonl` to `scripts/verify-session
 
 ## Line format and the full key set
 
-One JSON object per line, UTF-8, newline-terminated. **Every line carries all 35 keys.**
+One JSON object per line, UTF-8, newline-terminated. **Every line carries all 36 keys.**
 The writer encodes the complete key set on every line, with `null` for values that do
 not apply, so a reader **never has to test for key presence** — a key that is not
 meaningful for a given event is present as JSON `null`, not absent. The only per-line
@@ -80,7 +80,7 @@ six are non-null on every line.
 | `pitch_deg` | Double? | Head pitch in degrees for the same ticks; `null` when the face was not detected. |
 | `alert_type` | String? | Reminder posture: one of the seven `PostureKind` rawValues (see the `alert_type` vocabulary). Filled on `reminder`, `speech_timeout` and `speech_unavailable` lines. |
 | `level` | Int? | Reminder level: `1` (gentle) or `2` (voice). Filled on `reminder` lines and on `speech_timeout`. |
-| `breach_seconds` | Double? | On a `reminder` line, seconds from the episode's breach start to this reminder (`t − breachStart`). |
+| `breach_seconds` | Double? | On a `reminder` line: accumulated breach seconds for this episode at this reminder. An absence pause stops the accumulator, so it is wall-clock time minus any pause inside the episode and can lag the distance from the episode's first breaching sample. |
 | `sensitivity` | String? | On the `config` line: `low` / `medium` / `high`. |
 | `distance_threshold_cm` | Double? | On the `config` line: the near threshold in cm for this session. |
 | `pitch_threshold_deg` | Double? | On the `config` line: the head-down threshold in degrees for this session. |
@@ -105,10 +105,11 @@ six are non-null on every line.
 | `view_mode` | String? | On a `view_mode` line: `avatar` (point-cloud avatar) or `board` (the black-board fallback). |
 | `overlay_on` | Bool? | On a `view_mode` line: whether the debug skeleton/feature overlay is on. |
 | `avatar_on` | Bool? | On a `view_mode` line: whether avatar mode is on. |
+| `posture_stats` | Object? | On the `session_ended` line: one entry per `PostureKind` rawValue with `{"episodes": …, "reminders": …, "seconds": …}` (see below). `null` on every other line — but the key itself is present on every line like the rest. |
 
 ### The `feature_values` nested shape
 
-`feature_values` is the one key whose value is an object rather than a scalar. Its keys are the eight `PostureFeature` rawValues (`distance`, `head_pitch`, `head_roll`, `shoulder_tilt`, `head_height_drop`, `hand_to_face`, `head_forward`, `slouch`); each maps to a fixed triple:
+`feature_values` is the per-tick object key; `posture_stats` (the next section) is the summary's, and every other key's value is a scalar. Its keys are the eight `PostureFeature` rawValues (`distance`, `head_pitch`, `head_roll`, `shoulder_tilt`, `head_height_drop`, `hand_to_face`, `head_forward`, `slouch`); each maps to a fixed triple:
 
 ```json
 "feature_values": {
@@ -121,6 +122,22 @@ six are non-null on every line.
 - `over` — whether the value breached its threshold.
 
 The baseline a reading was measured against is deliberately **not** in the triple; QA reads it off the `calibration_done` line. A feature whose inputs were missing is still present, with its `value` set to half the threshold and `over` `false` — an absent measurement is never recorded as a breach.
+
+### The `posture_stats` nested shape
+
+`posture_stats` is filled on the `session_ended` line only, and is JSON `null` on every other line. It has one entry per `PostureKind` rawValue — all seven, the two experimental kinds included — so a consumer never has to test for a kind. Each entry is a fixed triple:
+
+```json
+"posture_stats": {
+  "near": { "episodes": 1, "reminders": 2, "seconds": 24.9 }
+}
+```
+
+- `episodes` — episodes of that posture that reached level 1, whether or not the line was voiced. For `near` and `head_down` this is the same number as `near_count` / `head_down_count`.
+- `reminders` — reminder **lines** emitted for that posture, both levels; an escalated episode counts twice. For `near` and `head_down` this is the same number as `near_remind_count` / `head_down_remind_count`, and it is `0` for a kind that never speaks.
+- `seconds` — accumulated breach seconds for that posture, with pauses excluded. For `near` and `head_down` it agrees with `near_seconds` / `head_down_seconds`, which the QA checker cross-checks.
+
+A kind that never breached is present with all three values `0`. The two experimental kinds (`head_forward`, `slouch`) never emit a reminder, so their `episodes` can be non-zero while `reminders` stays `0` — that is the intended reading, not a contradiction.
 
 ## Events
 
@@ -135,11 +152,11 @@ The baseline a reading was measured against is deliberately **not** in the tripl
 | `features` | A feature sample line — one per five samples (2 Hz at the 10 Hz tick). Enough to reconstruct a decision, not enough to flood the log. | `t`, `highlighted_feature`, `feature_values` |
 | `view_mode` | A layer-state change: the avatar / black-board mode or either overlay switch changed. | `view_mode`, `overlay_on`, `avatar_on` |
 | `reminder` | A reminder fired (level 1 gentle or level 2 voice). | `t`, `alert_type`, `level`, `breach_seconds`, `distance_cm`, `pitch_deg` |
-| `speech_timeout` | The speech watchdog fired: synthesis started but never called back within the estimate + 2 s, so the voice queue was advanced anyway. | `alert_type`, `level` (no `t` — the speaker has no session clock) |
-| `speech_unavailable` | No `zh-CN` voice is installed, so the voice reminder could not be spoken; the player falls back to the gentle tone. | `alert_type` (no `t`, no `level`) |
+| `speech_timeout` | The audio watchdog fired: a clip started but never reported finishing within its length + 2 s, so the queue was advanced anyway. | `alert_type`, `level` (no `t` — the player has no session clock) |
+| `speech_unavailable` | The posture's placeholder clip could not be loaded or decoded, so the reminder was silent. Nothing is played twice, and the queue advances. | `alert_type` (no `t`, no `level`) |
 | `paused` | The absence pause started (no face for 3 s). | `t` |
 | `resumed` | The absence pause ended (a face reappeared). | `t` |
-| `session_ended` | The session ended; carries the summary. | `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `paused_seconds`, `near_count`, `near_remind_count`, `head_down_count`, `head_down_remind_count`, `longest_good_streak_seconds` |
+| `session_ended` | The session ended; carries the summary. | `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `paused_seconds`, `near_count`, `near_remind_count`, `head_down_count`, `head_down_remind_count`, `longest_good_streak_seconds`, `posture_stats` |
 
 Ordering within one tick follows the engine: `sample`, then `paused`/`resumed`, then
 `status_changed` (only when the state changes), then any `reminder`s, then the `features`

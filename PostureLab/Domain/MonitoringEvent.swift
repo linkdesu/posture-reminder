@@ -72,6 +72,7 @@ struct LogRecord: Codable {
     case view_mode
     case overlay_on
     case avatar_on
+    case posture_stats
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -116,6 +117,9 @@ struct LogRecord: Codable {
   var view_mode: String?
   var overlay_on: Bool?
   var avatar_on: Bool?
+  /// Per-posture counts and accumulated breach seconds, on the `session_ended` line; keyed by
+  /// `PostureKind.rawValue`.
+  var posture_stats: [String: PostureStat]?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -157,6 +161,7 @@ struct LogRecord: Codable {
     try container.encode(view_mode, forKey: .view_mode)
     try container.encode(overlay_on, forKey: .overlay_on)
     try container.encode(avatar_on, forKey: .avatar_on)
+    try container.encode(posture_stats, forKey: .posture_stats)
   }
 }
 
@@ -264,6 +269,7 @@ extension MonitoringEvent {
       record.head_down_count = summary.headDownCount
       record.head_down_remind_count = summary.headDownRemindCount
       record.longest_good_streak_seconds = summary.longestGoodStreakSeconds
+      record.posture_stats = summary.postureStats
     }
 
     return record

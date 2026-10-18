@@ -7,37 +7,55 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
+		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
+		18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */; };
 		1D6AC6FB0412998782E3DA26 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362B143AD95950CA439D700B /* SessionStore.swift */; };
 		20BCEFA0C1E130818EDA47EE /* FileDebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */; };
 		255846CA2CDC2076E67B50B1 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76A7ACBCAFF7D9C5AF1A422 /* Settings.swift */; };
+		3971BFF07794B03E55994104 /* PomodoroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC66FD4FCBB2227E58111334 /* PomodoroView.swift */; };
 		3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */; };
 		3F794173788051EE1734E791 /* PostureSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43C4382384E519C27CCCA4F /* PostureSample.swift */; };
 		3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */; };
 		4D0EF23AB4D0D5063528375A /* DebugOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */; };
+		4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */; };
 		4FA5FAF4E26E7AFE50117616 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865D8839C4C8F659BB29252A /* SessionController.swift */; };
+		58AF263DF6D7220A3D95E4D0 /* PomodoroSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */; };
 		5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */; };
 		5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34CF188A7BF03E96664807B /* MonitoringEngine.swift */; };
 		602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D597B6333310C45A83D6402 /* ReminderPlayer.swift */; };
+		615F29CABD4A4D803D1CC61E /* PomodoroSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */; };
 		64C28F75CD3163146C4BD20A /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C15E12D9A4406B0415F7E219 /* HomeView.swift */; };
 		71817E1090992912CF82B885 /* ARFaceSampleSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14744EA27D09FF29D0524CC3 /* ARFaceSampleSource.swift */; };
 		7CA32D1FA92C371E7CFF1B67 /* Pose.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCBAEB16FED6503FA1D580B8 /* Pose.swift */; };
 		8113073D7E321639C3B962BA /* CalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEA84B4826A935D0B51FD76 /* CalibrationView.swift */; };
 		840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */; };
+		8E1F39B8B7CB4297B4B69AF5 /* head_down.wav in Resources */ = {isa = PBXBuildFile; fileRef = 5F1CEF001EA36F12FB4E1B6F /* head_down.wav */; };
 		90AE9263F3DA3E3C94C703E4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C1E4DBD06729CD331E2915 /* SettingsView.swift */; };
 		944A76A1C208C2E25A3E0D4B /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */; };
+		94E32C6F7AB36B7BBDF9CBC0 /* desk_lean.wav in Resources */ = {isa = PBXBuildFile; fileRef = D2E5D6DEB21A3900506F32F1 /* desk_lean.wav */; };
 		9628B624A31AC72209E46D2B /* BodyRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA4EE269B008D191C1D0C8EB /* BodyRig.swift */; };
 		98317745AAB9555DB00A6268 /* MonitoringView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E189193AF7944AFBC48C797E /* MonitoringView.swift */; };
 		A254F5561FB6D8D10A609078 /* SampleSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18493035B1BBEACE3179B76 /* SampleSource.swift */; };
+		ADC57D874E9D8D6D20022C39 /* PomodoroRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28BC245DEF113D2E19BAECC /* PomodoroRecord.swift */; };
+		AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */; };
+		B370D27AF06F42C9ED0FC4B9 /* PomodoroStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */; };
+		B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */; };
+		C64D63145339A974597D094B /* chin_rest.wav in Resources */ = {isa = PBXBuildFile; fileRef = A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */; };
+		C76487803E453EB4019A121C /* near.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7E37082B9C3154D095C46336 /* near.wav */; };
+		C963277798D4975B291D662B /* PomodoroHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */; };
 		CAB618B6756DF5A9C6432121 /* SimulatedSampleSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86185D03144F3F6CCC9FEC18 /* SimulatedSampleSource.swift */; };
 		CC4DAA282E3BC3ECC1A20B22 /* Scenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AE14E62E384345220D3E83 /* Scenarios.swift */; };
 		D73AAEA661B94D6FEFD2CB9A /* PostureFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46C067C01A1CB047E992E32D /* PostureFeature.swift */; };
 		D7D70D327DBA1B74296F2459 /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E000C965E071D7A728D350 /* AvatarView.swift */; };
 		D811F2C467842F35D52B7BCF /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A977A8B8E4D95F59F32EE642 /* RootView.swift */; };
 		D9300855FF10C6CA0056E139 /* Sensitivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16AEB838486856F512DE30ED /* Sensitivity.swift */; };
+		DCE243CB641E9DC1967F1A6F /* PomodoroSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */; };
 		DF963E8F59DA2A236665DCE3 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36AC79F435D21A488617AE6 /* App.swift */; };
 		E1EED948404432FC29BC5370 /* SessionSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01417FF66BD4502D7D8F0556 /* SessionSummary.swift */; };
 		E6C09F58442C1933FFC89B24 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C9CC48A2EE658C4F4F6E6C /* SummaryView.swift */; };
 		F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */; };
+		FB901494F5245F4A74E4B11B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 86098F7CD1ECFE6933A9E192 /* README.md */; };
 		FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */; };
 /* End PBXBuildFile section */
 
@@ -53,19 +71,31 @@
 
 /* Begin PBXFileReference section */
 		01417FF66BD4502D7D8F0556 /* SessionSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSummary.swift; sourceTree = "<group>"; };
+		0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsView.swift; sourceTree = "<group>"; };
+		11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroStore.swift; sourceTree = "<group>"; };
 		14744EA27D09FF29D0524CC3 /* ARFaceSampleSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARFaceSampleSource.swift; sourceTree = "<group>"; };
 		16AEB838486856F512DE30ED /* Sensitivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sensitivity.swift; sourceTree = "<group>"; };
 		16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDebugLogger.swift; sourceTree = "<group>"; };
+		20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettings.swift; sourceTree = "<group>"; };
 		2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugOverlayView.swift; sourceTree = "<group>"; };
 		2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		362B143AD95950CA439D700B /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		46C067C01A1CB047E992E32D /* PostureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureFeature.swift; sourceTree = "<group>"; };
+		4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistoryTests.swift; sourceTree = "<group>"; };
 		4D597B6333310C45A83D6402 /* ReminderPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayer.swift; sourceTree = "<group>"; };
 		4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogging.swift; sourceTree = "<group>"; };
+		5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistory.swift; sourceTree = "<group>"; };
+		5F1CEF001EA36F12FB4E1B6F /* head_down.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_down.wav; sourceTree = "<group>"; };
+		621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngine.swift; sourceTree = "<group>"; };
+		69901B3D5C223A77CD1EBE1F /* head_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_tilt.wav; sourceTree = "<group>"; };
 		6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureKind.swift; sourceTree = "<group>"; };
+		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
+		811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsStore.swift; sourceTree = "<group>"; };
+		86098F7CD1ECFE6933A9E192 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		86185D03144F3F6CCC9FEC18 /* SimulatedSampleSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatedSampleSource.swift; sourceTree = "<group>"; };
 		865D8839C4C8F659BB29252A /* SessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionController.swift; sourceTree = "<group>"; };
 		9BEA84B4826A935D0B51FD76 /* CalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationView.swift; sourceTree = "<group>"; };
+		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
 		A3AE14E62E384345220D3E83 /* Scenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios.swift; sourceTree = "<group>"; };
 		A977A8B8E4D95F59F32EE642 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureClassifier.swift; sourceTree = "<group>"; };
@@ -73,19 +103,25 @@
 		C0C1E4DBD06729CD331E2915 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C15E12D9A4406B0415F7E219 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		C4C9CC48A2EE658C4F4F6E6C /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
+		CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngineTests.swift; sourceTree = "<group>"; };
 		D0E000C965E071D7A728D350 /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarView.swift; sourceTree = "<group>"; };
 		D18493035B1BBEACE3179B76 /* SampleSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleSource.swift; sourceTree = "<group>"; };
+		D2E5D6DEB21A3900506F32F1 /* desk_lean.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = desk_lean.wav; sourceTree = "<group>"; };
 		D36AC79F435D21A488617AE6 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureClassifierTests.swift; sourceTree = "<group>"; };
 		DA4EE269B008D191C1D0C8EB /* BodyRig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyRig.swift; sourceTree = "<group>"; };
+		DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PosturePalette.swift; sourceTree = "<group>"; };
 		E189193AF7944AFBC48C797E /* MonitoringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringView.swift; sourceTree = "<group>"; };
 		E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEvent.swift; sourceTree = "<group>"; };
+		E28BC245DEF113D2E19BAECC /* PomodoroRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroRecord.swift; sourceTree = "<group>"; };
 		E34CF188A7BF03E96664807B /* MonitoringEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngine.swift; sourceTree = "<group>"; };
 		E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		F15B75C72C27B373EFE66CA1 /* PostureLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PostureLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngineTests.swift; sourceTree = "<group>"; };
 		F43C4382384E519C27CCCA4F /* PostureSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureSample.swift; sourceTree = "<group>"; };
 		F76A7ACBCAFF7D9C5AF1A422 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		FC66FD4FCBB2227E58111334 /* PomodoroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroView.swift; sourceTree = "<group>"; };
+		FE7551EC9FE93AF81703963F /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -105,6 +141,10 @@
 				2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */,
 				C15E12D9A4406B0415F7E219 /* HomeView.swift */,
 				E189193AF7944AFBC48C797E /* MonitoringView.swift */,
+				0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */,
+				FC66FD4FCBB2227E58111334 /* PomodoroView.swift */,
+				DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */,
+				FE7551EC9FE93AF81703963F /* ReportView.swift */,
 				A977A8B8E4D95F59F32EE642 /* RootView.swift */,
 				C0C1E4DBD06729CD331E2915 /* SettingsView.swift */,
 				C4C9CC48A2EE658C4F4F6E6C /* SummaryView.swift */,
@@ -119,6 +159,7 @@
 				047483D166B3818162835FE0 /* Debug */,
 				B7B9D5DB18AF75C1D19F8095 /* Domain */,
 				C5256C4656C76FB42E9F4A1F /* Input */,
+				9CF1BD72257F8BFAFDB4C45B /* Resources */,
 				957EC1281692DC84E0F531F2 /* Session */,
 				1190CAFB1687E27F9A717FE5 /* Views */,
 			);
@@ -134,10 +175,25 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		3E4B5F15C4E5342C19DEF51A /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */,
+				D2E5D6DEB21A3900506F32F1 /* desk_lean.wav */,
+				5F1CEF001EA36F12FB4E1B6F /* head_down.wav */,
+				69901B3D5C223A77CD1EBE1F /* head_tilt.wav */,
+				7E37082B9C3154D095C46336 /* near.wav */,
+				86098F7CD1ECFE6933A9E192 /* README.md */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
 		6F2E163F30CCEF5BACB20012 /* PostureLabTests */ = {
 			isa = PBXGroup;
 			children = (
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
+				CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */,
+				4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */,
 				D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */,
 				E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */,
 			);
@@ -162,12 +218,26 @@
 			path = Session;
 			sourceTree = "<group>";
 		};
+		9CF1BD72257F8BFAFDB4C45B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				3E4B5F15C4E5342C19DEF51A /* Audio */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		B7B9D5DB18AF75C1D19F8095 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
 				4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */,
 				E34CF188A7BF03E96664807B /* MonitoringEngine.swift */,
 				E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */,
+				621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */,
+				5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */,
+				E28BC245DEF113D2E19BAECC /* PomodoroRecord.swift */,
+				20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */,
+				811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */,
+				11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */,
 				BCBAEB16FED6503FA1D580B8 /* Pose.swift */,
 				AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */,
 				46C067C01A1CB047E992E32D /* PostureFeature.swift */,
@@ -201,6 +271,7 @@
 			buildConfigurationList = D19DA0C13E18E2656EC405CB /* Build configuration list for PBXNativeTarget "PostureLab" */;
 			buildPhases = (
 				355BE684303F80E9F2DE18F7 /* Sources */,
+				3822160B8AF92D4E7D82B5B3 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -269,6 +340,22 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		3822160B8AF92D4E7D82B5B3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FB901494F5245F4A74E4B11B /* README.md in Resources */,
+				C64D63145339A974597D094B /* chin_rest.wav in Resources */,
+				94E32C6F7AB36B7BBDF9CBC0 /* desk_lean.wav in Resources */,
+				8E1F39B8B7CB4297B4B69AF5 /* head_down.wav in Resources */,
+				0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */,
+				C76487803E453EB4019A121C /* near.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		355BE684303F80E9F2DE18F7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -286,12 +373,22 @@
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
 				98317745AAB9555DB00A6268 /* MonitoringView.swift in Sources */,
+				18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */,
+				B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */,
+				ADC57D874E9D8D6D20022C39 /* PomodoroRecord.swift in Sources */,
+				DCE243CB641E9DC1967F1A6F /* PomodoroSettings.swift in Sources */,
+				615F29CABD4A4D803D1CC61E /* PomodoroSettingsStore.swift in Sources */,
+				58AF263DF6D7220A3D95E4D0 /* PomodoroSettingsView.swift in Sources */,
+				B370D27AF06F42C9ED0FC4B9 /* PomodoroStore.swift in Sources */,
+				3971BFF07794B03E55994104 /* PomodoroView.swift in Sources */,
 				7CA32D1FA92C371E7CFF1B67 /* Pose.swift in Sources */,
 				3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */,
 				D73AAEA661B94D6FEFD2CB9A /* PostureFeature.swift in Sources */,
 				F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */,
+				4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */,
 				3F794173788051EE1734E791 /* PostureSample.swift in Sources */,
 				602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */,
+				170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */,
 				D811F2C467842F35D52B7BCF /* RootView.swift in Sources */,
 				A254F5561FB6D8D10A609078 /* SampleSource.swift in Sources */,
 				CC4DAA282E3BC3ECC1A20B22 /* Scenarios.swift in Sources */,
@@ -311,6 +408,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,
+				AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */,
+				C963277798D4975B291D662B /* PomodoroHistoryTests.swift in Sources */,
 				3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */,
 				944A76A1C208C2E25A3E0D4B /* SmokeTests.swift in Sources */,
 			);

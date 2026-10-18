@@ -514,6 +514,231 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(result.engine.summary.tooCloseCount, 0)
   }
 
+  /// Feeds one posed stretch into a running engine. The pause tests switch pose and face presence
+  /// mid-stream and inspect the engine while it is paused, so they cannot use `run`.
+  private func feed(_ samples: [PostureSample],
+                    into engine: inout MonitoringEngine) -> [MonitoringEvent] {
+    var events: [MonitoringEvent] = []
+    for sample in samples { events += engine.ingest(sample) }
+    return events
+  }
+
+  /// A pause is a hard gate, not a gap in wall-clock time. A chin rest reads the wrist-to-nose
+  /// distance off the body, so it keeps breaching with the face gone — the face-lost-but-body-present
+  /// case. Before the fix it escalated to level 2 while the child was away and fired at 17.0 s,
+  /// inside the pause.
+  func testPauseEmitsNoRemindersAndFreezesTheEpisode() throws {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    events += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)], as: .upright),
+                   into: &engine)
+    events += feed(posing([Segment(duration: 4, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 2),
+                   into: &engine)
+    // The face goes at 6.0 s and the pause starts at 9.0 s; the body keeps the chin rest breaching.
+    events += feed(posing([Segment(duration: 60, distanceCM: nil, pitchDeg: nil)],
+                          as: .chinRest,
+                          from: 6),
+                   into: &engine)
+
+    XCTAssertTrue(engine.isPaused)
+    XCTAssertEqual(engine.status, .noPerson)
+    // The face is gone for the 60 ticks from 6.0 s to the resume at 66.0 s, so the face-less
+    // stretch is exactly 60.0 s of absence; one tick is the finest this stream can resolve.
+    XCTAssertEqual(engine.summary.pausedSeconds, 60.0, accuracy: tick)
+    XCTAssertEqual(engine.summary.totalSeconds, 6.0, accuracy: 0.05)
+    XCTAssertEqual(engine.summary.goodSeconds, 2.0, accuracy: 0.05)
+
+    let pausedAt = try XCTUnwrap(events.compactMap { event -> TimeInterval? in
+      guard case .paused(let t) = event else { return nil }
+      return t
+    }.first)
+    XCTAssertEqual(pausedAt, 9.0, accuracy: 0.05)
+
+    // Level 1 landed at 7.0 s, before the pause; the level-2 wall falls inside it.
+    XCTAssertEqual(reminders(in: events).count, 1)
+    XCTAssertEqual(engine.episodeCount(for: .chinRest), 1)
+    XCTAssertEqual(engine.reminderCount(for: .chinRest), 1)
+
+    events += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 66),
+                   into: &engine)
+
+    XCTAssertFalse(engine.isPaused)
+    XCTAssertEqual(engine.status, .posture(.chinRest))
+    XCTAssertEqual(engine.summary.pausedSeconds, 60.0, accuracy: 0.05)
+
+    let fired = reminders(in: events)
+    XCTAssertEqual(fired.count, 1)
+    let gentle = try XCTUnwrap(fired.first)
+    XCTAssertEqual(gentle.kind, .chinRest)
+    XCTAssertEqual(gentle.level, .gentle)
+    XCTAssertEqual(gentle.t, 7.0, accuracy: 0.05)
+    XCTAssertEqual(gentle.breachSeconds, 5.0, accuracy: 0.05)
+    XCTAssertTrue(fired.allSatisfy { $0.t < 9.0 })
+    XCTAssertEqual(engine.reminderCount(for: .chinRest), 1)
+  }
+
+  /// Wall-clock arithmetic back-filled every wall a pause crossed: on resume `sample.t - breachStart`
+  /// jumped by the pause length and the waiting reminder fired on the first sample. The accumulator
+  /// only moves while the child is watched, so a wall crossed during a pause is still crossed at the
+  /// same rate afterwards, never on the resume sample itself.
+  func testPauseDoesNotBackfillTheFiveAndFifteenSecondWalls() throws {
+    // The 5 s wall: 4.9 s of breach when the pause starts. The wall is crossed while the child is
+    // away, but the first sample after the resume still reads 4.9 s, so level 1 lands one tick
+    // later rather than at once.
+    var fiveSecondEngine = MonitoringEngine(config: .forSensitivity(.medium),
+                                            baselineDistanceCM: 40,
+                                            baselinePitchDeg: 0)
+    var fiveSecondEvents: [MonitoringEvent] = []
+    fiveSecondEvents += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                                    as: .upright),
+                             into: &fiveSecondEngine)
+    fiveSecondEvents += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                                    as: .chinRest,
+                                    from: 2),
+                             into: &fiveSecondEngine)
+    fiveSecondEvents += feed(posing([Segment(duration: 60, distanceCM: nil, pitchDeg: nil)],
+                                    as: .chinRest,
+                                    from: 4),
+                             into: &fiveSecondEngine)
+    fiveSecondEvents += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                                    as: .chinRest,
+                                    from: 64),
+                             into: &fiveSecondEngine)
+
+    let fiveSecondFired = reminders(in: fiveSecondEvents)
+    XCTAssertEqual(fiveSecondFired.count, 1)
+    let fiveSecondGentle = try XCTUnwrap(fiveSecondFired.first)
+    XCTAssertEqual(fiveSecondGentle.kind, .chinRest)
+    XCTAssertEqual(fiveSecondGentle.level, .gentle)
+    XCTAssertEqual(fiveSecondGentle.t, 64.1, accuracy: 0.15)
+    // The accumulator only ever moves one tick at a time, so level 1 reads the 5 s wall plus the
+    // tick that carries it over. A clock that back-filled the 57 s pause would report 62.0 s here
+    // — the value in the tens this bound rejects — so the bound, not a literal, is what proves the
+    // paused interval never reached the accumulator.
+    XCTAssertGreaterThanOrEqual(fiveSecondGentle.breachSeconds, 5.0)
+    XCTAssertLessThan(fiveSecondGentle.breachSeconds, 6.0)
+    XCTAssertGreaterThan(fiveSecondGentle.t, 64.0)
+
+    // The 15 s wall: level 1 fired at 7.0 s and the pause crosses the level-2 wall. The accumulated
+    // breach is 6.9 s at the pause, so level 2 needs 8.1 s more and does not arrive inside this 2 s
+    // resume. The wall-clock version fired it on the first resumed sample.
+    var fifteenSecondEngine = MonitoringEngine(config: .forSensitivity(.medium),
+                                               baselineDistanceCM: 40,
+                                               baselinePitchDeg: 0)
+    var fifteenSecondEvents: [MonitoringEvent] = []
+    fifteenSecondEvents += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                                       as: .upright),
+                                into: &fifteenSecondEngine)
+    fifteenSecondEvents += feed(posing([Segment(duration: 4, distanceCM: 40, pitchDeg: 0)],
+                                       as: .chinRest,
+                                       from: 2),
+                                into: &fifteenSecondEngine)
+    fifteenSecondEvents += feed(posing([Segment(duration: 60, distanceCM: nil, pitchDeg: nil)],
+                                       as: .chinRest,
+                                       from: 6),
+                                into: &fifteenSecondEngine)
+    fifteenSecondEvents += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                                       as: .chinRest,
+                                       from: 66),
+                                into: &fifteenSecondEngine)
+
+    let fifteenSecondFired = reminders(in: fifteenSecondEvents)
+    XCTAssertEqual(fifteenSecondFired.map(\.level), [.gentle])
+    XCTAssertEqual(fifteenSecondFired.first?.t ?? -1, 7.0, accuracy: 0.05)
+    XCTAssertEqual(fifteenSecondEngine.reminderCount(for: .chinRest), 1)
+  }
+
+  /// Entering a pause stops the clock instead of resetting it: 4 s of breach, 60 s away, then one
+  /// more second of breach reaches level 1 — not the resume sample. `absencePauseDelay` is 0 so the
+  /// pause starts on the first face-less sample, keeping the frozen value exactly 4 s instead of
+  /// mixing in the shipped 3 s onset.
+  func testResumedBreachNeedsOneMoreSecondForLevelOne() throws {
+    var immediatePause = MonitoringEngine.Config.forSensitivity(.medium)
+    immediatePause.absencePauseDelay = 0
+    var engine = MonitoringEngine(config: immediatePause,
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    events += feed(posing([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)], as: .upright),
+                   into: &engine)
+    events += feed(posing([Segment(duration: 4.1, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 1),
+                   into: &engine)
+    // 4.0 s on the breach clock when the face leaves at 5.1 s.
+    events += feed(posing([Segment(duration: 60, distanceCM: nil, pitchDeg: nil)],
+                          as: .chinRest,
+                          from: 5.1),
+                   into: &engine)
+
+    XCTAssertTrue(engine.isPaused)
+    XCTAssertEqual(reminders(in: events).count, 0)
+    XCTAssertEqual(engine.episodeCount(for: .chinRest), 0)
+
+    events += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 65.1),
+                   into: &engine)
+
+    let fired = reminders(in: events)
+    XCTAssertEqual(fired.count, 1)
+    let gentle = try XCTUnwrap(fired.first)
+    XCTAssertEqual(gentle.kind, .chinRest)
+    XCTAssertEqual(gentle.level, .gentle)
+    XCTAssertEqual(gentle.t, 66.1, accuracy: 0.15)
+    XCTAssertEqual(gentle.breachSeconds, 5.0, accuracy: 0.06)
+    XCTAssertGreaterThan(gentle.t, 65.1)
+    XCTAssertEqual(engine.episodeCount(for: .chinRest), 1)
+    XCTAssertEqual(engine.reminderCount(for: .chinRest), 1)
+  }
+
+  /// AC21: a resume onto a still-breaching sample reports the posture, never `good`, and the pause
+  /// itself reports `no_person` even though the body is still in frame.
+  func testPausedStatusIsNoPersonAndAResumedBreachIsNeverGood() throws {
+    var immediatePause = MonitoringEngine.Config.forSensitivity(.medium)
+    immediatePause.absencePauseDelay = 0
+    var engine = MonitoringEngine(config: immediatePause,
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    events += feed(posing([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)], as: .upright),
+                   into: &engine)
+    events += feed(posing([Segment(duration: 4.1, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 1),
+                   into: &engine)
+    XCTAssertEqual(engine.status, .posture(.chinRest))
+
+    events += feed(posing([Segment(duration: 60, distanceCM: nil, pitchDeg: nil)],
+                          as: .chinRest,
+                          from: 5.1),
+                   into: &engine)
+    XCTAssertTrue(engine.isPaused)
+    XCTAssertEqual(engine.status, .noPerson)
+
+    events += feed(posing([Segment(duration: 2, distanceCM: 40, pitchDeg: 0)],
+                          as: .chinRest,
+                          from: 65.1),
+                   into: &engine)
+
+    XCTAssertFalse(engine.isPaused)
+    XCTAssertEqual(engine.status, .posture(.chinRest))
+    XCTAssertNotEqual(engine.status, .good)
+    XCTAssertTrue(events.contains { event in
+      guard case .statusChanged(let to, let t, _, _) = event else { return false }
+      return to == .posture(.chinRest) && abs(t - 65.1) < 0.05
+    })
+  }
+
   /// The episode counters count episodes (level 1 reached) while the remind counters count lines,
   /// so an episode that escalates to voice contributes 1 to the former and 2 to the latter.
   func testReminderCountsTrackEpisodesAndLines() {

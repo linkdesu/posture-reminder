@@ -154,6 +154,18 @@ def main():
     if not counts:
         print("AC13 FAIL: the session has no `features` lines, so there is nothing to check against")
         return 1
+
+    overlay_on = False
+    for line in open(args.session, encoding="utf-8"):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("event") == "view_mode" and row.get("overlay_on") is True:
+            overlay_on = True
+            break
+    if not overlay_on:
+        print("AC13 SKIP: the overlay was off for this session, so no red rows are expected")
+        return 0
     worst = max(counts)
 
     directory = os.path.join(os.path.dirname(os.path.abspath(args.session)), "screenshots")

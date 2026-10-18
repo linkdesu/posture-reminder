@@ -22,6 +22,17 @@ enum Scenario: String, CaseIterable, Equatable {
   case slouch
   case slouchMiss
 
+  // v0.4: the pause gate (AC20/AC21) and the two launch-argument screenshots (AC23/AC24).
+  // Names are referenced by the acceptance runner; do not rename.
+  case pauseWhileBreach
+  case pauseResumeStillNear
+  case avatarOffMonitoring
+  case debugOffMonitoring
+
+  // v0.5: the PRD's three-pomodoro day, which is what gives the parent's timeline something to
+  // show. Also referenced by the acceptance runner; do not rename.
+  case pomodoroDay
+
   var displayName: String {
     switch self {
     case .approach: return "靠近视距循环"
@@ -41,6 +52,11 @@ enum Scenario: String, CaseIterable, Equatable {
     case .headForwardMiss: return "头前伸差一点"
     case .slouch: return "持续驼背"
     case .slouchMiss: return "驼背差一点"
+    case .pauseWhileBreach: return "越阈中暂停"
+    case .pauseResumeStillNear: return "暂停后仍越阈"
+    case .avatarOffMonitoring: return "黑底监测"
+    case .debugOffMonitoring: return "无叠加监测"
+    case .pomodoroDay: return "一天三个番茄"
     }
   }
 
@@ -59,6 +75,10 @@ enum Scenario: String, CaseIterable, Equatable {
     case .chinRest, .chinRestMiss: return 30
     case .headForward, .headForwardMiss: return 26
     case .slouch, .slouchMiss: return 26
+    case .pauseWhileBreach, .pauseResumeStillNear: return 30
+    case .avatarOffMonitoring, .debugOffMonitoring: return 20
+    // Three shortened focuses with their breaks, at the runner's `-focusMinutes 1 -shortBreakMinutes 1`.
+    case .pomodoroDay: return Self.pomodoroDaySeconds
     }
   }
 
@@ -230,6 +250,71 @@ enum Scenario: String, CaseIterable, Equatable {
                     distanceCM: Self.baselineDistanceCM,
                     pitchDeg: Self.baselinePitchDeg,
                     rollDeg: 0)
+
+    // AC20: breach for 8 s, lose the face and body for 4 s (the pause gate trips at 3 s), then
+    // breach again. No reminder may fire during the pause, and none may be made up afterwards.
+    case .pauseWhileBreach:
+      if t >= 10 && t < 14 {
+        return Script(pose: .absent, distanceCM: nil, pitchDeg: nil, rollDeg: nil)
+      }
+      let near = t >= 2
+      return Script(pose: near ? .near : .upright,
+                    distanceCM: near ? Self.nearDistanceCM : Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
+
+    // AC21: the pause covers the whole early stretch, and the face is back inside the distance
+    // threshold on the very first frame after it, so the resumed status must not read `.good`.
+    case .pauseResumeStillNear:
+      if t >= 2 && t < 12 {
+        return Script(pose: .absent, distanceCM: nil, pitchDeg: nil, rollDeg: nil)
+      }
+      let near = t >= 12
+      return Script(pose: near ? .near : .upright,
+                    distanceCM: near ? Self.nearDistanceCM : Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
+
+    // AC23/AC24 screenshot replays: a plain seated-then-breaching run, with the overlay or the
+    // avatar switched off by the runner's launch argument.
+    case .avatarOffMonitoring, .debugOffMonitoring:
+      let near = t >= 2
+      return Script(pose: near ? .near : .upright,
+                    distanceCM: near ? Self.nearDistanceCM : Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
+
+    // The PRD's three-pomodoro day. The three focuses breach in three different ways — too close,
+    // then head down, then chin in hand — with good posture either side of each breach, so the
+    // parent's timeline shows a mix of colours instead of one. The breaks carry no posture at all:
+    // a break is not monitored by default, so there is nothing to say about it.
+    case .pomodoroDay:
+      let phase = t.truncatingRemainder(dividingBy: Self.pomodoroCycle)
+      let breaching = phase >= Self.pomodoroBreachStart && phase < Self.pomodoroBreachEnd
+      let focusNumber = min(3, Int(t / Self.pomodoroCycle) + 1)
+      guard phase < Self.pomodoroFocus, breaching else {
+        return Script(pose: .upright,
+                      distanceCM: Self.baselineDistanceCM,
+                      pitchDeg: Self.baselinePitchDeg,
+                      rollDeg: 0)
+      }
+      switch focusNumber {
+      case 1:
+        return Script(pose: .near,
+                      distanceCM: Self.nearDistanceCM,
+                      pitchDeg: Self.baselinePitchDeg,
+                      rollDeg: 0)
+      case 2:
+        return Script(pose: .headDown,
+                      distanceCM: Self.baselineDistanceCM,
+                      pitchDeg: Self.headDownPitchDeg,
+                      rollDeg: 0)
+      default:
+        return Script(pose: .chinRest,
+                      distanceCM: Self.baselineDistanceCM,
+                      pitchDeg: Self.baselinePitchDeg,
+                      rollDeg: 0)
+      }
     }
   }
 
@@ -244,6 +329,20 @@ enum Scenario: String, CaseIterable, Equatable {
 
   /// Length of one `longRun` cycle; the scenario repeats it on a 1800 second run.
   private static let longRunCycle: TimeInterval = 120
+
+  /// The `pomodoroDay` grid: a one-minute focus and a one-minute break, which is exactly what the
+  /// timer does when the runner passes `-focusMinutes 1 -shortBreakMinutes 1`. Three of them last six
+  /// minutes, so a whole three-pomodoro day fits in one round.
+  private static let pomodoroFocus: TimeInterval = 60
+  private static let pomodoroBreak: TimeInterval = 60
+  private static let pomodoroCycle: TimeInterval = pomodoroFocus + pomodoroBreak
+  private static let pomodoroDaySeconds: TimeInterval = 3 * pomodoroCycle
+
+  /// Where inside a focus the posture goes bad: fifteen seconds of good sitting, thirty of the
+  /// focus's posture — long enough to reach both reminder levels — then fifteen more seconds of good,
+  /// so every focus writes `good` segments as well as its own.
+  private static let pomodoroBreachStart: TimeInterval = 15
+  private static let pomodoroBreachEnd: TimeInterval = 45
 
   /// The tilt the scenario reports. `BodyRig` rotates the head and drops a shoulder by the same
   /// angles, so the reported roll and the posed skeleton agree. 22.5° and 15° are 1.5x the medium

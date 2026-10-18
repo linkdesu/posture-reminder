@@ -55,9 +55,13 @@ struct MonitoringEngine {
 
   private struct Episode {
     var inBreach = false
-    var breachStart: TimeInterval?
-    var gentleFiredAt: TimeInterval?
+    /// Breach seconds accumulated from `dt`; a pause freezes it, and the sample that opens an
+    /// episode contributes nothing.
+    var breachSeconds: Double = 0
+    /// `breachSeconds` when level 1 fired; nil means this episode has not spoken yet.
+    var gentleAtBreachSeconds: Double?
     var hasFiredVoice = false
+    /// Survives an episode reset, for the cooldown. Compared on the sample clock, not this one.
     var lastReminderAt: TimeInterval?
   }
 
@@ -81,6 +85,9 @@ struct MonitoringEngine {
   private var samplesSeen = 0
   private var previousSample: PostureSample?
   private var previousAssessment: PostureAssessment?
+  /// Whether the previous sample's interval started inside a pause. The dt ending at the first
+  /// sample after a resume must not reach the breach accumulators.
+  private var previousSampleWasPaused = false
   private var absentSince: TimeInterval?
   private var goodStreakSeconds: Double = 0
   private var lastEmittedStatus: PostureStatus = .good
@@ -129,8 +136,9 @@ struct MonitoringEngine {
       .sample(t: sample.t, distanceCM: sample.distanceCM, pitchDeg: sample.pitchDeg)
     ]
 
+    let dt = previousSample.map { sample.t - $0.t } ?? 0
     if let previous = previousSample, let priorAssessment = previousAssessment {
-      credit(previous, assessment: priorAssessment, dt: sample.t - previous.t)
+      credit(previous, assessment: priorAssessment, dt: dt)
     }
 
     // Reading time is credited per face tick, which is what the v2 pause rule and the QA
@@ -156,7 +164,11 @@ struct MonitoringEngine {
                                               thresholds: config.thresholds)
     latestAssessment = assessment
 
-    let next = status(for: assessment, personPresent: sample.facePresent || sample.bodyPresent)
+    // A pause is a hard gate: while it lasts the screen says "nobody there" even when the body is
+    // still in frame, because a face-less sample is not a measurement we trust.
+    let next = isPaused
+      ? .noPerson
+      : status(for: assessment, personPresent: sample.facePresent || sample.bodyPresent)
     if next != lastEmittedStatus {
       lastEmittedStatus = next
       status = next
@@ -166,7 +178,10 @@ struct MonitoringEngine {
                                    pitchDeg: sample.pitchDeg))
     }
 
-    events += advance(sample, assessment: assessment)
+    events += advance(sample,
+                      assessment: assessment,
+                      dt: dt,
+                      previousSampleWasPaused: previousSampleWasPaused)
 
     if samplesSeen % Self.samplesPerFeatureLine == 0 {
       events.append(.features(t: sample.t,
@@ -177,6 +192,7 @@ struct MonitoringEngine {
 
     previousSample = sample
     previousAssessment = assessment
+    previousSampleWasPaused = isPaused
     return events
   }
 
@@ -200,13 +216,21 @@ struct MonitoringEngine {
   /// Steps every posture's episode machine over this sample's breach flags and returns the
   /// reminders the child gets to hear.
   ///
+  /// A pause is a hard gate: while it lasts no episode moves at all, so a face-lost-but-body-present
+  /// breach can neither escalate nor fire behind it. Entering a pause does not reset an episode —
+  /// stopping the clock must not throw away how long the child had already been breaching.
+  ///
   /// Every breaching, speakeable posture emits its own reminder and keeps its own clock, so each
   /// kind is timed, logged and counted independently; the reminders of one tick are ordered by
   /// `PostureKind.priority` ascending. Keeping them from overlapping is the player's job, not the
   /// engine's. The experimental tier joins the stream only when `canSpeak` allows it, and never
   /// gets past level 1 (see `advanced`).
   private mutating func advance(_ sample: PostureSample,
-                                assessment: PostureAssessment) -> [MonitoringEvent] {
+                                assessment: PostureAssessment,
+                                dt: TimeInterval,
+                                previousSampleWasPaused: Bool) -> [MonitoringEvent] {
+    guard !isPaused else { return [] }
+
     let breached = Set(PostureKind.allCases.filter { assessment.breached[$0] == true })
 
     var events: [MonitoringEvent] = []
@@ -214,7 +238,9 @@ struct MonitoringEngine {
       let update = advanced(episodes[kind] ?? Episode(),
                             breached: breached.contains(kind),
                             kind: kind,
-                            sample: sample)
+                            sample: sample,
+                            dt: dt,
+                            canAccrue: !previousSampleWasPaused)
       episodes[kind] = update.episode
       guard update.firedGentle || update.reminder != nil else { continue }
       if update.firedGentle { episodeCounts[kind, default: 0] += 1 }
@@ -229,6 +255,17 @@ struct MonitoringEngine {
     summary.tooCloseRemindCount = reminderCounts[.near] ?? 0
     summary.headDownCount = episodeCounts[.headDown] ?? 0
     summary.headDownRemindCount = reminderCounts[.headDown] ?? 0
+
+    // The same counters reach the summary once per posture, so the log and the summary screen read
+    // one number each. Only `episodes`/`reminders` are written here: `credit` owns the seconds half
+    // of every entry, and merging field by field leaves what it accumulated in place.
+    for kind in PostureKind.allCases {
+      var stat = summary.postureStats[kind.rawValue]
+        ?? PostureStat(episodes: 0, reminders: 0, seconds: 0)
+      stat.episodes = episodeCounts[kind] ?? 0
+      stat.reminders = reminderCounts[kind] ?? 0
+      summary.postureStats[kind.rawValue] = stat
+    }
     return events
   }
 
@@ -242,9 +279,18 @@ struct MonitoringEngine {
 
   /// An interval belongs to the sample at its start; the sample without a face accrues paused time
   /// instead of reading time.
+  ///
+  /// Per-posture breach seconds follow the same interval rule and a pause stops them: `isPaused`
+  /// here is the state the interval started in, so an interval that opens inside a pause adds zero.
   private mutating func credit(_ sample: PostureSample,
                               assessment: PostureAssessment,
                               dt: TimeInterval) {
+    if !isPaused {
+      for kind in PostureKind.allCases where assessment.breached[kind] == true {
+        let zero = PostureStat(episodes: 0, reminders: 0, seconds: 0)
+        summary.postureStats[kind.rawValue, default: zero].seconds += dt
+      }
+    }
     guard sample.facePresent else {
       summary.pausedSeconds += dt
       return
@@ -271,44 +317,52 @@ struct MonitoringEngine {
   private func advanced(_ episode: Episode,
                         breached: Bool,
                         kind: PostureKind,
-                        sample: PostureSample) -> EpisodeUpdate {
+                        sample: PostureSample,
+                        dt: TimeInterval,
+                        canAccrue: Bool) -> EpisodeUpdate {
     var next = episode
 
     guard breached else {
+      // A good sample ends the episode; `breachSeconds` restarts with the next one.
       next.inBreach = false
-      next.breachStart = nil
-      next.gentleFiredAt = nil
+      next.breachSeconds = 0
+      next.gentleAtBreachSeconds = nil
       next.hasFiredVoice = false
       return EpisodeUpdate(episode: next, reminder: nil, firedGentle: false)
     }
 
-    if !next.inBreach {
+    if next.inBreach {
+      // The sample that opens an episode contributes nothing: `dt` belongs to the interval before
+      // it, which was not breaching. A paused interval (`canAccrue == false`) adds nothing either,
+      // so the clock resumes where it stopped instead of counting the pause.
+      if canAccrue { next.breachSeconds += dt }
+    } else {
       next.inBreach = true
-      next.breachStart = sample.t
-      next.gentleFiredAt = nil
+      next.breachSeconds = 0
+      next.gentleAtBreachSeconds = nil
       next.hasFiredVoice = false
     }
 
-    let breachStart = next.breachStart ?? sample.t
-
-    if next.gentleFiredAt == nil {
+    if next.gentleAtBreachSeconds == nil {
+      // The breach clock stops during a pause; the cooldown clock does not — it is sample time, so
+      // being away longer than `cooldown` lets the next reminder through as soon as it is needed.
       // Cooldown gates only an episode's first reminder, never the gentle-to-voice escalation:
       // the acceptance test requires voice at 15s of sustained breach, which a 30s gap between
       // the two levels would contradict.
       let cooledDown = next.lastReminderAt.map { sample.t - $0 >= config.cooldown } ?? true
-      if sample.t - breachStart >= config.gentleDelay, cooledDown {
-        next.gentleFiredAt = sample.t
+      if next.breachSeconds >= config.gentleDelay, cooledDown {
+        next.gentleAtBreachSeconds = next.breachSeconds
         next.lastReminderAt = sample.t
         let reminder = MonitoringEvent.reminder(kind: kind,
                                                 level: .gentle,
                                                 t: sample.t,
-                                                breachSeconds: sample.t - breachStart,
+                                                breachSeconds: next.breachSeconds,
                                                 distanceCM: sample.distanceCM,
                                                 pitchDeg: sample.pitchDeg)
         return EpisodeUpdate(episode: next, reminder: reminder, firedGentle: true)
       }
-    } else if !next.hasFiredVoice, let gentleFiredAt = next.gentleFiredAt,
-              sample.t - gentleFiredAt >= config.voiceDelay - config.gentleDelay {
+    } else if !next.hasFiredVoice, let gentleAt = next.gentleAtBreachSeconds,
+              next.breachSeconds - gentleAt >= config.voiceDelay - config.gentleDelay {
       // Level 2 exists only to speak. A kind without a voice line (the experimental tier) is
       // capped at level 1 here, so the tier never has to be special-cased a second time.
       guard kind.voiceLine != nil else {
@@ -320,7 +374,7 @@ struct MonitoringEngine {
       let reminder = MonitoringEvent.reminder(kind: kind,
                                               level: .voice,
                                               t: sample.t,
-                                              breachSeconds: sample.t - breachStart,
+                                              breachSeconds: next.breachSeconds,
                                               distanceCM: sample.distanceCM,
                                               pitchDeg: sample.pitchDeg)
       return EpisodeUpdate(episode: next, reminder: reminder, firedGentle: false)

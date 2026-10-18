@@ -1,0 +1,286 @@
+import Foundation
+import XCTest
+@testable import PostureLab
+
+/// The engine's only clock: runs of samples at the 10 Hz camera tick. Every `t` is an exact decimal
+/// tenth, so the expected remaining values are exact literals too.
+private func samples(_ count: Int, from start: TimeInterval = 0) -> [PostureSample] {
+  guard count > 0 else { return [] }
+  return (1...count).map { index in
+    PostureSample(t: start + Double(index) / 10, distanceCM: 40, pitchDeg: 15)
+  }
+}
+
+@discardableResult
+private func feed(_ engine: inout PomodoroEngine, _ stream: [PostureSample]) -> [PomodoroEvent] {
+  stream.flatMap { engine.ingest($0) }
+}
+
+final class PomodoroEngineTests: XCTestCase {
+  /// Epoch zero, so a record's epoch seconds are the same numbers as the sample clock and every
+  /// expectation below can be a literal.
+  private func makeEngine(_ settings: PomodoroSettings = PomodoroSettings()) -> PomodoroEngine {
+    PomodoroEngine(settings: settings, startedAt: Date(timeIntervalSince1970: 0))
+  }
+
+  // MARK: - Settings
+
+  func testSettingsDefaultsMatchTheNorthStarTable() {
+    let settings = PomodoroSettings()
+    XCTAssertEqual(settings.focusMinutes, 25)
+    XCTAssertEqual(settings.shortBreakMinutes, 5)
+    XCTAssertEqual(settings.longBreakMinutes, 15)
+    XCTAssertEqual(settings.focusPerLongBreak, 4)
+    XCTAssertEqual(settings.autoStartBreak, true)
+    XCTAssertEqual(settings.autoStartFocus, false)
+    XCTAssertEqual(settings.dailyGoal, 4)
+    XCTAssertEqual(settings.endSound, .soft)
+    XCTAssertEqual(settings.remindBeforeEnd, false)
+    XCTAssertEqual(settings.postureVoiceEnabled, true)
+    XCTAssertEqual(settings.postureVoiceVolume, 0.8)
+    XCTAssertEqual(settings.monitorDuringBreak, false)
+    XCTAssertEqual(settings.keepScreenAwake, true)
+  }
+
+  func testRangesDescribeEveryIntegerSetting() {
+    XCTAssertEqual(PomodoroSettings.ranges.count, 5)
+    XCTAssertEqual(PomodoroSettings.ranges["focusMinutes"], 5...60)
+    XCTAssertEqual(PomodoroSettings.ranges["shortBreakMinutes"], 1...15)
+    XCTAssertEqual(PomodoroSettings.ranges["longBreakMinutes"], 5...30)
+    XCTAssertEqual(PomodoroSettings.ranges["focusPerLongBreak"], 2...8)
+    XCTAssertEqual(PomodoroSettings.ranges["dailyGoal"], 1...12)
+  }
+
+  func testClampedPullsEverySettingBackIntoRange() {
+    var settings = PomodoroSettings()
+    XCTAssertEqual(settings.clamped(), settings)
+
+    settings.focusMinutes = 63
+    settings.shortBreakMinutes = 0
+    settings.longBreakMinutes = 45
+    settings.focusPerLongBreak = 1
+    settings.dailyGoal = 20
+    settings.postureVoiceVolume = 1.7
+
+    let clamped = settings.clamped()
+    XCTAssertEqual(clamped.focusMinutes, 60)
+    XCTAssertEqual(clamped.shortBreakMinutes, 1)
+    XCTAssertEqual(clamped.longBreakMinutes, 30)
+    XCTAssertEqual(clamped.focusPerLongBreak, 2)
+    XCTAssertEqual(clamped.dailyGoal, 12)
+    XCTAssertEqual(clamped.postureVoiceVolume, 1)
+
+    settings.postureVoiceVolume = -0.3
+    XCTAssertEqual(settings.clamped().postureVoiceVolume, 0)
+  }
+
+  func testClampedSnapsTheFocusLengthOntoItsFiveMinuteStep() {
+    var settings = PomodoroSettings()
+
+    settings.focusMinutes = 7
+    XCTAssertEqual(settings.clamped().focusMinutes, 5)
+
+    settings.focusMinutes = 58
+    XCTAssertEqual(settings.clamped().focusMinutes, 60)
+
+    settings.focusMinutes = 32
+    XCTAssertEqual(settings.clamped().focusMinutes, 30)
+
+    settings.focusMinutes = 1
+    XCTAssertEqual(settings.clamped().focusMinutes, 5)
+  }
+
+  // MARK: - Focus
+
+  func testFocusCompletesAtThePlannedTimeAndAShortBreakFollows() {
+    var engine = makeEngine()
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.isRunning, false)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(engine.focusIndex, 1)
+
+    XCTAssertEqual(engine.command(.start), [.phaseChanged(to: .focus, index: 1)])
+    XCTAssertEqual(engine.isRunning, true)
+
+    // 24:59 of samples: the countdown follows the stream and nothing else.
+    feed(&engine, samples(14_990))
+    XCTAssertEqual(engine.remainingSeconds, 1)
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.record.focusedSeconds, 1499)
+
+    let events = feed(&engine, samples(10, from: 1499))
+
+    XCTAssertEqual(events.count, 2)
+    guard case .completed(let record) = events[0] else {
+      return XCTFail("expected a completed pomodoro")
+    }
+    XCTAssertEqual(record.outcome, .completed)
+    XCTAssertEqual(record.startedAt, 0)
+    XCTAssertEqual(record.endedAt, 1500)
+    XCTAssertEqual(record.plannedSeconds, 1500)
+    XCTAssertEqual(record.focusedSeconds, 1500)
+    XCTAssertEqual(record.pausedSeconds, 0)
+    XCTAssertEqual(record.skippedBreak, false)
+    XCTAssertEqual(record.focusIndex, 1)
+
+    XCTAssertEqual(events[1], .phaseChanged(to: .shortBreak, index: 1))
+    XCTAssertEqual(engine.phase, .shortBreak)
+    XCTAssertEqual(engine.remainingSeconds, 300)
+    XCTAssertEqual(engine.isRunning, true)
+  }
+
+  func testShortBreakEndsIntoAWaitingNextFocus() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(15_000))
+    XCTAssertEqual(engine.phase, .shortBreak)
+
+    // The default `autoStartFocus` is off: the break ends and the next focus waits for `.start`.
+    let events = feed(&engine, samples(3_000, from: 1500))
+    XCTAssertEqual(events, [.phaseChanged(to: .focus, index: 2)])
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.focusIndex, 2)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(engine.isRunning, false)
+
+    // A waiting focus does not spend time just because samples keep arriving.
+    XCTAssertEqual(feed(&engine, samples(600, from: 1800)), [])
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+  }
+
+  func testFourthFocusProducesALongBreak() {
+    var settings = PomodoroSettings()
+    settings.focusMinutes = 1
+    settings.shortBreakMinutes = 1
+    settings.longBreakMinutes = 1
+    var engine = makeEngine(settings)
+    _ = engine.command(.start)
+
+    var clock: TimeInterval = 0
+    var last: [PomodoroEvent] = []
+    for index in 1...4 {
+      last = feed(&engine, samples(600, from: clock))
+      clock += 60
+      guard index < 4 else { break }
+
+      XCTAssertEqual(last.last, .phaseChanged(to: .shortBreak, index: index))
+      feed(&engine, samples(600, from: clock))
+      clock += 60
+      XCTAssertEqual(engine.phase, .focus)
+      XCTAssertEqual(engine.isRunning, false)
+      _ = engine.command(.start)
+    }
+
+    XCTAssertEqual(last.last, .phaseChanged(to: .longBreak, index: 4))
+    XCTAssertEqual(engine.phase, .longBreak)
+    XCTAssertEqual(engine.record.focusIndex, 4)
+    XCTAssertEqual(engine.remainingSeconds, 60)
+  }
+
+  func testAutoStartBreakOffLeavesTheBreakWaiting() {
+    var settings = PomodoroSettings()
+    settings.autoStartBreak = false
+    var engine = makeEngine(settings)
+    _ = engine.command(.start)
+
+    let events = feed(&engine, samples(15_000))
+    XCTAssertEqual(events.count, 2)
+    XCTAssertEqual(engine.phase, .shortBreak)
+    XCTAssertEqual(engine.isRunning, false)
+    XCTAssertEqual(engine.remainingSeconds, 300)
+
+    // Nothing ticks until the break is started.
+    XCTAssertEqual(feed(&engine, samples(600, from: 1500)), [])
+    XCTAssertEqual(engine.remainingSeconds, 300)
+  }
+
+  // MARK: - Pause
+
+  func testPauseInsideAFocusDoesNotInflateFocusedSeconds() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(6_000))
+    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+
+    _ = engine.command(.pause)
+    XCTAssertEqual(engine.isRunning, false)
+    feed(&engine, samples(1_200, from: 600))
+    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.record.pausedSeconds, 120)
+
+    _ = engine.command(.resume)
+    let events = feed(&engine, samples(9_000, from: 720))
+
+    XCTAssertEqual(events.last, .phaseChanged(to: .shortBreak, index: 1))
+    guard case .completed(let record) = events.first else {
+      return XCTFail("expected a completed pomodoro")
+    }
+    XCTAssertEqual(record.focusedSeconds, 1500)
+    XCTAssertEqual(record.pausedSeconds, 120)
+    XCTAssertEqual(record.endedAt, 1620)
+  }
+
+  // MARK: - Ending early
+
+  func testAbandonReportsTheActualFocusedTime() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(3_000))
+
+    let events = engine.command(.abandon)
+    XCTAssertEqual(events.count, 1)
+    guard case .abandoned(let record) = events[0] else {
+      return XCTFail("expected an abandoned pomodoro")
+    }
+    XCTAssertEqual(record.outcome, .abandoned)
+    XCTAssertEqual(record.startedAt, 0)
+    XCTAssertEqual(record.endedAt, 300)
+    XCTAssertEqual(record.plannedSeconds, 1500)
+    XCTAssertEqual(record.focusedSeconds, 300)
+    XCTAssertEqual(record.pausedSeconds, 0)
+    XCTAssertEqual(record.skippedBreak, false)
+    XCTAssertEqual(record.focusIndex, 1)
+    // The record carries the evidence the aggregation side attaches; the engine itself owns none.
+    XCTAssertEqual(record.postureSegments, [])
+    XCTAssertEqual(record.reminderCounts, [:])
+
+    XCTAssertEqual(engine.isRunning, false)
+    XCTAssertEqual(engine.remainingSeconds, 1200)
+  }
+
+  func testSkippingABreakIsRecordedAndMovesToTheNextFocus() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(15_000))
+    XCTAssertEqual(engine.phase, .shortBreak)
+    XCTAssertEqual(engine.isRunning, true)
+
+    let events = engine.command(.skipBreak)
+    XCTAssertEqual(events, [.breakSkipped(from: .shortBreak), .phaseChanged(to: .focus, index: 2)])
+    XCTAssertEqual(engine.record.skippedBreak, true)
+    XCTAssertEqual(engine.record.focusIndex, 1)
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.focusIndex, 2)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(engine.isRunning, false)
+  }
+
+  func testFinishAbandonsTheFocusInFlight() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(1_000))
+
+    let events = engine.finish(at: 100)
+    XCTAssertEqual(events.count, 2)
+    guard case .abandoned(let record) = events[0] else {
+      return XCTFail("expected an abandoned pomodoro")
+    }
+    XCTAssertEqual(record.outcome, .abandoned)
+    XCTAssertEqual(record.endedAt, 100)
+    XCTAssertEqual(record.focusedSeconds, 100)
+    XCTAssertEqual(events[1], .finishedAll)
+    XCTAssertEqual(engine.isRunning, false)
+  }
+}
