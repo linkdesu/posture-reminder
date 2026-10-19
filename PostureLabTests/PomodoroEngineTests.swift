@@ -11,6 +11,20 @@ private func samples(_ count: Int, from start: TimeInterval = 0) -> [PostureSamp
   }
 }
 
+/// The same tick with no face in frame: what the camera reports for a child who has left the chair.
+private func absentSamples(_ count: Int, from start: TimeInterval = 0) -> [PostureSample] {
+  guard count > 0 else { return [] }
+  return (1...count).map { index in
+    PostureSample(t: start + Double(index) / 10, distanceCM: nil, pitchDeg: nil)
+  }
+}
+
+/// The one-minute warnings in a batch, so a test can say "once" or "never" without knowing the rest
+/// of the events.
+private func endingSoonEvents(_ events: [PomodoroEvent]) -> [PomodoroEvent] {
+  events.filter { if case .endingSoon = $0 { return true } else { return false } }
+}
+
 @discardableResult
 private func feed(_ engine: inout PomodoroEngine, _ stream: [PostureSample]) -> [PomodoroEvent] {
   stream.flatMap { engine.ingest($0) }
@@ -222,6 +236,137 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(record.endedAt, 1620)
   }
 
+  // MARK: - Absence
+
+  func testAbsenceSuspendsTheFocusAndItsSecondsAreNotFocusTime() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(6_000))
+    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.isPausedByAbsence, false)
+
+    // The face is gone from the 600.1 tick and back at 660.0: sixty seconds nobody was in the chair.
+    XCTAssertEqual(feed(&engine, absentSamples(599, from: 600)), [])
+    XCTAssertEqual(engine.isRunning, true)          // suspended, not stopped
+    XCTAssertEqual(engine.isPausedByAbsence, true)
+    XCTAssertEqual(engine.remainingSeconds, 900)    // the countdown holds where it stood
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.record.pausedSeconds, 0)  // an absence is not a pause
+
+    feed(&engine, samples(11, from: 659.9))         // back at 660.0, still there at 661.0
+    XCTAssertEqual(engine.isPausedByAbsence, false)
+    XCTAssertEqual(engine.remainingSeconds, 899)
+    XCTAssertEqual(engine.record.focusedSeconds, 601)  // 661 s of clock, 60 s of it away
+    XCTAssertEqual(engine.record.pausedSeconds, 0)
+    XCTAssertEqual(engine.phase, .focus)
+  }
+
+  func testAnAbsenceUnderTheLimitDoesNotInterruptTheFocus() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(6_000))
+
+    // 299 s away, all of it suspended and none of it focus time.
+    XCTAssertEqual(feed(&engine, absentSamples(2_990, from: 600)), [])
+    XCTAssertEqual(engine.isPausedByAbsence, true)
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.isRunning, true)
+    XCTAssertNil(engine.record.endedAt)
+    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+
+    // Back at 899.1: the countdown picks up where it stopped, with the whole ten minutes left.
+    XCTAssertEqual(feed(&engine, samples(1, from: 899)), [])
+    XCTAssertEqual(engine.isPausedByAbsence, false)
+    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.phase, .focus)
+  }
+
+  func testAnAbsencePastTheLimitInterruptsTheFocusWithoutABreak() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(6_000))
+
+    // Exactly 300 s away is still the same, suspended focus ...
+    XCTAssertEqual(feed(&engine, absentSamples(3_000, from: 600)), [])
+    XCTAssertEqual(engine.isRunning, true)
+    XCTAssertEqual(engine.remainingSeconds, 900)
+
+    // ... and the tick that makes it 300.1 s ends it.
+    let events = feed(&engine, absentSamples(10, from: 900))
+    XCTAssertEqual(events.count, 1)
+    guard case .interrupted(let record) = events[0] else {
+      return XCTFail("expected an interrupted pomodoro")
+    }
+    XCTAssertEqual(record.outcome, .interrupted)
+    XCTAssertEqual(record.startedAt, 0)
+    // "more than 300 s" is strict, so on a 10 Hz stream the absence that began at 600.1 s trips at
+    // the first sample past 900.1 s, which is 900.2.
+    XCTAssertEqual(record.endedAt, 900.2)
+    XCTAssertEqual(record.plannedSeconds, 1500)
+    XCTAssertEqual(record.focusedSeconds, 600)      // ten minutes in, and never the absence
+    XCTAssertEqual(record.pausedSeconds, 0)
+    XCTAssertEqual(record.skippedBreak, false)
+    XCTAssertEqual(record.focusIndex, 1)
+
+    // B5: no break, nothing auto-starts, and the child comes back to a full, still countdown.
+    XCTAssertEqual(engine.phase, .focus)
+    XCTAssertEqual(engine.isRunning, false)
+    XCTAssertEqual(engine.isPausedByAbsence, false)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(feed(&engine, absentSamples(100, from: 901)), [])
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+  }
+
+  // MARK: - The one-minute warning
+
+  func testEndingSoonFiresOnceAtSixtySecondsOnlyWhenTheSettingIsOn() {
+    var settings = PomodoroSettings()
+    settings.remindBeforeEnd = true
+    var engine = makeEngine(settings)
+    _ = engine.command(.start)
+    XCTAssertEqual(feed(&engine, samples(14_390)), [])
+    XCTAssertEqual(engine.remainingSeconds, 61)
+
+    var events = feed(&engine, samples(10, from: 1439))
+    XCTAssertEqual(events, [.endingSoon(remainingSeconds: 60)])
+    XCTAssertEqual(engine.remainingSeconds, 60)
+
+    // The rest of the last minute stays quiet, and the focus still completes on time.
+    events = feed(&engine, samples(600, from: 1440))
+    XCTAssertEqual(endingSoonEvents(events), [])
+    XCTAssertEqual(events.count, 2)
+    guard case .completed(let record) = events[0] else {
+      return XCTFail("expected a completed pomodoro")
+    }
+    XCTAssertEqual(record.endedAt, 1500)
+    XCTAssertEqual(events[1], .phaseChanged(to: .shortBreak, index: 1))
+
+    // With the setting off the same run says nothing about the last minute.
+    var quiet = makeEngine()
+    XCTAssertEqual(quiet.command(.start), [.phaseChanged(to: .focus, index: 1)])
+    events = feed(&quiet, samples(15_000))
+    XCTAssertEqual(endingSoonEvents(events), [])
+    XCTAssertEqual(events.count, 2)
+  }
+
+  func testTogglingRemindBeforeEndMidFocusArmsTheWarning() {
+    var engine = makeEngine()                      // the setting is off at the start
+    _ = engine.command(.start)
+    XCTAssertEqual(feed(&engine, samples(14_390)), [])
+    XCTAssertEqual(engine.remainingSeconds, 61)
+
+    // The parent flips it on during the focus: the warning belongs to this focus, not the next one.
+    var settings = PomodoroSettings()
+    settings.remindBeforeEnd = true
+    engine.update(settings: settings)
+
+    let events = feed(&engine, samples(10, from: 1439))
+    XCTAssertEqual(events, [.endingSoon(remainingSeconds: 60)])
+  }
+
   // MARK: - Ending early
 
   func testAbandonReportsTheActualFocusedTime() {
@@ -247,7 +392,31 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(record.reminderCounts, [:])
 
     XCTAssertEqual(engine.isRunning, false)
+    // B3: the abandoned countdown is spent, so what is left is the whole focus again.
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+  }
+
+  func testAbandonRearmsTheCountdownToTheFullFocus() {
+    var engine = makeEngine()
+    _ = engine.command(.start)
+    feed(&engine, samples(3_000))
     XCTAssertEqual(engine.remainingSeconds, 1200)
+
+    _ = engine.command(.abandon)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(engine.isRunning, false)
+    XCTAssertEqual(engine.phase, .focus)
+
+    // B3: the next start runs a whole focus, not the tail of the abandoned one.
+    _ = engine.command(.start)
+    XCTAssertEqual(engine.remainingSeconds, 1500)
+    XCTAssertEqual(engine.isRunning, true)
+    feed(&engine, samples(10, from: 300))
+    XCTAssertEqual(engine.remainingSeconds, 1499)
+    XCTAssertEqual(engine.record.plannedSeconds, 1500)
+    XCTAssertEqual(engine.record.focusedSeconds, 1)
+    XCTAssertEqual(engine.record.startedAt, 300)
+    XCTAssertEqual(engine.record.focusIndex, 1)
   }
 
   func testSkippingABreakIsRecordedAndMovesToTheNextFocus() {

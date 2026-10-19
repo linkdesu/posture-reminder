@@ -13,6 +13,9 @@ enum Scenario: String, CaseIterable, Equatable {
   // v0.3: one positive and one "just short of the threshold" counter-example for each new posture.
   case headTilt
   case headTiltMiss
+  // v0.5.1: the shoulder line split out of head tilt, so each can breach on its own (AC11).
+  case shoulderTilt
+  case shoulderTiltMiss
   case deskLean
   case deskLeanMiss
   case chinRest
@@ -44,6 +47,8 @@ enum Scenario: String, CaseIterable, Equatable {
     case .longRun: return "30 分钟长跑"
     case .headTilt: return "持续歪头"
     case .headTiltMiss: return "歪头差一点"
+    case .shoulderTilt: return "持续高低肩"
+    case .shoulderTiltMiss: return "高低肩差一点"
     case .deskLean: return "趴在桌上"
     case .deskLeanMiss: return "趴桌差一点"
     case .chinRest: return "持续托腮"
@@ -71,6 +76,7 @@ enum Scenario: String, CaseIterable, Equatable {
     case .cooldown: return 45
     case .longRun: return 1800
     case .headTilt, .headTiltMiss: return 26
+    case .shoulderTilt, .shoulderTiltMiss: return 26
     case .deskLean, .deskLeanMiss: return 26
     case .chinRest, .chinRestMiss: return 30
     case .headForward, .headForwardMiss: return 26
@@ -198,6 +204,22 @@ enum Scenario: String, CaseIterable, Equatable {
                     distanceCM: Self.baselineDistanceCM,
                     pitchDeg: Self.baselinePitchDeg,
                     rollDeg: tilted ? Self.nearMissHeadTiltRollDeg : 0)
+
+    // The shoulder-line twin: same two-second upright lead-in, then the rig tilts the shoulders and
+    // leaves the head square, so nothing but `shoulderTilt` reads over its threshold. The tilt angle
+    // lives in `BodyRig` (1.5x / 0.8x the medium shoulder threshold) because the classifier reads it
+    // off the joints, not off a reported sample field.
+    case .shoulderTilt:
+      return Script(pose: t >= 2 ? .shoulderTilt : .upright,
+                    distanceCM: Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
+
+    case .shoulderTiltMiss:
+      return Script(pose: t >= 2 ? .nearMissShoulderTilt : .upright,
+                    distanceCM: Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
 
     case .deskLean:
       // Face down on the desk, still in frame at 18 cm; the deep pitch is what carries the desk-lean
@@ -344,9 +366,10 @@ enum Scenario: String, CaseIterable, Equatable {
   private static let pomodoroBreachStart: TimeInterval = 15
   private static let pomodoroBreachEnd: TimeInterval = 45
 
-  /// The tilt the scenario reports. `BodyRig` rotates the head and drops a shoulder by the same
-  /// angles, so the reported roll and the posed skeleton agree. 22.5° and 15° are 1.5x the medium
-  /// roll and shoulder thresholds, 12° and 8° are 0.8x of them.
+  /// The tilt the scenario reports. `BodyRig` rotates the head group by the same angle, so the
+  /// reported roll and the posed skeleton agree. 22.5° and 12° are 1.5x and 0.8x the medium roll
+  /// threshold. The shoulder-line angles are not reported: the classifier reads the shoulder tilt off
+  /// the posed joints, so they are pinned in `BodyRig` instead.
   private static let headTiltRollDeg: Double = 22.5
   private static let nearMissHeadTiltRollDeg: Double = 12
 

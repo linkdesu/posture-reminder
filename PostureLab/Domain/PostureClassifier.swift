@@ -55,7 +55,8 @@ enum PostureClassifier {
     var breached: [PostureKind: Bool] = [:]
     breached[.near] = over(.distance)
     breached[.headDown] = over(.headPitch)
-    breached[.headTilt] = over(.headRoll) || over(.shoulderTilt)
+    breached[.headTilt] = over(.headRoll)
+    breached[.shoulderTilt] = over(.shoulderTilt)
     // `bodyPresent` gates the whole rule and not just the face-lost branch: without it a child who got
     // up and walked away would be read as leaning on the desk.
     let deepDip = pitchDrop.map { $0 > 2 * thresholds.pitchDeg } ?? false
@@ -89,7 +90,8 @@ enum PostureClassifier {
     case .headForward: return [.headForward]
     case .slouch: return [.slouch]
     case .headDown: return [.headPitch]
-    case .headTilt: return [.headRoll, .shoulderTilt]
+    case .headTilt: return [.headRoll]
+    case .shoulderTilt: return [.shoulderTilt]
     case .chinRest: return [.handToFace]
     }
   }

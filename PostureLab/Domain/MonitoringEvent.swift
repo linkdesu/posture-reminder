@@ -13,10 +13,23 @@ enum MonitoringEvent: Equatable {
   case features(t: TimeInterval, readings: [FeatureReading], highlighted: PostureFeature?)
   /// Layer state, written when the avatar/black-board mode or either overlay switch changes.
   case viewMode(mode: String, overlay: Bool, avatar: Bool)
+  /// The pomodoro countdown, once per second of the sample clock while a phase runs. A countdown
+  /// that keeps moving is only provable as a series of lines, but one per sample (10 Hz) would bury
+  /// the log, so a tick is written when the sample clock crosses into a new whole second.
+  case pomodoroTick(remainingSeconds: Double, phase: String)
   /// Speech watchdog: the player stopped awaiting synthesis for too long. The speaker has no
   /// session clock, so these carry no `t`.
   case speechTimeout(kind: PostureKind, level: ReminderLevel)
   case speechUnavailable(kind: PostureKind)
+  /// A voice clip reported that it started playing. Written when the player actually starts the
+  /// clip, not when it is queued, so the line never claims a sound the device did not make; an asset
+  /// that is missing or will not play reports `speechUnavailable` instead.
+  case speechPlayed(kind: PostureKind, level: ReminderLevel)
+  /// A pomodoro cue — the one-minute warning or an end sound — reported that it started playing.
+  /// Written on the same rule as `speechPlayed`: only once playback really began, so the line never
+  /// claims a sound the device did not make. The cue's name rides in the log's existing `message`
+  /// key rather than a key of its own.
+  case cuePlayed(cue: String)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
   case sessionEnded(summary: SessionSummary)
@@ -73,6 +86,8 @@ struct LogRecord: Codable {
     case overlay_on
     case avatar_on
     case posture_stats
+    case remaining_seconds
+    case phase
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -120,6 +135,10 @@ struct LogRecord: Codable {
   /// Per-posture counts and accumulated breach seconds, on the `session_ended` line; keyed by
   /// `PostureKind.rawValue`.
   var posture_stats: [String: PostureStat]?
+  /// Seconds left in the pomodoro phase, on a `pomodoro_tick` line.
+  var remaining_seconds: Double?
+  /// The pomodoro phase rawValue (`focus` / `shortBreak` / `longBreak`), on a `pomodoro_tick` line.
+  var phase: String?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -162,6 +181,8 @@ struct LogRecord: Codable {
     try container.encode(overlay_on, forKey: .overlay_on)
     try container.encode(avatar_on, forKey: .avatar_on)
     try container.encode(posture_stats, forKey: .posture_stats)
+    try container.encode(remaining_seconds, forKey: .remaining_seconds)
+    try container.encode(phase, forKey: .phase)
   }
 }
 
@@ -231,6 +252,11 @@ extension MonitoringEvent {
       record.overlay_on = overlay
       record.avatar_on = avatar
 
+    case .pomodoroTick(let remainingSeconds, let phase):
+      record.event = "pomodoro_tick"
+      record.remaining_seconds = remainingSeconds
+      record.phase = phase
+
     case .reminder(let kind, let level, let t, let breachSeconds, let distanceCM, let pitchDeg):
       record.event = "reminder"
       record.t = t
@@ -248,6 +274,15 @@ extension MonitoringEvent {
     case .speechUnavailable(let kind):
       record.event = "speech_unavailable"
       record.alert_type = kind.rawValue
+
+    case .speechPlayed(let kind, let level):
+      record.event = "speech_played"
+      record.alert_type = kind.rawValue
+      record.level = level.rawValue
+
+    case .cuePlayed(let cue):
+      record.event = "cue_played"
+      record.message = cue
 
     case .paused(let t):
       record.event = "paused"

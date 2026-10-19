@@ -42,6 +42,14 @@ struct PostureLabApp: App {
     if let longBreak = PostureLabApp.intArgument("longBreakMinutes", from: defaults) {
       stagedPomodoro.longBreakMinutes = longBreak
     }
+    // `-voice 0|1` and `-endSound soft|chime|none` let the acceptance flip the two audio switches
+    // between runs without tapping through the settings screen.
+    if let voice = PostureLabApp.boolOverride("voice", from: defaults) {
+      stagedPomodoro.postureVoiceEnabled = voice
+    }
+    if let endSound = PostureLabApp.endSound(from: defaults) {
+      stagedPomodoro.endSound = endSound
+    }
     pomodoroSettings.settings = stagedPomodoro
     settings.suppressPersistence = false
     pomodoroSettings.suppressPersistence = false
@@ -123,6 +131,11 @@ struct PostureLabApp: App {
 
   private static func sensitivity(from defaults: UserDefaults) -> Sensitivity? {
     defaults.string(forKey: "sensitivity").flatMap { Sensitivity(rawValue: $0) }
+  }
+
+  /// `-endSound soft|chime|none`: which cue ends a focus, nil when the flag was not given.
+  private static func endSound(from defaults: UserDefaults) -> EndSound? {
+    defaults.string(forKey: "endSound").flatMap { EndSound(rawValue: $0) }
   }
 
   /// `-pomodoro 1`, or a report launch argument: the report is only reachable in pomodoro mode, so

@@ -39,10 +39,11 @@ POSTURE_KINDS = [
     "slouch",
     "head_down",
     "head_tilt",
+    "shoulder_tilt",
     "chin_rest",
 ]
-# `PostureSegment.kind`: the seven postures plus the two states.
-SEGMENT_KINDS = POSTURE_KINDS + ["good", "no_person"]
+# `PostureSegment.kind`: the eight postures, the two states, and the pause band (B2).
+SEGMENT_KINDS = POSTURE_KINDS + ["good", "no_person", "paused"]
 
 # A completed focus credits the whole plan by definition, so `focusedSeconds` is expected to land
 # on `plannedSeconds`; the slack only covers float arithmetic.

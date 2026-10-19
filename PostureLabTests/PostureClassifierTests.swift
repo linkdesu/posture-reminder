@@ -70,14 +70,14 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertEqual(uprightBaseline.neckToRoot, 0.20, accuracy: 0.0001)
   }
 
-  /// A clean upright frame: all eight features reported in `allCases` order, all seven kinds
+  /// A clean upright frame: all eight features reported in `allCases` order, all eight kinds
   /// reported as not breached, nothing to highlight.
   func testUprightFrameBreachesNothing() {
     let assessment = assess(rigged(.upright))
 
     XCTAssertEqual(assessment.readings.count, 8)
     XCTAssertEqual(assessment.readings.map(\.feature), PostureFeature.allCases)
-    XCTAssertEqual(assessment.breached.count, 7)
+    XCTAssertEqual(assessment.breached.count, PostureKind.allCases.count)
     for kind in PostureKind.allCases {
       XCTAssertEqual(assessment.breached[kind], false, "\(kind) breached an upright frame")
     }
@@ -122,35 +122,52 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertEqual(smallPitch.severity, 0.8, accuracy: 0.0001)
   }
 
-  /// Head tilt has two signals: the head roll the scenario reports, and the shoulder line the rig
-  /// rotates. Either one is enough.
-  func testHeadTiltBreachesOnHeadRollOrShoulderLine() {
-    let roll = assess(rigged(.headTilt, rollDeg: 22.5))
-    XCTAssertEqual(roll.breached[.headTilt], true)
-    let headRoll = reading(roll, .headRoll)
+  /// Head tilt reads the head roll alone. The shoulder line is a posture of its own now, so a
+  /// tilted head must never report `shoulderTilt` (AC11).
+  func testHeadTiltBreachesOnHeadRollAlone() {
+    let breach = assess(rigged(.headTilt, rollDeg: 22.5))
+    XCTAssertEqual(breach.breached[.headTilt], true)
+    XCTAssertEqual(breach.breached[.shoulderTilt], false)
+    let headRoll = reading(breach, .headRoll)
     XCTAssertEqual(headRoll.value, 22.5, accuracy: 0.0001)
     XCTAssertEqual(headRoll.threshold, 15.0, accuracy: 0.0001)
     XCTAssertTrue(headRoll.isOverThreshold)
     XCTAssertEqual(headRoll.severity, 1.0, accuracy: 0.0001)
+    XCTAssertFalse(reading(breach, .shoulderTilt).isOverThreshold)
 
-    let rollMiss = assess(rigged(.nearMissHeadTilt, rollDeg: 12))
-    XCTAssertEqual(rollMiss.breached[.headTilt], false)
-    let smallRoll = reading(rollMiss, .headRoll)
+    let miss = assess(rigged(.nearMissHeadTilt, rollDeg: 12))
+    XCTAssertEqual(miss.breached[.headTilt], false)
+    XCTAssertEqual(miss.breached[.shoulderTilt], false)
+    let smallRoll = reading(miss, .headRoll)
     XCTAssertEqual(smallRoll.value, 12.0, accuracy: 0.0001)
     XCTAssertFalse(smallRoll.isOverThreshold)
     XCTAssertEqual(smallRoll.severity, 0.8, accuracy: 0.0001)
+  }
 
-    // No roll reported: the rig's dropped shoulder has to carry the rule on its own.
-    let shoulders = assess(rigged(.headTilt))
-    XCTAssertEqual(shoulders.breached[.headTilt], true)
-    XCTAssertTrue(reading(shoulders, .shoulderTilt).isOverThreshold)
-    XCTAssertEqual(reading(shoulders, .shoulderTilt).severity, 1.0, accuracy: 0.0001)
-    XCTAssertEqual(reading(shoulders, .headRoll).value, 7.5, accuracy: 0.0001)
-    XCTAssertFalse(reading(shoulders, .headRoll).isOverThreshold)
+  /// Shoulder tilt reads the shoulder line alone: a level head with one shoulder down breaches it,
+  /// and a level shoulder line under a tilted head does not (AC11).
+  func testShoulderTiltBreachesOnShoulderLineAlone() {
+    let breach = assess(rigged(.shoulderTilt))
+    XCTAssertEqual(breach.breached[.shoulderTilt], true)
+    XCTAssertEqual(breach.breached[.headTilt], false)
+    let shoulders = reading(breach, .shoulderTilt)
+    XCTAssertEqual(shoulders.value, 15.0, accuracy: 1.0)
+    XCTAssertEqual(shoulders.threshold, 10.0, accuracy: 0.0001)
+    XCTAssertTrue(shoulders.isOverThreshold)
+    XCTAssertEqual(shoulders.severity, 1.0, accuracy: 0.0001)
+    XCTAssertFalse(reading(breach, .headRoll).isOverThreshold)
 
-    let shoulderMiss = assess(rigged(.nearMissHeadTilt))
-    XCTAssertEqual(shoulderMiss.breached[.headTilt], false)
-    XCTAssertFalse(reading(shoulderMiss, .shoulderTilt).isOverThreshold)
+    let miss = assess(rigged(.nearMissShoulderTilt))
+    XCTAssertEqual(miss.breached[.shoulderTilt], false)
+    XCTAssertEqual(miss.breached[.headTilt], false)
+    let small = reading(miss, .shoulderTilt)
+    XCTAssertEqual(small.value, 8.0, accuracy: 1.0)
+    XCTAssertFalse(small.isOverThreshold)
+
+    // The mirror of the test above: head roll alone leaves this rule quiet.
+    let headOnly = assess(rigged(.headTilt, rollDeg: 22.5))
+    XCTAssertEqual(headOnly.breached[.shoulderTilt], false)
+    XCTAssertFalse(reading(headOnly, .shoulderTilt).isOverThreshold)
   }
 
   /// Desk lean needs a dropped head *and* either a deep pitch or a lost face.
@@ -277,6 +294,7 @@ final class PostureClassifierTests: XCTestCase {
       (.slouch, rigged(.slouch)),
       (.headDown, rigged(.headDown, pitchDeg: -30)),
       (.headTilt, rigged(.headTilt, rollDeg: 22.5)),
+      (.shoulderTilt, rigged(.shoulderTilt)),
       (.chinRest, rigged(.chinRest)),
     ]
 
@@ -305,6 +323,29 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertEqual(PostureKind.chinRest.voiceLine, "手放下，坐正一点哦")
     XCTAssertFalse(PostureKind.slouch.isEnabledByDefault)
     XCTAssertTrue(PostureKind.near.isEnabledByDefault)
+  }
+
+  /// The frozen v0.5.1 table: eight kinds, and the tier, priority, display name and voice line of
+  /// each. Order is the `allCases` order the palette and the log follow.
+  func testKindTableMatchesTheContract() {
+    let table: [(kind: PostureKind, tier: PostureTier, priority: Int, name: String, voice: String?)] = [
+      (.deskLean, .medium, 1, "趴桌", "快坐起来，别趴在桌上哦"),
+      (.near, .stable, 2, "太近", "离书太近啦，坐直一点哦"),
+      (.headForward, .experimental, 3, "头前伸", nil),
+      (.slouch, .experimental, 4, "驼背", nil),
+      (.headDown, .stable, 5, "低头", "头抬起来一点哦"),
+      (.headTilt, .stable, 6, "歪头", "头别歪哦，坐正一点"),
+      (.shoulderTilt, .stable, 7, "高低肩", "肩膀放松，两边放平哦"),
+      (.chinRest, .medium, 8, "托腮", "手放下，坐正一点哦"),
+    ]
+
+    XCTAssertEqual(table.map { $0.kind }, PostureKind.allCases)
+    for row in table {
+      XCTAssertEqual(row.kind.tier, row.tier, "\(row.kind) tier")
+      XCTAssertEqual(row.kind.priority, row.priority, "\(row.kind) priority")
+      XCTAssertEqual(row.kind.displayName, row.name, "\(row.kind) display name")
+      XCTAssertEqual(row.kind.voiceLine, row.voice, "\(row.kind) voice line")
+    }
   }
 
   // MARK: - Roll-up
@@ -338,8 +379,8 @@ final class PostureClassifierTests: XCTestCase {
   /// The highlight follows the dominant kind: an uncomputable candidate can never win, and a
   /// breaching kind that is not dominant never contributes a highlight.
   func testHighlightedIsTheMostSevereFeatureOfTheDominantKind() {
-    let shoulders = assess(rigged(.headTilt))
-    XCTAssertEqual(shoulders.dominant, .headTilt)
+    let shoulders = assess(rigged(.shoulderTilt))
+    XCTAssertEqual(shoulders.dominant, .shoulderTilt)
     XCTAssertEqual(shoulders.highlighted, .shoulderTilt)
 
     let roll = assess(rigged(.upright, rollDeg: 22.5))

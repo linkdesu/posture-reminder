@@ -10,6 +10,7 @@ import SwiftUI
 /// can never appear without its colour.
 struct ReportView: View {
   @EnvironmentObject private var controller: SessionController
+  @EnvironmentObject private var pomodoroSettings: PomodoroSettingsStore
 
   /// Raised by 清空历史; the dialog below is the confirmation that has to come before the store
   /// clears, so a stray tap can never wipe the family's history.
@@ -32,10 +33,10 @@ struct ReportView: View {
         }
         .padding(20)
       }
-      .navigationTitle("报告")
+      .navigationTitle("统计页")
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Button("返回") { controller.showPomodoro() }
+          Button("主页") { controller.showPomodoro() }
         }
       }
       .confirmationDialog("清空全部历史？",
@@ -97,13 +98,24 @@ struct ReportView: View {
 
   /// The day's headline figures. The good-posture ratio is left out on a day with no segments at
   /// all: the aggregate reports 0 there, and printing "0%" would misread "nothing measured" as
-  /// "everything was bad".
+  /// "everything was bad". The daily goal is always stated, met or not, so a quiet day still
+  /// answers the one question the header is asked instead of leaving it to be inferred.
   private func dayDetail(_ day: ReportDay) -> String {
-    var parts = ["完成 \(day.completedPomodoros) 个番茄", "专注 \(durationText(day.focusSeconds))"]
+    var parts = ["完成 \(day.completedPomodoros) 个番茄", goalText(day),
+                 "专注 \(durationText(day.focusSeconds))"]
     if !day.segments.isEmpty {
       parts.append("良好占比 \(percentText(day.goodRatio))")
     }
     return parts.joined(separator: " · ")
+  }
+
+  /// Whether the day met the parent's daily goal. The goal's lower bound is one pomodoro, so a day
+  /// with no data lands on "未达成" by the same comparison as any other short day: the header never
+  /// claims a goal was reached where nothing was measured.
+  private func goalText(_ day: ReportDay) -> String {
+    let goal = pomodoroSettings.settings.dailyGoal
+    let done = day.completedPomodoros
+    return done >= goal ? "每日目标 \(done)/\(goal) 已达成" : "每日目标 \(done)/\(goal) 未达成"
   }
 
   /// A segment reduced to a fraction of its day, so the band can be drawn at any width.
@@ -192,8 +204,8 @@ struct ReportView: View {
       }
   }
 
-  /// `legendOrder` covers the seven postures and the absence state; 良好 is a state the report also
-  /// draws, so it ranks ahead of them and a good day reads top-down.
+  /// `legendOrder` covers the postures and the non-posture bands (absence and pause); 良好 is a
+  /// state the report also draws, so it ranks ahead of them and a good day reads top-down.
   private func legendRank(of kind: String, in order: [String]) -> Int {
     if kind == PostureStatus.good.rawValue { return -1 }
     return order.firstIndex(of: kind) ?? order.count
@@ -400,9 +412,11 @@ struct ReportView: View {
   }
 
   /// The name of a segment kind, read back through the one state vocabulary the domain logs, so a
-  /// kind added there needs no second table here.
+  /// kind added there needs no second table here. The pause band is the exception by design: it is
+  /// not a `PostureStatus` at all, so it gets its one fixed label.
   private static func displayName(for kind: String) -> String {
-    PostureStatus(rawValue: kind)?.displayName ?? kind
+    if kind == PosturePalette.pausedKind { return "暂停" }
+    return PostureStatus(rawValue: kind)?.displayName ?? kind
   }
 
   /// "1 小时 15 分" / "45 分" / "30 秒": the form the focus totals are read in.

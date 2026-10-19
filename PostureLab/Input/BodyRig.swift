@@ -8,6 +8,7 @@ enum BodyPose: String, CaseIterable, Equatable {
   case near
   case headDown
   case headTilt
+  case shoulderTilt
   case deskLean
   case chinRest
   case headForward
@@ -18,6 +19,7 @@ enum BodyPose: String, CaseIterable, Equatable {
   case nearMissDistance
   case nearMissHeadDown
   case nearMissHeadTilt
+  case nearMissShoulderTilt
   case nearMissDeskLean
   case nearMissChinRest
   case nearMissHeadForward
@@ -35,14 +37,15 @@ enum BodyPose: String, CaseIterable, Equatable {
 ///
 /// Pinning the anchors to medium does not make them a medium-only artefact, because
 /// `PostureThresholds.forSensitivity` reads the level into exactly two thresholds, `distanceCM` and
-/// `pitchDeg`, and leaves the other six constant at all three levels. None of the five
-/// counter-examples AC17 runs — `headTilt`, `deskLean`, `chinRest`, `headForward`, `slouch` — reaches
-/// its own posture's threshold at `low` or `high` either, and the desk-lean one never even consults
-/// the pitch half of its rule: it stops at the fixed 0.10 head-height drop. The corollary is the part
-/// worth remembering: the three-level setting changes nothing for five of the seven postures, whose
-/// deciding threshold is constant, and only reaches `near` (distance), `headDown` (pitch) and the
-/// `2 x pitchDeg` deep-dip gate inside the desk-lean rule. Whether the other six thresholds should
-/// scale with the level too is an open question in `tmp/handoff/omp-questions.md`.
+/// pitchDeg`, and leaves the other six constant at all three levels. None of the six
+/// counter-examples AC17 runs — `headTilt`, `shoulderTilt`, `deskLean`, `chinRest`, `headForward`,
+/// `slouch` — reaches its own posture's threshold at `low` or `high` either, and the desk-lean one
+/// never even consults the pitch half of its rule: it stops at the fixed 0.10 head-height drop. The
+/// corollary is the part worth remembering: the three-level setting changes nothing for six of the
+/// eight postures, whose deciding threshold is constant, and only reaches `near` (distance),
+/// `headDown` (pitch) and the `2 x pitchDeg` deep-dip gate inside the desk-lean rule. Whether the
+/// other six thresholds should scale with the level too is an open question in
+/// `tmp/handoff/omp-questions.md`.
 enum BodyRig {
 
   /// Normalized image coordinates (0...1, y downwards) and metres to the camera. `distanceCM` is the
@@ -149,11 +152,14 @@ enum BodyRig {
       move(head, dy: nearMissFactor * medium.headHeightDrop, in: &posed)
 
     case .headTilt:
-      tiltHead(rollDeg: positiveFactor * medium.rollDeg,
-               shoulderTiltDeg: positiveFactor * medium.shoulderTiltDeg, in: &posed)
+      tiltHead(rollDeg: positiveFactor * medium.rollDeg, in: &posed)
     case .nearMissHeadTilt:
-      tiltHead(rollDeg: nearMissFactor * medium.rollDeg,
-               shoulderTiltDeg: nearMissFactor * medium.shoulderTiltDeg, in: &posed)
+      tiltHead(rollDeg: nearMissFactor * medium.rollDeg, in: &posed)
+
+    case .shoulderTilt:
+      tiltShoulders(degrees: positiveFactor * medium.shoulderTiltDeg, in: &posed)
+    case .nearMissShoulderTilt:
+      tiltShoulders(degrees: nearMissFactor * medium.shoulderTiltDeg, in: &posed)
 
     case .deskLean:
       // Face down on the desk: the head group drops the whole way and comes much closer to the
@@ -209,11 +215,10 @@ enum BodyRig {
     }
   }
 
-  /// Rotates the head about the neck and drops one shoulder, so the ear line and the shoulder line
-  /// come out at exactly the angles the scenario reports.
-  private static func tiltHead(rollDeg: Double,
-                               shoulderTiltDeg: Double,
-                               in posed: inout [JointID: Placement]) {
+  /// Rotates the head about the neck, leaving the shoulder line level. The head roll feature itself
+  /// comes from the sample's reported `rollDeg`; this keeps the drawn skeleton agreeing with it
+  /// without tripping the separate shoulder-tilt feature.
+  private static func tiltHead(rollDeg: Double, in posed: inout [JointID: Placement]) {
     guard let neck = posed[.neck] else { return }
     let roll = rollDeg * .pi / 180
     let sinRoll = sin(roll)
@@ -226,10 +231,15 @@ enum BodyRig {
       joint.y = neck.y + dx * sinRoll + dy * cosRoll
       posed[id] = joint
     }
+  }
 
-    // One shoulder lower: half the line moves down by `halfWidth * sin(angle)`, which puts the whole
-    // shoulder line that many degrees off horizontal.
-    let drop = (PostureBaseline.uprightShoulderWidth / 2) * sin(shoulderTiltDeg * .pi / 180)
+  /// Rotates the shoulder line about its centre, leaving the head square. Half the line moves down
+  /// and half up by `halfWidth * sin(angle)`, which leaves the width alone (so no other proxy that
+  /// reads the shoulder span moves) and puts the line `atan(sin angle)` off horizontal — 14.51° for
+  /// the positive's 15° and 7.92° for the counter-example's 8°, both still on the right side of the
+  /// 10° medium threshold.
+  private static func tiltShoulders(degrees: Double, in posed: inout [JointID: Placement]) {
+    let drop = (PostureBaseline.uprightShoulderWidth / 2) * sin(degrees * .pi / 180)
     move([.rightShoulder], dy: drop, in: &posed)
     move([.leftShoulder], dy: -drop, in: &posed)
   }

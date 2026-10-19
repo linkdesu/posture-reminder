@@ -1,14 +1,17 @@
 import SwiftUI
 
-/// The twelve pomodoro settings of the north star, in the order of its table.
+/// The twelve pomodoro settings of the north star, in the order of its table, plus the app-level
+/// debug switch.
 ///
 /// Every integer row builds its stepper from `PomodoroSettings.ranges` — the one table
 /// `PomodoroSettings.clamped()` also enforces — so the screen can never offer a limit the store
-/// would pull back. The view only reads and writes `PomodoroSettingsStore.settings`; clamping,
-/// storage and the launch-argument override window all live in the store.
+/// would pull back. The pomodoro rows only read and write `PomodoroSettingsStore.settings`;
+/// clamping, storage and the launch-argument override window all live in the store. The debug row
+/// reads `Settings.debugEnabled`, the same switch the reading flow's overlay uses.
 struct PomodoroSettingsView: View {
   @EnvironmentObject private var controller: SessionController
   @EnvironmentObject private var settingsStore: PomodoroSettingsStore
+  @EnvironmentObject private var settings: Settings
 
   @State private var confirmingReset = false
 
@@ -98,18 +101,27 @@ struct PomodoroSettingsView: View {
           }
         }
 
+        Section("调试") {
+          // The same app-level switch the reading flow's overlay reads. Off by default, so the
+          // child never sees joint data or an experimental posture unless a parent turns it on.
+          Toggle(isOn: $settings.debugEnabled) {
+            settingLabel(title: "调试模式",
+                         subtitle: "关闭时孩子看不到关节数据和实验性体态；开启后专注时显示关节数据")
+          }
+        }
+
         Section {
           Button("恢复默认设置", role: .destructive) { confirmingReset = true }
         }
       }
-      .navigationTitle("番茄钟设置")
+      .navigationTitle("设置页")
       .toolbar {
         // The child's screen is the only thing behind this one, so the way back is named after it.
         ToolbarItem(placement: .topBarLeading) {
           Button {
             controller.showPomodoro()
           } label: {
-            Label("返回专注", systemImage: "chevron.left")
+            Label("主页", systemImage: "chevron.left")
           }
         }
       }

@@ -22,6 +22,10 @@ struct PostureSegment: Equatable, Codable {
 enum PomodoroOutcome: String, Codable, Equatable {
   case completed
   case abandoned
+  /// The child stayed away from a focus longer than the engine allows, so the focus ended where it
+  /// stood (B5). Not a completion: no break follows it and the countdown is re-armed for the next
+  /// start.
+  case interrupted
 }
 
 /// One pomodoro as it is persisted: the plan, what actually happened, and the evidence attached to
@@ -37,8 +41,10 @@ struct PomodoroRecord: Equatable, Codable, Identifiable {
   /// Epoch seconds; absent while the pomodoro is still in flight.
   var endedAt: Double?
   var plannedSeconds: Double
-  /// Actually counted focus time, pauses excluded.
+  /// Actually counted focus time: pauses and absences excluded, so it is never time the child was
+  /// not in front of the camera.
   var focusedSeconds: Double
+  /// Time the focus spent manually paused (B2). An absence is not a pause — it is only excluded.
   var pausedSeconds: Double
   var outcome: PomodoroOutcome
   var skippedBreak: Bool

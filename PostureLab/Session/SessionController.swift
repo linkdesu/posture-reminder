@@ -136,9 +136,15 @@ final class SessionController: ObservableObject {
   /// the report, so the controller maintains the shared clock rather than trusting the source to.
   private var pomodoroLastT: TimeInterval = 0
   private var pomodoroClockOffset: TimeInterval = 0
+  /// The last whole second of the shared clock a `pomodoro_tick` line was written for. The tick is
+  /// the countdown's evidence, so it is one line per second, not one per sample.
+  private var pomodoroTickSecond: Int?
   /// The id of the record in flight; a different id is exactly what an opened focus looks like.
   private var pomodoroRecordID: UUID?
   private var pomodoroFocusOpen = false
+  /// Mirrors `pomodoroFocusPaused` so a pause is noticed exactly once, whichever way it arrived;
+  /// see `syncPomodoroPause`.
+  private var pomodoroPauseApplied = false
   /// Whether the run ever started a focus, and whether it is over.
   private var pomodoroStarted = false
   private var pomodoroRunFinished = false
@@ -178,12 +184,15 @@ final class SessionController: ObservableObject {
     }
 
     // The pomodoro settings screen can change the voice switch or the volume mid-run, and the player
-    // follows. Only in pomodoro mode: the reading flow keeps its own audio behaviour.
+    // follows. Only in pomodoro mode: the reading flow keeps its own audio behaviour. The timer is
+    // re-read too, so a switch or a length changed mid-run is honoured by the next focus rather than
+    // the next launch (the running countdown is fixed when its focus starts).
     pomodoroSettings.$settings
       .dropFirst()
       .sink { [weak self] values in
         Task { @MainActor in
           guard let self, self.pomodoroMode else { return }
+          self.pomodoro?.update(settings: values)
           self.applyPomodoroAudio(values)
         }
       }
@@ -550,6 +559,7 @@ final class SessionController: ObservableObject {
     self.pomodoro = pomodoro
     syncPomodoroFocus()
     for event in events { handlePomodoroEvent(event, at: pomodoroLastT) }
+    syncPomodoroPause()
     refreshPomodoroSnapshot()
   }
 
@@ -606,6 +616,10 @@ final class SessionController: ObservableObject {
     pomodoroSegments = []
     pomodoroOpenSegment = nil
     pomodoroPending = nil
+    // A fresh timer runs on a fresh clock, so the first second of it is due again.
+    pomodoroTickSecond = nil
+    // Nothing is in flight on a fresh timer, and no pause decision survives from the run before.
+    pomodoroPauseApplied = false
   }
 
   /// One tick of a pomodoro run: one shared clock, the posture engine while posture is monitored,
@@ -618,15 +632,19 @@ final class SessionController: ObservableObject {
     lastSampleT = sample.t
 
     // The timer always gets the sample - it is the clock - while the posture engine gets it only
-    // while posture is monitored. Decided before the timer ticks, because this sample belongs to the
-    // focus that is open when it arrives.
+    // while posture is monitored and the focus is actually being counted. Decided before the timer
+    // ticks, because this sample belongs to the focus that is open when it arrives.
     let monitoring = monitorsPomodoroPosture
-    if monitoring { feedPosture(sample) }
+    if monitoring, !pomodoroFocusPaused { feedPosture(sample) }
 
     let events = pomodoro.ingest(sample)
     self.pomodoro = pomodoro
     syncPomodoroFocus()
     for event in events { handlePomodoroEvent(event, at: sample.t) }
+    syncPomodoroPause()
+    // After the events, so a phase that ended on this sample is reported as the phase the countdown
+    // has already moved on to.
+    logPomodoroTickIfDue(at: sample.t)
 
     if monitoring, pomodoroFocusOpen { accumulatePomodoroSegment(at: sample.t) }
     refreshPomodoroSnapshot()
@@ -638,12 +656,65 @@ final class SessionController: ObservableObject {
     }
   }
 
+  /// Writes the countdown, once per second of the shared clock, while a phase is running.
+  ///
+  /// The countdown is anchored on a sample time instead of being counted down tick by tick, so the
+  /// series of lines is the only thing a reader can check: a `phase` that stays put while
+  /// `remaining_seconds` falls in step with the `ts` gap between two lines. One line per second is
+  /// enough for that; one per sample (10 Hz) would bury the log. A phase that is not running -
+  /// parked before its 开始, or paused by the child - writes nothing, because a frozen countdown and a
+  /// stopped one would otherwise look alike. An absence pause is the one exception: the timer is still
+  /// running, so it keeps ticking where it stopped, and the flat `remaining_seconds` is that freeze.
+  private func logPomodoroTickIfDue(at t: TimeInterval) {
+    guard let pomodoro, pomodoro.isRunning else { return }
+    let second = Int(t.rounded(.down))
+    guard second != pomodoroTickSecond else { return }
+    pomodoroTickSecond = second
+    logger.log(.pomodoroTick(remainingSeconds: pomodoro.remainingSeconds,
+                             phase: pomodoro.phase.rawValue))
+  }
+
   /// Whether the posture engine takes a sample: every focus, and a break only when the pomodoro
   /// settings ask for it, because a break is otherwise a rest from being watched too.
   private var monitorsPomodoroPosture: Bool {
     guard let pomodoro else { return false }
     if pomodoro.phase == .focus { return pomodoroFocusOpen }
     return pomodoroSettings.settings.monitorDuringBreak
+  }
+
+  /// A focus that is not being counted is paused, and the two ways it gets there are one state: the
+  /// child tapped 暂停, or the child is not in frame (B1, B2). Both stop the posture feed, both
+  /// silence the player, and both take a band of their own on the timeline; keeping them apart would
+  /// hand the parent two vocabularies for the same missing minute.
+  ///
+  /// A focus parked before its 开始 is not open, so it is not a pause; and the pomodoro engine, not
+  /// this controller, is what suspends the countdown when the face goes and decides when the absence
+  /// has lasted long enough to end the focus (B5). Breaks are outside the question: a break is not
+  /// the focus's timeline and was never an open focus, so `monitorDuringBreak` keeps meaning what it
+  /// says for a break that is paused or not yet started.
+  private var pomodoroFocusPaused: Bool {
+    guard let pomodoro, pomodoroFocusOpen else { return false }
+    return !pomodoro.isRunning || pomodoro.isPausedByAbsence
+  }
+
+  /// Everything a pause takes away from a running focus, applied once per transition so a manual
+  /// pause and an absence pause cannot drift apart (B1, B2).
+  ///
+  /// The player stops: the clip in flight belongs to a sitting session that is over, and a paused
+  /// pomodoro is silent. An absence also drops the last frame, because that frame is a child who is
+  /// no longer in front of the camera, whereas a pause the child pressed keeps it — they are still
+  /// sitting there, only the timer stopped. The mirror is what stops either of those from being
+  /// applied once per sample.
+  private func syncPomodoroPause() {
+    let paused = pomodoroFocusPaused
+    guard paused != pomodoroPauseApplied else { return }
+    pomodoroPauseApplied = paused
+    guard paused else { return }
+    player.stop()
+    if pomodoro?.isPausedByAbsence == true {
+      latestGeometry = nil
+      latestAssessment = nil
+    }
   }
 
   /// Feeds the posture engine and mirrors what the reading flow does with the result: log the events,
@@ -705,7 +776,14 @@ final class SessionController: ObservableObject {
       autoStartParkedFocusIfSimulating()
     case .finishedAll:
       break
+    case .endingSoon:
+      // The engine announces the last minute of a focus and owns the switch that gates it
+      // (`remindBeforeEnd`, read live, so a change mid-focus is honoured without this controller
+      // repeating the rule). What belongs here is the sound the moment calls for.
+      player.play(cue: .warnBeforeEnd)
     case .completed(let record):
+      // The focus is over, which is the one moment the end sound exists for.
+      playEndSound()
       // Waits one beat: a skipped break is reported after the completion, and the flag belongs on this
       // record. The break that follows ends with a `phaseChanged(to: .focus)` that writes it.
       closePomodoroFocus(record: record, at: t)
@@ -713,10 +791,27 @@ final class SessionController: ObservableObject {
       closePomodoroFocus(record: record, at: t)
       // Nothing can change an abandoned pomodoro, so it goes in the history at once.
       flushPomodoroPending()
+    case .interrupted(let record):
+      // B5: the child was away long enough for the pomodoro to be over. It is not a completion, so it
+      // is never celebrated with the end sound, and the engine parks afterwards instead of starting a
+      // break.
+      closePomodoroFocus(record: record, at: t)
+      flushPomodoroPending()
     case .breakSkipped:
       // The engine marks the pomodoro whose break was skipped, and that record is the one still
       // waiting to be written, so the skip goes into the history with the rest of its evidence.
       pomodoroPending?.skippedBreak = true
+    }
+  }
+
+  /// The end-of-focus sound the settings name. `.none` is a real choice — a parent who wants a silent
+  /// timer — so it plays nothing and logs nothing rather than a cue nobody asked for. Whether the clip
+  /// really started, and hence whether a `cue_played` line is written at all, is the player's call.
+  private func playEndSound() {
+    switch pomodoroSettings.settings.endSound {
+    case .soft: player.play(cue: .endSoft)
+    case .chime: player.play(cue: .endChime)
+    case .none: break
     }
   }
 
@@ -757,8 +852,12 @@ final class SessionController: ObservableObject {
   /// well writes a `"good"` segment like any other posture. Emitting only the bad postures would
   /// leave the good-posture ratio at zero for ever, which reads as a charting bug when it is in fact
   /// a missing segment.
+  ///
+  /// A paused focus writes `PosturePalette.pausedKind` instead: the time is not the child sitting in
+  /// some posture, it is time the pomodoro did not count, and the band has to say so (B1 and B2).
   private func accumulatePomodoroSegment(at t: TimeInterval) {
-    guard let kind = engine?.status.rawValue else { return }
+    let kind: String? = pomodoroFocusPaused ? PosturePalette.pausedKind : engine?.status.rawValue
+    guard let kind else { return }
     guard let open = pomodoroOpenSegment else {
       pomodoroOpenSegment = (kind: kind, start: t)
       return

@@ -56,7 +56,7 @@ does both and then feeds the newest `session-*.jsonl` to `scripts/verify-session
 
 ## Line format and the full key set
 
-One JSON object per line, UTF-8, newline-terminated. **Every line carries all 36 keys.**
+One JSON object per line, UTF-8, newline-terminated. **Every line carries all 38 keys.**
 The writer encodes the complete key set on every line, with `null` for values that do
 not apply, so a reader **never has to test for key presence** — a key that is not
 meaningful for a given event is present as JSON `null`, not absent. The only per-line
@@ -78,8 +78,8 @@ six are non-null on every line.
 | `screen` | String? | Visible screen for this line. On `screen_shown` lines it is the screen just shown; elsewhere the writer stamps the last screen it saw (initial `home`). Never `null`. |
 | `distance_cm` | Double? | Distance to the book in cm, for the sample/status/reminder at this tick; `null` when no face was detected or the event carries no sample. |
 | `pitch_deg` | Double? | Head pitch in degrees for the same ticks; `null` when the face was not detected. |
-| `alert_type` | String? | Reminder posture: one of the seven `PostureKind` rawValues (see the `alert_type` vocabulary). Filled on `reminder`, `speech_timeout` and `speech_unavailable` lines. |
-| `level` | Int? | Reminder level: `1` (gentle) or `2` (voice). Filled on `reminder` lines and on `speech_timeout`. |
+| `alert_type` | String? | Reminder posture: one of the eight `PostureKind` rawValues (see the `alert_type` vocabulary). Filled on `reminder`, `speech_timeout`, `speech_unavailable` and `speech_played` lines. |
+| `level` | Int? | Reminder level: `1` (gentle) or `2` (voice). Filled on `reminder`, `speech_timeout` and `speech_played` lines. |
 | `breach_seconds` | Double? | On a `reminder` line: accumulated breach seconds for this episode at this reminder. An absence pause stops the accumulator, so it is wall-clock time minus any pause inside the episode and can lag the distance from the episode's first breaching sample. |
 | `sensitivity` | String? | On the `config` line: `low` / `medium` / `high`. |
 | `distance_threshold_cm` | Double? | On the `config` line: the near threshold in cm for this session. |
@@ -97,7 +97,7 @@ six are non-null on every line.
 | `head_down_remind_count` | Int? | On `session_ended`: head-down reminder **lines**, both levels. |
 | `longest_good_streak_seconds` | Double? | On `session_ended`: longest unbroken run of good seconds. |
 | `scenario` | String? | On the `session_started` line: the scripted scenario name, or `null` for a camera run. |
-| `message` | String? | Reserved. No event fills it today, so it is `null` on every line. |
+| `message` | String? | On a `cue_played` line: the cue's name — `warn_before_end`, `end_soft` or `end_chime`. `null` on every other line. |
 | `battery_level` | Double? | Battery charge in `0...1`. **Writer-sampled**, not event-driven — see below. |
 | `thermal_state` | String? | `nominal` / `fair` / `serious` / `critical`. **Writer-sampled** — see below. |
 | `highlighted_feature` | String? | On a `features` line: the `PostureFeature` rawValue the debug overlay is highlighting right now, or `null` when nothing is highlighted. |
@@ -106,6 +106,8 @@ six are non-null on every line.
 | `overlay_on` | Bool? | On a `view_mode` line: whether the debug skeleton/feature overlay is on. |
 | `avatar_on` | Bool? | On a `view_mode` line: whether avatar mode is on. |
 | `posture_stats` | Object? | On the `session_ended` line: one entry per `PostureKind` rawValue with `{"episodes": …, "reminders": …, "seconds": …}` (see below). `null` on every other line — but the key itself is present on every line like the rest. |
+| `remaining_seconds` | Double? | On a `pomodoro_tick` line: seconds left in the phase the timer is in. `null` on every other line — but the key itself is present on every line like the rest. |
+| `phase` | String? | On a `pomodoro_tick` line: the phase's `PomodoroPhase` rawValue, `focus` / `shortBreak` / `longBreak`. `null` on every other line — but the key itself is present on every line like the rest. |
 
 ### The `feature_values` nested shape
 
@@ -125,7 +127,7 @@ The baseline a reading was measured against is deliberately **not** in the tripl
 
 ### The `posture_stats` nested shape
 
-`posture_stats` is filled on the `session_ended` line only, and is JSON `null` on every other line. It has one entry per `PostureKind` rawValue — all seven, the two experimental kinds included — so a consumer never has to test for a kind. Each entry is a fixed triple:
+`posture_stats` is filled on the `session_ended` line only, and is JSON `null` on every other line. It has one entry per `PostureKind` rawValue — all eight, the two experimental kinds included — so a consumer never has to test for a kind. Each entry is a fixed triple:
 
 ```json
 "posture_stats": {
@@ -154,6 +156,9 @@ A kind that never breached is present with all three values `0`. The two experim
 | `reminder` | A reminder fired (level 1 gentle or level 2 voice). | `t`, `alert_type`, `level`, `breach_seconds`, `distance_cm`, `pitch_deg` |
 | `speech_timeout` | The audio watchdog fired: a clip started but never reported finishing within its length + 2 s, so the queue was advanced anyway. | `alert_type`, `level` (no `t` — the player has no session clock) |
 | `speech_unavailable` | The posture's placeholder clip could not be loaded or decoded, so the reminder was silent. Nothing is played twice, and the queue advances. | `alert_type` (no `t`, no `level`) |
+| `speech_played` | A clip reported that it **started** playing. Written where the player actually starts the clip, not where it was queued, so the line never claims audio for an asset that is missing or will not play — those report `speech_unavailable` instead. It is proof that the player loaded and started the clip, not that a room heard it. | `alert_type`, `level` (no `t` — the player has no session clock) |
+| `pomodoro_tick` | The pomodoro countdown, written **once per second of the sample clock** while a phase is running, so a run is a descending series of lines instead of a single start and end. One line per sample (10 Hz) would bury the log; this is the pomodoro flow only, and a phase that is paused or parked writes nothing. | `remaining_seconds`, `phase` (no `t` — read the instant off `ts`, which is on every line) |
+| `cue_played` | A pomodoro cue reported that it **started** playing: the one-minute warning, or the end sound of a finished focus. Written where the clip really started, so a cue that could not be loaded or started writes nothing, and `EndSound.none` writes nothing at all. Like `speech_played`, it is proof that the player started the clip, not that a room heard it. | `message` (the cue name); no `t` — the player has no session clock |
 | `paused` | The absence pause started (no face for 3 s). | `t` |
 | `resumed` | The absence pause ended (a face reappeared). | `t` |
 | `session_ended` | The session ended; carries the summary. | `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `paused_seconds`, `near_count`, `near_remind_count`, `head_down_count`, `head_down_remind_count`, `longest_good_streak_seconds`, `posture_stats` |
@@ -164,14 +169,18 @@ line when the tick is a feature sample (every fifth). When several postures fire
 `reminder`s on the same tick they appear in ascending `PostureKind.priority` order, one
 line per posture.
 
+In the pomodoro flow the same ordering holds per sample, and a sample's `pomodoro_tick`
+line comes last: a phase that ended on that sample has already moved on by the time the
+tick is written, so the tick always names the phase the sample left the timer in.
+
 ## Vocabularies
 
 ### `state`
 
-`good`, `no_person`, plus the seven posture rawValues: `desk_lean`, `near`,
-`head_forward`, `slouch`, `head_down`, `head_tilt`, `chin_rest`.
+`good`, `no_person`, plus the eight posture rawValues: `desk_lean`, `near`,
+`head_forward`, `slouch`, `head_down`, `head_tilt`, `shoulder_tilt`, `chin_rest`.
 
-The nine values come from `PostureStatus` (`good`, `no_person`, or `posture(kind)`) and
+The ten values come from `PostureStatus` (`good`, `no_person`, or `posture(kind)`) and
 its rawValues are exactly `PostureKind`'s — there is one posture vocabulary, not two.
 
 ### `screen`
@@ -182,8 +191,8 @@ directly without a `screen_shown` line, so it never contaminates the `screen` ke
 
 ### `alert_type`
 
-The same seven posture rawValues as `state`: `desk_lean`, `near`, `head_forward`,
-`slouch`, `head_down`, `head_tilt`, `chin_rest`.
+The same eight posture rawValues as `state`: `desk_lean`, `near`, `head_forward`,
+`slouch`, `head_down`, `head_tilt`, `shoulder_tilt`, `chin_rest`.
 
 ### `level`
 
@@ -205,14 +214,16 @@ The code keeps its own identifiers; the mapping happens only at the log boundary
 |---|---|
 | `PostureStatus.good` | `good` |
 | `PostureStatus.noPerson` | `no_person` |
-| `PostureStatus.posture(kind)` | `kind.rawValue` (one of the seven postures) |
-| `PostureKind.near` / `.headDown` / … | `near` / `head_down` / … (all seven rawValues) |
+| `PostureStatus.posture(kind)` | `kind.rawValue` (one of the eight postures) |
+| `PostureKind.near` / `.headDown` / … | `near` / `head_down` / … (all eight rawValues) |
 | `PostureFeature.distance` / `.handToFace` / … | `distance` / `hand_to_face` / … (all eight rawValues) |
 | `MonitoringEvent.calibrated(...)` | `calibration_done` |
 | `MonitoringEvent.features(...)` | `features` |
 | `MonitoringEvent.viewMode(...)` | `view_mode` |
 | `MonitoringEvent.speechTimeout(...)` | `speech_timeout` |
 | `MonitoringEvent.speechUnavailable(...)` | `speech_unavailable` |
+| `MonitoringEvent.speechPlayed(...)` | `speech_played` |
+| `MonitoringEvent.pomodoroTick(...)` | `pomodoro_tick` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
 | `SessionSummary.tooCloseCount` | `near_count` |
 | `SessionSummary.tooCloseRemindCount` | `near_remind_count` |
@@ -221,7 +232,7 @@ The code keeps its own identifiers; the mapping happens only at the log boundary
 
 ## Every posture is timed, logged and counted on its own
 
-v0.3 runs **one episode machine per `PostureKind`**, so each of the seven postures keeps
+v0.3 runs **one episode machine per `PostureKind`**, so each of the eight postures keeps
 its own breach clock, its own level-1/level-2 escalation and its own counters. The
 consequences for reading a log:
 
@@ -231,10 +242,10 @@ consequences for reading a log:
   for another.
 - **The priority order only sequences the voice queue, it does not select one posture.**
   `PostureKind.priority` (deskLean 1, near 2, headForward 3, slouch 4, headDown 5,
-  headTilt 6, chinRest 7) orders the *speech* queue so the player speaks one line at a
-  time; it never causes a breaching posture to go untimed, unlogged or uncounted. `state`
-  still reports only the single highest-priority breaching posture (`dominant`), which is
-  why `state` is coarser than the `reminder` lines.
+  headTilt 6, shoulderTilt 7, chinRest 8) orders the *speech* queue so the player speaks
+  one line at a time; it never causes a breaching posture to go untimed, unlogged or
+  uncounted. `state` still reports only the single highest-priority breaching posture
+  (`dominant`), which is why `state` is coarser than the `reminder` lines.
 - **Experimental postures (head-forward, slouch) never speak.** At the default setting
   (`experimentalPostures` off) they produce **no `reminder` at all** — not even a tone —
   while still moving `state`, still writing `features` lines and still counting episodes
@@ -299,7 +310,7 @@ log that satisfies them is a log whose summary is derivable:
   therefore normal for `near_seconds + head_down_seconds + good_seconds` to exceed
   `total_seconds`. The predicates are strict: near is `distance_cm <
   distance_threshold_cm` (equal is not a violation), head-down is `baseline_pitch_deg −
-  pitch_deg > pitch_threshold_deg`. The other five postures have no `*_seconds` counter yet;
+  pitch_deg > pitch_threshold_deg`. The other six postures have no `*_seconds` counter yet;
   their time shows up as absent from `good_seconds` and as `reminder` lines.
 - **`longest_good_streak_seconds`** is the longest unbroken run of good intervals; a breach
   of **any** posture resets the running streak to 0, and absence neither extends it nor
@@ -328,6 +339,13 @@ drops it from its expected set otherwise. In a scripted run the `settings` shot 
 produced only when the run was launched with the `-captureSettings` argument.
 
 ## Which key answers which acceptance criterion
+
+This table indexes the reading-session acceptance list (AC1 = first run through
+`calibration_done`, and so on). The pomodoro round numbers its own checklist separately:
+there its AC1 is the countdown, answered by the `pomodoro_tick` series — `remaining_seconds`
+falling in step with the `ts` gap between lines, with no gap in the series — and its AC4 is
+the audio, answered by `speech_played` lines (`alert_type` + `level`) plus the absence of
+any such line while the voice switch is off.
 
 | AC | Evidence in the log |
 |---|---|

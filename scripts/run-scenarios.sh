@@ -203,6 +203,11 @@ run_case cooldown     medium         45 --expect-level1 5 --expect-level2 15 --e
 # must fire nothing, so each names the feature its positive breaches.
 run_case headTilt     medium         26 --expect-level1 5 --expect-level2 15 --expect-kind head_tilt
 run_case headTiltMiss medium         26 --expect-no-reminders --expect-feature-under head_roll
+# v0.5.1 split the shoulder line out of head tilt, so it carries its own pair: both variants
+# leave the head square and move only the shoulder line, which is what keeps the two postures
+# from firing on the same pose (AC11).
+run_case shoulderTilt medium         26 --expect-level1 5 --expect-level2 15 --expect-kind shoulder_tilt
+run_case shoulderTiltMiss medium     26 --expect-no-reminders --expect-feature-under shoulder_tilt
 run_case deskLean     medium         26 --expect-level1 5 --expect-level2 15 --expect-kind desk_lean
 run_case deskLeanMiss medium         26 --expect-no-reminders --expect-feature-under head_height_drop
 run_case chinRest     medium         30 --expect-level1 5 --expect-level2 15 --expect-kind chin_rest

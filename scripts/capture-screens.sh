@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Capture the v0.5 screens Link reviews: the child's screen (idle and mid-focus), the settings
-# page, and the day, week and month reports.
+# Capture the v0.5.1 screens Link reviews: the home page idle, mid-focus and mid-focus with the
+# debug overlay, the settings page, and the day, week and month reports.
 #
 #   scripts/capture-screens.sh [--build]
 #
@@ -13,13 +13,14 @@
 # The app is reinstalled before every shot so the seeded history and the stored settings cannot
 # leak from one capture into the next.
 #
-# Output: artifacts/r4-pomodoro/screenshots/*.png, each beside the log it came from.
+# Every screen is captured from one run: the shots land in artifacts/r5-pomodoro/screenshots/, and
+# each one is accompanied by the sandbox Documents copy it was showing and a provenance.txt.
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
 BUNDLE=me.xieal.posturelab
 APP=/tmp/pl-sim/Build/Products/Debug-iphonesimulator/PostureLab.app
-OUT="${OUT:-artifacts/r4-pomodoro}"
+OUT="${OUT:-artifacts/r5-pomodoro}"
 DO_BUILD=0
 [[ "${1:-}" == "--build" ]] && DO_BUILD=1
 
@@ -37,13 +38,19 @@ mkdir -p "$OUT/screenshots"
 FAILED=0
 
 # output name | seconds to wait | launch arguments
+#
+# The two mid-focus home shots are the AC10 pair and differ only in the overlay: App.swift turns
+# debug on for any scripted run, and the scenario is what feeds the screens live joints, so the
+# child's screen has to say `-debug 0` to be free of joint data and the debug one `-debug 1` to
+# show it. Both wait the same 26 seconds, which puts them mid-focus over a running countdown.
 CASES=(
-  "1-main-idle|10|-pomodoro 1"
-  "2-main-focus|26|-pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
-  "3-settings|10|-pomodoro 1 -settings 1"
-  "4-report-day|10|-pomodoro 1 -seedHistory 30 -report day"
-  "5-report-week|10|-pomodoro 1 -seedHistory 30 -report week"
-  "6-report-month|10|-pomodoro 1 -seedHistory 30 -report month"
+  "1-home-idle|10|-pomodoro 1"
+  "2-home-focus|26|-pomodoro 1 -debug 0 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
+  "3-home-debug|26|-pomodoro 1 -debug 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
+  "4-settings|10|-pomodoro 1 -settings 1"
+  "5-stats-day|10|-pomodoro 1 -seedHistory 30 -report day"
+  "6-stats-week|10|-pomodoro 1 -seedHistory 30 -report week"
+  "7-stats-month|10|-pomodoro 1 -seedHistory 30 -report month"
 )
 
 for entry in "${CASES[@]}"; do

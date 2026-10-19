@@ -8,11 +8,19 @@ import SwiftUI
 /// `AvatarView` already does. There is no edge border, no flashing, no panel and no modal; the
 /// pre-recorded voice and the parent report are where a posture is actually raised.
 ///
-/// The settings and the report do have a way in from here, because an installed app has no other:
-/// two quiet text buttons that exist only before the first focus has run, so the screen is bare of
-/// anything pressable for the whole of every focus. See `showsSetupEntries`.
+/// The only navigation is the pair of icons at the top trailing edge: the report page (`chart.bar`)
+/// and the settings page (`gearshape`). They carry no text, so a child who is not looking for them
+/// never notices them, but a parent never has to wait for a pomodoro to end either.
 struct PomodoroView: View {
   @EnvironmentObject private var controller: SessionController
+  @EnvironmentObject private var settings: Settings
+  @EnvironmentObject private var pomodoroSettings: PomodoroSettingsStore
+
+  /// How much of the bottom the controls can take: the home-indicator inset, the bottom padding, the
+  /// tall start button, the spacing below it and the secondary row, plus a margin. The debug
+  /// overlay's feature table is lifted clear of all of them by this much; the likeness wears the same
+  /// inset so both layers still project onto the same joints.
+  private static let controlsClearance: CGFloat = 200
 
   var body: some View {
     ZStack {
@@ -22,15 +30,61 @@ struct PomodoroView: View {
       // The likeness is the ground of the screen, not a card inside a layout. It also draws the
       // quiet placeholder while there is no geometry yet, so the ground never turns into a blank
       // warning.
-      AvatarView(geometry: controller.latestGeometry, assessment: controller.latestAssessment)
+      AvatarView(geometry: controller.latestGeometry, assessment: childAssessment)
         .ignoresSafeArea()
+        // When the overlay is up it is inset for the controls and the likeness takes the same frame,
+        // so the skeleton stays on the body. See `controlsClearance`.
+        .padding(.bottom, showsDebugOverlay ? Self.controlsClearance : 0)
+
+      // Joint data is a parent's view of the measurement, so it sits under the controls and is never
+      // a target. It shows only while a focus is running; a break or a pause has no live reading.
+      if showsDebugOverlay {
+        DebugOverlayView(geometry: controller.latestGeometry, assessment: childAssessment)
+          .ignoresSafeArea()
+          .padding(.bottom, Self.controlsClearance)
+          .allowsHitTesting(false)
+      }
 
       if let snapshot = controller.pomodoroSnapshot {
         session(snapshot)
       } else {
         idle
       }
+
+      // Today's progress lives in the top leading corner: the countdown owns the centre and the two
+      // icons own the top trailing edge, so this readout competes with neither.
+      if let snapshot = controller.pomodoroSnapshot {
+        dailyGoal(snapshot)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+          .allowsHitTesting(false)
+      }
+
+      navigation
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
+  }
+
+  // MARK: - Display filter
+
+  /// The assessment the child is allowed to see.
+  ///
+  /// With debug off, an experimental posture is a measurement for the parent's report, not something
+  /// a child should meet: clearing `dominant` keeps every part of the likeness calm. The log and the
+  /// history still record the posture untouched — this is a display filter and nothing else.
+  private var childAssessment: PostureAssessment? {
+    guard let assessment = controller.latestAssessment else { return nil }
+    guard !settings.debugEnabled, assessment.dominant?.tier == .experimental else {
+      return assessment
+    }
+    var filtered = assessment
+    filtered.dominant = nil
+    return filtered
+  }
+
+  /// A focus in flight is the only time there is fresh joint data to show.
+  private var showsDebugOverlay: Bool {
+    guard settings.debugEnabled, let snapshot = controller.pomodoroSnapshot else { return false }
+    return snapshot.phase == .focus && snapshot.isRunning
   }
 
   // MARK: - Session
@@ -107,12 +161,6 @@ struct PomodoroView: View {
           secondary("跳过休息") { controller.pomodoroCommand(.skipBreak) }
         }
       }
-
-      // Only before the first focus: after that this row is gone, so the bottom of the screen holds
-      // the clock's controls and nothing else. See `showsSetupEntries`.
-      if showsSetupEntries {
-        setupEntries
-      }
     }
   }
 
@@ -129,6 +177,21 @@ struct PomodoroView: View {
     .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
   }
 
+  // MARK: - Daily goal
+
+  /// Today's completed pomodoros against the parent's daily goal, in the dimmest weight the screen
+  /// uses. It is a status line, not a target to chase: it never grows, never colours itself and
+  /// never sits where the child's eye has to pass the countdown.
+  private func dailyGoal(_ snapshot: PomodoroSnapshot) -> some View {
+    Text("今天 \(snapshot.completedToday)/\(pomodoroSettings.settings.dailyGoal)")
+      .font(.caption.monospacedDigit())
+      .foregroundStyle(.white.opacity(0.4))
+      .padding(.top, 18)
+      .padding(.leading, 20)
+      .shadow(color: .black.opacity(0.6), radius: 6)
+      .accessibilityLabel("今日目标 \(snapshot.completedToday) 个，共 \(pomodoroSettings.settings.dailyGoal) 个")
+  }
+
   // MARK: - Idle
 
   /// No snapshot means pomodoro mode is not live yet. Stay quiet and show nothing that could be
@@ -139,48 +202,37 @@ struct PomodoroView: View {
       Text("番茄钟待命中")
         .font(.subheadline)
         .foregroundStyle(.white.opacity(0.35))
-        .padding(.bottom, showsSetupEntries ? 16 : 40)
-      if showsSetupEntries {
-        setupEntries
-          .padding(.bottom, 28)
-      }
+        .padding(.bottom, 40)
     }
   }
 
-  // MARK: - Setup entries
+  // MARK: - Navigation
 
-  /// Whether the settings and the report are reachable from this screen.
-  ///
-  /// A fresh install has no other route to either, so they have to be here; but the north star is
-  /// that the child's screen carries nothing that could pull them out of a focus, so the pair is
-  /// offered only while there is nothing to protect — before the first focus has run at all, which is
-  /// `nil` (no timer yet), or a timer that has not started, is still on the first focus and has
-  /// completed none today. Once a focus has run, they stay hidden for good: during and after one the
-  /// screen is the cloud, the countdown and the controls and nothing else.
-  private var showsSetupEntries: Bool {
-    guard let snapshot = controller.pomodoroSnapshot else { return true }
-    return !snapshot.isRunning && snapshot.focusIndex == 1 && snapshot.completedToday == 0
-  }
-
-  /// Two quiet text buttons rather than a bar, so the way out is there when it is looked for and
-  /// invisible to the child who is not looking for it.
-  private var setupEntries: some View {
-    HStack(spacing: 16) {
-      setupEntry("设置") { controller.showPomodoroSettings() }
-      setupEntry("报告") { controller.showReport() }
+  /// The screen's only navigation: the report page and the settings page as icons. No text, so the
+  /// two words a child would look for never appear; the tap targets stay large enough for an adult.
+  private var navigation: some View {
+    HStack(spacing: 0) {
+      iconButton("chart.bar", label: "统计页") { controller.showReport() }
+      iconButton("gearshape", label: "设置页") { controller.showPomodoroSettings() }
     }
+    .padding(.top, 4)
+    .padding(.trailing, 12)
   }
 
-  private func setupEntry(_ title: String, action: @escaping () -> Void) -> some View {
+  /// `label` is the accessibility name, not visible text: the buttons are icons only.
+  private func iconButton(_ symbol: String,
+                          label: String,
+                          action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Text(title)
-        .font(.footnote)
-        .foregroundStyle(.white.opacity(0.35))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+      Image(systemName: symbol)
+        .font(.system(size: 18, weight: .medium))
+        .foregroundStyle(.white.opacity(0.55))
+        .frame(width: 44, height: 44)
         .contentShape(Rectangle())
+        .shadow(color: .black.opacity(0.6), radius: 6)
     }
     .buttonStyle(.plain)
+    .accessibilityLabel(label)
   }
 
   // MARK: - Text

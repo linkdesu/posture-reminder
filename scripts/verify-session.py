@@ -65,6 +65,7 @@ POSTURE_KINDS = [
     "slouch",
     "head_down",
     "head_tilt",
+    "shoulder_tilt",
     "chin_rest",
 ]
 # The `view_mode` vocabulary.

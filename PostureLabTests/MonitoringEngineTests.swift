@@ -421,6 +421,37 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(engine.status.rawValue, "desk_lean")
   }
 
+  /// Shoulder tilt is its own posture: a dropped shoulder under a square head runs one shoulder-tilt
+  /// episode, speaks at levels 1 and 2, and never touches the head-tilt episode (AC11).
+  func testShoulderTiltPoseRunsAHeadTiltFreeEpisode() throws {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+
+    let upright = sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)])
+    let tilted = posing([Segment(duration: 20, distanceCM: 40, pitchDeg: 0)],
+                        as: .shoulderTilt,
+                        from: 1.0)
+    for sample in upright + tilted {
+      events += engine.ingest(sample)
+    }
+
+    XCTAssertEqual(reminders(in: events).map(\.kind), [.shoulderTilt, .shoulderTilt])
+    XCTAssertEqual(reminders(in: events).map(\.level), [.gentle, .voice])
+    XCTAssertEqual(engine.episodeCount(for: .shoulderTilt), 1)
+    XCTAssertEqual(engine.reminderCount(for: .shoulderTilt), 2)
+    XCTAssertEqual(engine.episodeCount(for: .headTilt), 0)
+    XCTAssertEqual(engine.reminderCount(for: .headTilt), 0)
+    XCTAssertEqual(engine.status, .posture(.shoulderTilt))
+    XCTAssertEqual(engine.status.rawValue, "shoulder_tilt")
+
+    let line = try XCTUnwrap(lastFeatureLine(in: events))
+    XCTAssertEqual(line.highlighted, .shoulderTilt)
+    XCTAssertTrue(try reading(line.readings, .shoulderTilt).isOverThreshold)
+    XCTAssertFalse(try reading(line.readings, .headRoll).isOverThreshold)
+  }
+
   /// An experimental kind still runs its episode, still moves the status and still writes feature
   /// lines; only the reminder is dropped, because its `voiceLine` is nil.
   func testExperimentalKindLogsWithoutAReminder() throws {
