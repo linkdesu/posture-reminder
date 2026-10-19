@@ -36,6 +36,36 @@ enum ReportScope: String, CaseIterable, Equatable {
   }
 }
 
+#if DEBUG
+/// `-autopause <seconds>:<holdSeconds>`: the plan behind the one manual pause the acceptance has to
+/// photograph. A simulator has no scriptable tap, so a debug build issues the pause and the resume
+/// itself, at those two points of the shared sample clock, and a scripted run catches the paused
+/// state and the grey band the timeline draws for it.
+///
+/// Debug builds only: this type, the argument's name and every call site around it are compiled out
+/// of a release build, which can neither read the argument nor act on it.
+struct DebugAutoPause {
+  /// Seconds into the run, on the shared sample clock, when the pause is issued.
+  var at: TimeInterval
+  /// Seconds the pause holds before the resume is issued.
+  var hold: TimeInterval
+
+  /// Parses the launch argument's value; nil when it is absent or malformed.
+  init?(_ raw: String?) {
+    guard let raw else { return nil }
+    let parts = raw.split(separator: ":", maxSplits: 1)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+    guard parts.count == 2,
+          let at = TimeInterval(parts[0]),
+          let hold = TimeInterval(parts[1]),
+          at >= 0, hold > 0
+    else { return nil }
+    self.at = at
+    self.hold = hold
+  }
+}
+#endif
+
 @MainActor
 final class SessionController: ObservableObject {
   enum Phase: Equatable {
@@ -155,6 +185,14 @@ final class SessionController: ObservableObject {
   /// reports after the completion, still lands on the record it belongs to.
   private var pomodoroPending: PomodoroRecord?
   private var pomodoroCompletedTodayCount = 0
+
+  #if DEBUG
+  /// The timer's proof hook, armed from `-autopause` in `App.swift` before the first frame: the plan
+  /// for this run, whether its pause has gone out yet, and whether the run has used it up.
+  var debugAutoPause: DebugAutoPause?
+  private var debugAutoPausePaused = false
+  private var debugAutoPauseFinished = false
+  #endif
 
   init(settings: Settings,
        store: SessionStore,
@@ -649,12 +687,38 @@ final class SessionController: ObservableObject {
     if monitoring, pomodoroFocusOpen { accumulatePomodoroSegment(at: sample.t) }
     refreshPomodoroSnapshot()
 
+    #if DEBUG
+    // `-autopause`: a debug-only proof hook, driven here on the sample this run just ticked, so the
+    // command lands on the timer that sample was accounted for rather than on a stale copy of it.
+    applyDebugAutoPauseIfDue(at: sample.t)
+    #endif
+
     // A scripted run ends with its script, not with a tap. The script position is the source's own
     // clock, so the shared offset never triggers this early.
     if let scenario = simulatedScenario, rawSample.t >= scenario.duration {
       finishPomodoroRun()
     }
   }
+
+  #if DEBUG
+  /// `-autopause <seconds>:<holdSeconds>`: issues the 暂停 and the 继续 a scripted acceptance run
+  /// cannot tap, measured on the sample clock the countdown itself runs on so the run stays
+  /// deterministic, and through the same `pomodoroCommand` path the two buttons use so the pause and
+  /// its grey band land in the history exactly as a manual one does. One pair per run: the pause goes
+  /// out once, and the resume retires the plan.
+  ///
+  /// Debug builds only; see `DebugAutoPause`. A release build has neither the plan nor this method.
+  private func applyDebugAutoPauseIfDue(at t: TimeInterval) {
+    guard let plan = debugAutoPause, !debugAutoPauseFinished else { return }
+    if t >= plan.at + plan.hold {
+      debugAutoPauseFinished = true
+      pomodoroCommand(.resume)
+    } else if t >= plan.at, !debugAutoPausePaused {
+      debugAutoPausePaused = true
+      pomodoroCommand(.pause)
+    }
+  }
+  #endif
 
   /// Writes the countdown, once per second of the shared clock, while a phase is running.
   ///

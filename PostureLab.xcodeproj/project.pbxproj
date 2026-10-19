@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
 		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
 		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
 		18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */; };
@@ -56,6 +57,8 @@
 		D9300855FF10C6CA0056E139 /* Sensitivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16AEB838486856F512DE30ED /* Sensitivity.swift */; };
 		DCE243CB641E9DC1967F1A6F /* PomodoroSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */; };
 		DF963E8F59DA2A236665DCE3 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36AC79F435D21A488617AE6 /* App.swift */; };
+		E066DE6D76B50AF19CD97E55 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C23BDEA7206E390ADDB2D4 /* Support.swift */; };
+		E198A08B21E3EAC5EDA03D2E /* SettingsPersistenceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */; };
 		E1EED948404432FC29BC5370 /* SessionSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01417FF66BD4502D7D8F0556 /* SessionSummary.swift */; };
 		E6C09F58442C1933FFC89B24 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C9CC48A2EE658C4F4F6E6C /* SummaryView.swift */; };
 		F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */; };
@@ -64,6 +67,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		0F175B8533F8E2A304224336 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1C063856DAF4AA2F9BFFE4F6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0AC9F62221BA03090624422F;
+			remoteInfo = PostureLab;
+		};
 		800E9F4D0E7D4356BE1ABAF7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1C063856DAF4AA2F9BFFE4F6 /* Project object */;
@@ -92,7 +102,9 @@
 		5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistory.swift; sourceTree = "<group>"; };
 		5F1CEF001EA36F12FB4E1B6F /* head_down.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_down.wav; sourceTree = "<group>"; };
 		621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngine.swift; sourceTree = "<group>"; };
+		63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualPauseUITests.swift; sourceTree = "<group>"; };
 		69901B3D5C223A77CD1EBE1F /* head_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_tilt.wav; sourceTree = "<group>"; };
+		69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPersistenceUITests.swift; sourceTree = "<group>"; };
 		6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureKind.swift; sourceTree = "<group>"; };
 		6DECA819287056EFAF59B08B /* BodyCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCloud.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
@@ -103,6 +115,7 @@
 		9BEA84B4826A935D0B51FD76 /* CalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationView.swift; sourceTree = "<group>"; };
 		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
 		A3AE14E62E384345220D3E83 /* Scenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios.swift; sourceTree = "<group>"; };
+		A7C23BDEA7206E390ADDB2D4 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		A977A8B8E4D95F59F32EE642 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureClassifier.swift; sourceTree = "<group>"; };
 		BCBAEB16FED6503FA1D580B8 /* Pose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pose.swift; sourceTree = "<group>"; };
@@ -124,6 +137,7 @@
 		E34CF188A7BF03E96664807B /* MonitoringEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngine.swift; sourceTree = "<group>"; };
 		E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		E86DD762F759A830119DDC53 /* end_chime.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = end_chime.wav; sourceTree = "<group>"; };
+		EB5BC89A7E921207F3567C64 /* PostureLabUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F15B75C72C27B373EFE66CA1 /* PostureLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PostureLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngineTests.swift; sourceTree = "<group>"; };
 		F43C4382384E519C27CCCA4F /* PostureSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureSample.swift; sourceTree = "<group>"; };
@@ -180,6 +194,7 @@
 			children = (
 				F15B75C72C27B373EFE66CA1 /* PostureLab.app */,
 				2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */,
+				EB5BC89A7E921207F3567C64 /* PostureLabUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -217,6 +232,7 @@
 			children = (
 				20E684999139E73633E72754 /* PostureLab */,
 				6F2E163F30CCEF5BACB20012 /* PostureLabTests */,
+				DAC2BB503B3064BA5445728D /* PostureLabUITests */,
 				2FCFCAEEB1B7E772DB8AF927 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -275,6 +291,16 @@
 			path = Input;
 			sourceTree = "<group>";
 		};
+		DAC2BB503B3064BA5445728D /* PostureLabUITests */ = {
+			isa = PBXGroup;
+			children = (
+				63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */,
+				69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */,
+				A7C23BDEA7206E390ADDB2D4 /* Support.swift */,
+			);
+			path = PostureLabUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -295,6 +321,24 @@
 			productName = PostureLab;
 			productReference = F15B75C72C27B373EFE66CA1 /* PostureLab.app */;
 			productType = "com.apple.product-type.application";
+		};
+		19604DCB0C44C51D2F1FF362 /* PostureLabUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 57FE26C8A10548505F0571FE /* Build configuration list for PBXNativeTarget "PostureLabUITests" */;
+			buildPhases = (
+				9002A07405510EDA48904272 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				71B0151373EE0D33C678B62A /* PBXTargetDependency */,
+			);
+			name = PostureLabUITests;
+			packageProductDependencies = (
+			);
+			productName = PostureLabUITests;
+			productReference = EB5BC89A7E921207F3567C64 /* PostureLabUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 		24DD43DD412C4DD68CBAEF95 /* PostureLabTests */ = {
 			isa = PBXNativeTarget;
@@ -327,6 +371,10 @@
 						DevelopmentTeam = DFA8MZ9MZW;
 						ProvisioningStyle = Automatic;
 					};
+					19604DCB0C44C51D2F1FF362 = {
+						DevelopmentTeam = DFA8MZ9MZW;
+						TestTargetID = 0AC9F62221BA03090624422F;
+					};
 					24DD43DD412C4DD68CBAEF95 = {
 						DevelopmentTeam = DFA8MZ9MZW;
 					};
@@ -348,6 +396,7 @@
 			targets = (
 				0AC9F62221BA03090624422F /* PostureLab */,
 				24DD43DD412C4DD68CBAEF95 /* PostureLabTests */,
+				19604DCB0C44C51D2F1FF362 /* PostureLabUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -419,6 +468,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		9002A07405510EDA48904272 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */,
+				E198A08B21E3EAC5EDA03D2E /* SettingsPersistenceUITests.swift in Sources */,
+				E066DE6D76B50AF19CD97E55 /* Support.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FB54347993C6F5D57CD21DD8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -438,6 +497,11 @@
 			isa = PBXTargetDependency;
 			target = 0AC9F62221BA03090624422F /* PostureLab */;
 			targetProxy = 800E9F4D0E7D4356BE1ABAF7 /* PBXContainerItemProxy */;
+		};
+		71B0151373EE0D33C678B62A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0AC9F62221BA03090624422F /* PostureLab */;
+			targetProxy = 0F175B8533F8E2A304224336 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -504,6 +568,24 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		29EAB366B091FA0FAAC27F94 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = DFA8MZ9MZW;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.xieal.posturelab.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PostureLab;
+			};
+			name = Release;
 		};
 		2A88D3096D73F52CD71CD62D /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -645,9 +727,36 @@
 			};
 			name = Debug;
 		};
+		F81A25F22D9B69E86BB0B915 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = DFA8MZ9MZW;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.xieal.posturelab.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PostureLab;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		57FE26C8A10548505F0571FE /* Build configuration list for PBXNativeTarget "PostureLabUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F81A25F22D9B69E86BB0B915 /* Debug */,
+				29EAB366B091FA0FAAC27F94 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		76A58D5CD638BC867DC291CA /* Build configuration list for PBXNativeTarget "PostureLabTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

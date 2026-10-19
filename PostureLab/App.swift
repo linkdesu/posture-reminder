@@ -33,6 +33,14 @@ struct PostureLabApp: App {
     // unclamped on purpose: `PomodoroSettings.clamped()` is the gate for what the settings screen and
     // persistence write, not for a per-run override.
     var stagedPomodoro = pomodoroSettings.settings
+    #if DEBUG
+    // `-presetSettings focusMinutes=10,remindBeforeEnd=1,endSound=chime`: a debug-only list of the
+    // twelve settable pomodoro settings, for the acceptance run that has to photograph every row
+    // before and after a change. It is staged like every other launch-argument override, so nothing
+    // it names becomes the saved setting, and it is applied before the single-value arguments below,
+    // which therefore still win when both name the same key.
+    PostureLabApp.applyPresetSettings(from: defaults, to: &stagedPomodoro)
+    #endif
     if let focus = PostureLabApp.intArgument("focusMinutes", from: defaults) {
       stagedPomodoro.focusMinutes = focus
     }
@@ -77,6 +85,11 @@ struct PostureLabApp: App {
                                    captureSettings: PostureLabApp.captureSettings(from: defaults),
                                    pomodoroStore: pomodoroStore,
                                    pomodoroSettings: pomodoroSettings)
+    #if DEBUG
+    // `-autopause 30:20`: a debug-only plan the controller carries out on the shared sample clock,
+    // so a scripted run can photograph the paused screen and the grey band a manual pause draws.
+    controller.debugAutoPause = DebugAutoPause(defaults.string(forKey: "autopause"))
+    #endif
 
     // The pomodoro screens are reached by launch argument before the first frame: `-pomodoro 1` is the
     // child's screen, `-settings 1` the pomodoro settings (never the reading-session 设置 screen, which
@@ -155,4 +168,89 @@ struct PostureLabApp: App {
     guard let raw = defaults.string(forKey: "captureSettings") else { return false }
     return raw != "0" && raw.lowercased() != "false"
   }
+
+  #if DEBUG
+  /// `-presetSettings focusMinutes=10,shortBreakMinutes=1,monitorDuringBreak=1,endSound=chime`: the
+  /// twelve settable pomodoro settings as one comma-separated launch argument, so the acceptance can
+  /// put any of them on screen without tapping through the settings screen.
+  ///
+  /// Every value goes through `PomodoroSettings.clamped()`, the same gate the settings screen writes
+  /// through, so a preset cannot stage a setting the app could not otherwise hold. Only the keys it
+  /// names are touched, and it is applied before the single-value arguments, which still win.
+  ///
+  /// The keys are the settable property names: `focusMinutes`, `shortBreakMinutes`,
+  /// `longBreakMinutes`, `focusPerLongBreak`, `dailyGoal`, `remindBeforeEnd`, `postureVoiceEnabled`,
+  /// `monitorDuringBreak`, `keepScreenAwake`, `autoStartBreak`, `autoStartFocus` and `endSound`.
+  /// Integers read as integers, booleans as `1`/`0`/`true`/`false`, and `endSound` as
+  /// `soft`/`chime`/`none`. An unknown key, a malformed pair or an unparsable value is ignored.
+  ///
+  /// Debug builds only: this function, the argument's name, every key and the call to it are
+  /// compiled out of a release build, which can neither read the argument nor act on it.
+  private static func applyPresetSettings(from defaults: UserDefaults,
+                                          to staged: inout PomodoroSettings) {
+    guard let raw = defaults.string(forKey: "presetSettings") else { return }
+
+    // One parsed value through the field's own clamp: a copy carrying just that value is clamped and
+    // the field read back, so the preset never disturbs a setting it did not name.
+    func gate<T>(_ value: T, _ keyPath: WritableKeyPath<PomodoroSettings, T>) -> T {
+      var probe = PomodoroSettings()
+      probe[keyPath: keyPath] = value
+      return probe.clamped()[keyPath: keyPath]
+    }
+
+    for pair in raw.split(separator: ",") {
+      let parts = pair.split(separator: "=", maxSplits: 1)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+      guard parts.count == 2 else { continue }
+      let key = String(parts[0])
+      let value = String(parts[1])
+
+      switch key {
+      case "focusMinutes":
+        if let number = Int(value) { staged.focusMinutes = gate(number, \.focusMinutes) }
+      case "shortBreakMinutes":
+        if let number = Int(value) {
+          staged.shortBreakMinutes = gate(number, \.shortBreakMinutes)
+        }
+      case "longBreakMinutes":
+        if let number = Int(value) { staged.longBreakMinutes = gate(number, \.longBreakMinutes) }
+      case "focusPerLongBreak":
+        if let number = Int(value) {
+          staged.focusPerLongBreak = gate(number, \.focusPerLongBreak)
+        }
+      case "dailyGoal":
+        if let number = Int(value) { staged.dailyGoal = gate(number, \.dailyGoal) }
+      case "endSound":
+        if let sound = EndSound(rawValue: value) { staged.endSound = gate(sound, \.endSound) }
+      case "remindBeforeEnd":
+        if let flag = presetFlag(value) { staged.remindBeforeEnd = gate(flag, \.remindBeforeEnd) }
+      case "postureVoiceEnabled":
+        if let flag = presetFlag(value) {
+          staged.postureVoiceEnabled = gate(flag, \.postureVoiceEnabled)
+        }
+      case "monitorDuringBreak":
+        if let flag = presetFlag(value) {
+          staged.monitorDuringBreak = gate(flag, \.monitorDuringBreak)
+        }
+      case "keepScreenAwake":
+        if let flag = presetFlag(value) { staged.keepScreenAwake = gate(flag, \.keepScreenAwake) }
+      case "autoStartBreak":
+        if let flag = presetFlag(value) { staged.autoStartBreak = gate(flag, \.autoStartBreak) }
+      case "autoStartFocus":
+        if let flag = presetFlag(value) { staged.autoStartFocus = gate(flag, \.autoStartFocus) }
+      default:
+        continue  // an unknown key is ignored, not an error
+      }
+    }
+  }
+
+  /// The boolean spellings `-presetSettings` accepts; nil for anything else.
+  private static func presetFlag(_ raw: String) -> Bool? {
+    switch raw.lowercased() {
+    case "1", "true": return true
+    case "0", "false": return false
+    default: return nil
+    }
+  }
+  #endif
 }

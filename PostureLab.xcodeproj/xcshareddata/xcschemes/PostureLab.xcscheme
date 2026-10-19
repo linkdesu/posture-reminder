@@ -50,6 +50,17 @@
                ReferencedContainer = "container:PostureLab.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "19604DCB0C44C51D2F1FF362"
+               BuildableName = "PostureLabUITests.xctest"
+               BlueprintName = "PostureLabUITests"
+               ReferencedContainer = "container:PostureLab.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

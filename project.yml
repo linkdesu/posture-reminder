@@ -32,6 +32,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.tests
         GENERATE_INFOPLIST_FILE: YES
         DEVELOPMENT_TEAM: DFA8MZ9MZW
+  # The UI target exists for the two criteria a launch argument cannot express: AC2's twelve
+  # per-setting taps and AC12's manual pause. The dependency on the app is what gives the bundle its
+  # TEST_TARGET_NAME, so `XCUIApplication()` launches PostureLab without naming it here.
+  PostureLabUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PostureLabUITests]
+    dependencies:
+      - target: PostureLab
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        DEVELOPMENT_TEAM: DFA8MZ9MZW
 schemes:
   PostureLab:
     build:
@@ -44,3 +58,4 @@ schemes:
       gatherCoverageData: false
       targets:
         - PostureLabTests
+        - PostureLabUITests
