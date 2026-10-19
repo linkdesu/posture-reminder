@@ -686,6 +686,9 @@ def main():
     parser.add_argument("--expect-no-reminders-during-pause", action="store_true")
     parser.add_argument("--expect-not-good-after-resume", action="store_true")
     parser.add_argument("--expect-posture-stats", action="store_true")
+    # A pomodoro run never visits the reading flow's screens, so demanding its five screenshots
+    # there fails a session that is fine on the substance.
+    parser.add_argument("--no-screenshots", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -731,7 +734,8 @@ def main():
             results.append(extra)
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
-    results.append(check_screenshots(args.log, rows))
+    if not args.no_screenshots:
+        results.append(check_screenshots(args.log, rows))
 
     if args.expect_feature_over:
         results.append(check_feature_over(rows, args.expect_feature_over))
