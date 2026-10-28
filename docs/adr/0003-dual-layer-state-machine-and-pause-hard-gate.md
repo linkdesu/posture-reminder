@@ -1,27 +1,27 @@
-# ADR-0003: Two state machines and the pause hard gate
+# ADR-0003：双层状态机与暂停硬门控
 
-- **Date**: 2026-10-28
-- **Status**: Accepted
+- **日期**：2026-10-28
+- **状态**：已接受
 
-## Context
+## 背景
 
-One pomodoro has two independent clocks: the timer's phases and eight posture episodes. Both have to stop while the child is not being observed, and neither may invent a violation or a reward across that gap. A manual pause and an absence are different causes of the same missing interval, but the parent's timeline must not learn two vocabularies for the same minute.
+一个番茄钟有两套独立时钟：计时器的阶段，以及八个体态回合。两者都必须在孩子未被观察时停止，且都不能在这段空白上凭空制造越阈或奖励。手动暂停与无人暂停是同一段缺失时间的不同原因，但家长的时间轴不能为同一分钟发明两套词汇。
 
-## Decision
+## 决策
 
-The timer is a **phase machine** (`PomodoroEngine`) over `focus` / `shortBreak` / `longBreak`; posture is **one episode machine per `PostureKind`** (`MonitoringEngine`), each with its own breach clock, escalation and counters. Both are driven only by `PostureSample.t`, so one replay reproduces a run.
+计时器是覆盖 `focus` / `shortBreak` / `longBreak` 的**阶段状态机**（`PomodoroEngine`）；体态是**每种 `PostureKind` 一个回合状态机**（`MonitoringEngine`），各自维护越阈时钟、升级与计数。两者都只由 `PostureSample.t` 驱动，因此一次重放就能复现一次运行。
 
-**A pause is a hard gate.** Manual pause and absence both freeze the countdown and every posture episode: no breach seconds accrue, no episode escalates, no reminder is emitted, and entering a pause does not reset an episode. Cooldown is measured on the sample clock and therefore keeps running through the pause; it still gates only a new episode's first reminder, not the level-1 → level-2 escalation.
+**暂停是硬门控。** 手动暂停与无人暂停都会冻结倒计时和全部体态回合：不累计越阈秒数、不升级回合、不发提醒，进入暂停也不会重置回合。冷却按样本时钟计量，因此会穿过暂停继续走；它仍只拦新回合的首次提醒，不拦同一回合从一级到二级的升级。
 
-**Time accounting.** Neither pause is counted in `focusedSeconds`; a completed focus equals its plan because the countdown can only reach zero after the plan was actually consumed. Both a manual pause and an absence accrue `pausedSeconds`, and both render as the same grey `paused` band on the report timeline, so `pausedSeconds` is exactly the sum of those bands — the parent is asking "which minutes did the timer not count?", not "which button caused it?".
+**时间记账。** 两种暂停都不计入 `focusedSeconds`；完成的专注阶段等于其计划时长，因为倒计时只有在计划时间真正走完后才会归零。手动暂停与无人暂停都累加到 `pausedSeconds`，并在统计页时间轴上渲染为同一段灰色 `paused` 带，因此 `pausedSeconds` 恰好等于这些灰带时长之和——家长问的是“哪些分钟计时器没有计入”，而不是“按了哪个按钮”。
 
-**Absence limit.** After 3 continuous seconds without a face the focus suspends: the countdown and every posture episode freeze. If one absence lasts longer than 300 seconds, the focus ends where it stands as `interrupted`; no break follows, the next start replays the same focus index, and the child must press 开始 again.
+**无人上限。** 连续 3 秒未检测到人脸后，专注阶段挂起：倒计时与全部体态回合冻结。若单次无人持续超过 300 秒，该专注阶段就地结束并记为 `interrupted`；不进入休息，下一次开始会重放同一个专注序号，孩子必须再次按「开始」。
 
-**Resume is a re-measure, not a reset.** When the face returns (or the child resumes), the next sample is classified normally and the state follows it; the engine does not force `good`, because that would hide a posture the child is still holding.
+**恢复即重新测量，不是重置。** 人脸回来（或孩子继续）后，下一个样本按正常流程分类，状态跟随它；引擎不会强制回到 `good`，因为那会隐藏孩子仍然保持的体态。
 
-## Consequences
+## 影响
 
-- The UI and the log share one explanation of a frozen countdown; the timer's absence suspension and the posture engine's absence pause cannot drift apart.
-- A future change to pause semantics must move the timer and all eight episode machines together, or the `focusedSeconds` / `pausedSeconds` / timeline numbers stop reconciling.
-- `pausedSeconds` equals the total of the grey pause bands, so the timer and the timeline reconcile without the reader knowing which pause caused a band.
-- The current code still stops the countdown on the first face-less sample and accrues `pausedSeconds` only for manual pauses. Aligning it with this decision — the 3-second absence trigger, both pauses in `pausedSeconds`, and band-total equality — is a follow-up ticket.
+- UI 与日志对“倒计时为什么冻结”只有一套解释；计时器的无人挂起与体态引擎的无人暂停不会漂移。
+- 未来若改变暂停语义，必须同时移动计时器与全部八个回合状态机，否则 `focusedSeconds` / `pausedSeconds` / 时间轴数字将无法对账。
+- `pausedSeconds` 等于全部灰色暂停带之和，计时器与时间轴可以直接对账，读者无需知道某个灰带由哪种暂停造成。
+- 当前代码仍在首个无人样本就停止倒计时，且只在手动暂停时累加 `pausedSeconds`。将其对齐到本决策——3 秒无人触发、两种暂停都计入 `pausedSeconds`、灰带总和相等——是后续 ticket 的工作。

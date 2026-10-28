@@ -1,45 +1,23 @@
-# ADR-0001: A single test seam — posture-sample sequence into a pure, time-injected state machine
+# ADR-0001：单一测试缝——姿态样本序列输入纯函数、注入时间的状态机
 
-- **Date**: 2026-10-17
-- **Status**: Accepted
+- **日期**：2026-10-17
+- **状态**：已接受
 
-## Context
+## 背景
 
-PostureLab's core behaviour — violation detection, the two-level reminder ladder,
-cooldown, absence pause, and session statistics — has to be verified three ways:
-unit tests, scripted simulated runs, and real-device acceptance. The camera path
-(ARKit) and the scripted `Scenario` path are two implementations of one thing;
-unit tests must not depend on a real camera, and the scripted runs must exercise
-exactly the same behaviour as the real device.
+PostureLab 的核心行为——越阈检测、两级提醒阶梯、冷却、无人暂停与会话统计——必须通过三种方式验证：单元测试、脚本化模拟运行与真机验收。相机路径（ARKit）与脚本化 `Scenario` 路径是同一件事的两种实现；单元测试不能依赖真实相机，脚本运行又必须与真机执行完全相同的反馈行为。
 
-The engine has no access to wall-clock time. All timing (the 5 s gentle delay, the
-15 s voice delay, the 30 s cooldown, the 3 s absence pause) derives from
-`PostureSample.t`, the seconds since session start carried on each sample. This is
-a deliberate constraint: a recorded sample stream replayed into the engine is
-deterministic byte for byte, so tests need no clock, no `sleep`, and no network.
+引擎不能读取墙上时钟。所有计时（5 秒轻提示延迟、15 秒语音延迟、30 秒冷却、3 秒无人暂停）都来自 `PostureSample.t`，即每个样本携带的会话开始后秒数。这是刻意约束：把录制好的样本流重放进引擎，结果逐字节确定，测试不需要时钟、`sleep` 或网络。
 
-## Decision
+## 决策
 
-There is **one test seam** in the app: a sequence of `PostureSample`s, together with
-the calibration baseline and the settings, is fed into the pure state machine
-(`MonitoringEngine`), and the output — the sequence of `MonitoringEvent`s with their
-times and levels, plus the resulting `SessionSummary` — is asserted.
+应用只有**一个测试缝**：把一串 `PostureSample`，连同校准基线与设置，输入纯状态机（`MonitoringEngine`），再断言输出——带时间与级别的 `MonitoringEvent` 序列，以及最终的 `SessionSummary`。
 
-The real input source and the scripted input source both conform to the single
-`SampleSource` interface (`onSample` + `start()`/`stop()`), so every code path
-downstream of a sample is shared. Unit tests and real-device simulated acceptance
-therefore test the same behaviour. Tests only look at external behaviour: feed a
-sample timeline in, assert the emitted events — never internal implementation.
+真实输入源与脚本输入源都遵循同一个 `SampleSource` 接口（`onSample` + `start()`/`stop()`），因此样本之后的每条代码路径都被共享。单元测试与真机模拟验收因此验证同一套行为。测试只看外部行为：输入一条样本时间线，断言发出的事件——绝不检查内部实现。
 
-## Consequences
+## 影响
 
-- Adding a new input source (or changing ARKit details) cannot change reminder
-  behaviour; any behavioural fix must be made in the engine and is covered by the
-  same seam.
-- Tests are fast and deterministic: no camera, no timing flakiness, no simulator
-  needed for the domain.
-- The seam's contract is the log: event names and values are QA's vocabulary
-  (ADR-0002), so tests and the log speak the same language.
-- If a future design introduces time outside `PostureSample.t` (e.g. wall-clock
-  scheduling in the coordinator), the seam narrows to the engine only; that would
-  be a trade to reopen deliberately, not an accident.
+- 新增输入源（或修改 ARKit 细节）不会改变提醒行为；任何行为修复都必须落在引擎里，并被同一个测试缝覆盖。
+- 测试快速且确定：不需要相机、不受时序抖动影响，领域层也不需要模拟器。
+- 测试缝的契约就是日志：事件名与值使用 QA 的词汇（ADR-0002），所以测试与日志说同一种语言。
+- 如果未来设计在 `PostureSample.t` 之外引入时间（例如协调器里的墙上时钟调度），测试缝会收窄到只覆盖引擎；那时应刻意重开这个取舍，而不是让它意外发生。

@@ -1,88 +1,49 @@
-# Placeholder audio clips
+# 占位音频片段
 
-This folder holds two families of generated placeholders. Neither family is a final
-recording: every file is a soft synthetic tone whose only job is to give the build a real,
-bundled asset. They deliberately contain no speech.
+本目录存放两族生成的占位音频。两族都不是最终录音：每个文件都是柔和的合成音，唯一作用是让构建产物带有真实的内置资源。它们刻意不含语音。
 
-- **Posture reminders** — six files, one per speaking posture (`near` … `chin_rest`).
-  These are **placeholders for the child-facing voice lines**, replaced during the
-  recording pass, owned by the product owner (Link) together with the voice recordings;
-  nobody should ship them as the child-facing voice. The final set must be recorded gentle
-  voice lines, one per posture, dropped in under the same names.
-- **Pomodoro finish sounds** — two files, `end_soft.wav` and `end_chime.wav`. These are
-  **the pomodoro's end-of-phase sounds, not posture reminders**: the pomodoro surface picks
-  one from the `EndSound` setting (`soft` / `chime` / `none`) and hands the matching
-  `PomodoroCue` to `ReminderPlayer.play(cue:)`, which loads and starts the clip. They are
-  never played as a posture cue — the posture path cannot reach them — even though the same
-  player owns both. `none` selects no cue and has no file.
+- **体态提醒**——六个文件，每个可发声体态一个（`near` … `chin_rest`）。这些是**孩子侧语音行的占位文件**，将在录音阶段替换，由产品负责人（Link）连同语音录音一起负责；任何人都不应把它们作为孩子侧语音发布。最终集合必须是温柔的真人语音行，每个体态一条，以相同文件名放入。
+- **番茄钟结束提示音**——两个文件，`end_soft.wav` 与 `end_chime.wav`。这些是**番茄钟的阶段结束提示音，不是体态提醒**：番茄钟界面从 `EndSound` 设置（`soft` / `chime` / `none`）选择一个，并把对应的 `PomodoroCue` 交给 `ReminderPlayer.play(cue:)`，由它加载并开始片段。它们绝不会作为体态提示音播放——体态路径无法触达它们——即使同一个播放器拥有两者。`none` 不选择任何提示音，也没有文件。
 
-Do not confuse the two families. A posture clip answers "you are sitting badly, sit up"; a
-finish sound answers "this focus block is over". They share a format and nothing else.
+不要把两族混淆。体态片段回答“你坐姿不对，坐直”；结束提示音回答“这个专注段结束了”。它们只共享格式，不共享其他任何东西。
 
-The pomodoro's **one-minute warning** (`PomodoroCue.warnBeforeEnd`) is deliberately absent
-from this folder: it is a generated two-blip 660 Hz tone built in memory by `ReminderPlayer`,
-not a sound anyone chooses, so the recording pass that replaces this folder has nothing to do
-with it. Its cue name `warn_before_end` is a log value only — it is not a file name and there
-is no `warn_before_end.wav` to look for.
+番茄钟的**一分钟提醒**（`PomodoroCue.warnBeforeEnd`）刻意不放在本目录：它是 `ReminderPlayer` 在内存中生成的两声 660 Hz 提示音，不是任何人可选择的音效，因此替换本目录的录音工作与它无关。它的提示音名 `warn_before_end` 只是日志值——不是文件名，也没有 `warn_before_end.wav` 可找。
 
-## File naming contract
+## 文件命名契约
 
-Two naming rules, one per family:
+两条命名规则，每族一条：
 
-- A **posture clip** is exactly `<PostureKind.rawValue>.wav`, one per posture that can
-  speak (the six non-experimental kinds), and `ReminderPlayer` looks the clip up by that
-  name.
-- A **finish sound** is exactly `end_<EndSound.rawValue>.wav`: `end_soft.wav` for the
-  default calm tone and `end_chime.wav` for the brighter alternative. Those two names are
-  also the `PomodoroCue` raw values (`soft` and `chime` are the two `EndSound` cases that
-  name a file), and the player looks the clip up by that value. `EndSound.none` has no file,
-  because "no sound" is silence, not an asset.
+- **体态片段**恰好是 `<PostureKind.rawValue>.wav`，每个可发声体态一个（六个非实验级体态），`ReminderPlayer` 按该名称查找片段。
+- **结束提示音**恰好是 `end_<EndSound.rawValue>.wav`：默认平静音是 `end_soft.wav`，更明亮的选择是 `end_chime.wav`。这两个名称也是 `PomodoroCue` 的 rawValue（`soft` 与 `chime` 是两个命名文件的 `EndSound` case），播放器按该值查找片段。`EndSound.none` 没有文件，因为“没有声音”就是静音，不是资源。
 
-| Family | Purpose | File | Placeholder tone |
+| 族 | 用途 | 文件 | 占位音 |
 |---|---|---|---|
-| Posture | reminder for `near` | `near.wav` | C5, 523.25 Hz |
-| Posture | reminder for `head_down` | `head_down.wav` | G4, 392.00 Hz |
-| Posture | reminder for `head_tilt` | `head_tilt.wav` | A4, 440.00 Hz |
-| Posture | reminder for `shoulder_tilt` | `shoulder_tilt.wav` | F4, 349.23 Hz |
-| Posture | reminder for `desk_lean` | `desk_lean.wav` | E4, 329.63 Hz |
-| Posture | reminder for `chin_rest` | `chin_rest.wav` | D5, 587.33 Hz |
-| Finish | pomodoro end sound, `EndSound.soft` (the default) | `end_soft.wav` | one low tone, G3, 196.00 Hz |
-| Finish | pomodoro end sound, `EndSound.chime` | `end_chime.wav` | two rising bell notes, G5 783.99 Hz then C6 1046.50 Hz |
+| 体态 | `near` 的提醒 | `near.wav` | C5，523.25 Hz |
+| 体态 | `head_down` 的提醒 | `head_down.wav` | G4，392.00 Hz |
+| 体态 | `head_tilt` 的提醒 | `head_tilt.wav` | A4，440.00 Hz |
+| 体态 | `shoulder_tilt` 的提醒 | `shoulder_tilt.wav` | F4，349.23 Hz |
+| 体态 | `desk_lean` 的提醒 | `desk_lean.wav` | E4，329.63 Hz |
+| 体态 | `chin_rest` 的提醒 | `chin_rest.wav` | D5，587.33 Hz |
+| 结束音 | 番茄钟结束音，`EndSound.soft`（默认） | `end_soft.wav` | 一个低音，G3，196.00 Hz |
+| 结束音 | 番茄钟结束音，`EndSound.chime` | `end_chime.wav` | 两个上行铃音，G5 783.99 Hz 后接 C6 1046.50 Hz |
 
-The experimental kinds (`head_forward`, `slouch`) have no clip and never reach level 2, so
-adding a file for them has no effect. The finish sounds have no posture and are selected by
-the `EndSound` setting alone.
+实验级体态（`head_forward`、`slouch`）没有片段，也永不触发任何提醒；为它们添加文件不会产生效果。结束提示音没有体态，只由 `EndSound` 设置选择。
 
-The replacement recordings must keep the same file names and extension. If the format ever
-changes, `ReminderPlayer.clipExtension` is the single place to change, and every file must change
-with it — a missing posture clip is logged as `speech_unavailable` and plays nothing, while a
-missing finish sound plays nothing and writes no `cue_played` line.
+替换录音必须保持相同文件名与扩展名。如果格式改变，`ReminderPlayer.clipExtension` 是唯一需要修改的地方，并且每个文件都必须随之改变——缺失的体态片段会记为 `speech_unavailable` 且不播放任何声音；缺失的结束提示音不播放任何声音，也不写 `cue_played` 行。
 
-## Format: WAV, not m4a
+## 格式：使用 WAV，而不是 m4a
 
-The PRD allowed either. WAV is used because the standard library's `wave` module produces it
-with no external tool, so the placeholders are reproducible byte for byte on any machine with
-Python and no audio dependencies. These are throwaway placeholders, so the larger file size
-(about 52 KB each) does not matter; the final recordings may use m4a if the recording pipeline
-prefers it.
+PRD 两者都允许。这里使用 WAV，因为标准库的 `wave` 模块无需外部工具即可生成，因此占位文件在任何装有 Python、没有音频依赖的机器上都能逐字节复现。这些是一次性占位文件，所以更大的体积（每个约 52 KB）无关紧要；最终录音如果录音流程更偏好 m4a，可以使用 m4a。
 
-## Regenerating
+## 重新生成
 
-All eight files are one deterministic script: no randomness, no third-party audio library, so
-a re-run on any machine with Python reproduces the committed bytes exactly.
+全部八个文件由一个确定性脚本生成：没有随机性、没有第三方音频库，因此在任何装有 Python 的机器上重跑都会复现已提交的字节。
 
-Every file is 16-bit mono, 22.05 kHz, 1.2 s, at peak amplitude 0.18 of full scale (the peak
-sample of every clip is 5898), with a gentle raised-cosine attack and release so nothing
-clicks.
+每个文件都是 16 位单声道、22.05 kHz、1.2 秒，峰值幅度为满刻度的 0.18（每个片段的峰值样本为 5898），带平缓的升余弦起音与释音，因此没有爆音。
 
-- The six **posture** clips are a single sine, 0.12 s attack and 0.30 s release.
-- `end_soft` is a single low sine too, but with a slower 0.30 s attack and 0.45 s release —
-  the same shape, stretched, so it reads as calmer and lower than any reminder.
-- `end_chime` is two overlapping bell notes (a fundamental plus a weak 2nd and 3rd harmonic),
-  each with a fast 0.012 s attack and an exponential decay, tapered over the last 0.06 s of
-  the note so the note boundaries do not click; the pair is then normalized back to the same
-  0.18 peak as everything else. It is deliberately brighter and higher than every posture
-  clip.
+- 六个**体态**片段是单正弦，起音 0.12 秒、释音 0.30 秒。
+- `end_soft` 也是单低正弦，但起音更慢（0.30 秒）、释音 0.45 秒——同一形状被拉长，因此听起来比任何提醒都更平静、更低。
+- `end_chime` 是两个重叠的铃音（基频加较弱的二、三次谐波），每个都有 0.012 秒快速起音与指数衰减，并在音符最后 0.06 秒做锥形收尾，避免音符边界爆音；随后整对音归一化回与其他文件相同的 0.18 峰值。它刻意比所有体态片段更明亮、更高。
 
 ```python
 import math, struct, wave, os
@@ -112,7 +73,7 @@ def write_wav(name, samples):
         w.writeframes(struct.pack("<%dh" % len(samples), *samples))
 
 def sine(freq, attack, release):
-    """One sine over the full clip length with a raised-cosine attack and release."""
+    """整段片段长度上的单正弦，带升余弦起音与释音。"""
     out = []
     for i in range(frames):
         t = i / SAMPLE_RATE
@@ -125,15 +86,15 @@ def sine(freq, attack, release):
         out.append(math.sin(2 * math.pi * freq * t) * env)
     return out
 
-# Posture reminders: one sine per speaking posture.
+# 体态提醒：每个可发声体态一条正弦。
 for name, freq in clips.items():
     write_wav(name, [int(round(v * PEAK * 32767)) for v in sine(freq, ATTACK, RELEASE)])
 
-# Pomodoro finish sounds. Not posture reminders; the pomodoro surface alone plays these.
-# end_soft: the default calm tone — a low sine with a slower swell than a reminder.
+# 番茄钟结束提示音。不是体态提醒；只由番茄钟界面播放。
+# end_soft：默认平静音——比提醒更慢起音的低正弦。
 write_wav("end_soft", [int(round(v * PEAK * 32767)) for v in sine(196.00, 0.30, 0.45)])
 
-# end_chime: two bright bell notes, the second overlapping the first, normalized to PEAK.
+# end_chime：两个明亮铃音，第二个与第一个重叠，归一化到 PEAK。
 NOTE_DURATION = 0.75
 NOTE_ATTACK = 0.012
 NOTE_TAIL = 0.06
@@ -158,4 +119,4 @@ peak = max(abs(v) for v in chime)
 write_wav("end_chime", [int(round(v / peak * PEAK * 32767)) for v in chime])
 ```
 
-`project.yml` includes everything under `PostureLab`, so the files are bundled automatically.
+`project.yml` 包含 `PostureLab` 下的所有内容，因此这些文件会自动打包。

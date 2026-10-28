@@ -1,25 +1,25 @@
-# ADR-0004: Non-intrusive, pre-recorded voice reminders in the pomodoro
+# ADR-0004：番茄钟中的非侵入式预录语音提醒
 
-- **Date**: 2026-10-28
-- **Status**: Accepted
+- **日期**：2026-10-28
+- **状态**：已接受
 
-## Context
+## 背景
 
-A posture reminder competes with the child's attention. A timer that stops, a dialog that covers the figure, or a loud tone every few seconds teaches the child to dread the app and breaks the focus the pomodoro exists to protect. The parent still needs the posture raised, but only when it is worth raising.
+体态提醒会与孩子的注意力竞争。停下的计时器、盖住人形的对话框，或每隔几秒响一次的提示音，会让孩子害怕这个应用，并破坏番茄钟本应保护的专注。家长仍然需要知道体态问题，但只在值得提醒的时候。
 
-The pomodoro is the **only user-facing flow**: the child presses 开始, the countdown runs, and the settings and report sit behind two small icons; the user side contains exactly those three screens. It has no blocking calibration page: the first 3 seconds of valid face samples at focus start establish the distance and pitch `PostureBaseline` by median, silently; if there is no valid sample, the upright reference stands in.
+番茄钟是**唯一用户侧流程**：孩子按下「开始」，倒计时运行，设置与统计藏在两个小图标后面；用户侧恰好只有这三个界面。它没有打断式校准页：专注阶段启动后的前 3 秒有效人脸样本以中位数建立距离与俯仰角 `PostureBaseline`，全程静默；若没有有效样本，则使用标准直立参考。
 
-## Decision
+## 决策
 
-A breaching posture **never pauses the pomodoro, never opens a dialog, never draws an edge warning and never plays the 5-second level-1 tone**. The pomodoro screen keeps its layout and its clock; the only immediate feedback is the tint on the part of the 3D body cloud the dominant posture blames.
+体态越阈**绝不停下番茄钟、绝不打开对话框、绝不画边缘警告、绝不播放 5 秒一级提示音**。番茄钟界面保持布局与时钟；唯一即时反馈是 3D 人形点云上被主导体态指责的部分改变颜色。
 
-The child hears **only a bundled, pre-recorded, gentle WAV voice**, and only after a speakable posture has accumulated 15 seconds of continuous breach. Each speakable posture owns one fixed clip named after its rawValue; system TTS is deliberately not used, because a synthesizer adds a mechanical voice and unpredictable pauses to the one moment the child is already being corrected. Several postures breaching at once are queued by `ReminderPlayer` and spoken one at a time in `PostureKind.priority` order (1…8). The experimental tier (`head_forward`, `slouch`) is recorded in history and the log and, with debug on, highlighted; it **never triggers any reminder at all**, not even level 1.
+孩子只会听到**预录在应用包内的温柔 WAV 语音**，且只有在可发声体态连续越阈累计满 15 秒之后。每个可发声体态拥有一条以 `rawValue` 命名的固定音频；刻意不使用系统 TTS，因为合成音会给本已需要纠正孩子的时刻加入机械嗓音与不可预测的停顿。多个体态同时越阈时，由 `ReminderPlayer` 排队，按 `PostureKind.priority` 顺序（1…8）逐条播报。实验级体态（`head_forward`、`slouch`）只写入历史与日志，并在调试模式开启时高亮；它们**永不触发任何提醒**，一级也不行。
 
-The parent controls the voice with the settings page's voice switch and volume. With the switch off, the engine still times, logs and counts reminders; only the sound is dropped.
+家长通过设置页的语音开关与音量控制声音。关闭开关后，引擎仍会计时、记录并统计提醒；只是不发出声音。
 
-## Consequences
+## 影响
 
-- Reminder events and the audio are decoupled: `reminder` lines exist even when the child hears nothing, and `speech_played` is written only where a clip really started. This keeps QA able to distinguish "no breach" from "breach but muted".
-- The bundled clips are placeholders today; replacing them with real recordings is an asset change, not a behaviour change, as long as the names stay `<PostureKind.rawValue>.wav` and `end_<EndSound.rawValue>.wav`.
-- The current code still launches into the legacy reading flow, has no silent 3-second calibration, and can emit a level-1 event for an experimental posture when the old switch is on. Aligning those behaviours with these confirmed decisions is a follow-up ticket.
-- The one-minute warning and the end sound are cues, not posture reminders: they are not queued behind voice clips and are not silenced by the posture voice switch.
+- 提醒事件与音频解耦：即使孩子听不到声音，`reminder` 行仍然存在；`speech_played` 只在片段真正开始时写出。这样 QA 能区分“没有越阈”和“越阈但被静音”。
+- 当前音频片段仍是占位文件；替换为真实录音属于资源变更，不是行为变更，只要文件名保持 `<PostureKind.rawValue>.wav` 与 `end_<EndSound.rawValue>.wav`。
+- 当前代码仍会进入旧阅读流程，没有静默 3 秒校准，并且当旧的实验开关打开时仍可能为实验级体态发出一级事件。把这些行为对齐到已确认决策，是后续 ticket 的工作。
+- 一分钟提醒与结束提示音是提示音，不是体态提醒：它们不排在语音片段队列后面，也不受体态语音开关静音。

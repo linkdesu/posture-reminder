@@ -1,44 +1,28 @@
-# QA log schema — how to read a PostureLab session log
+# QA 日志结构——如何阅读 PostureLab 会话日志
 
-This is the reference for reading a session log. It describes the wire format that
-`FileDebugLogger` writes and that `scripts/verify-session.py` reads. It is the log
-reference, not a restatement of the PRD; see `docs/adr/0002-jsonl-log-contract-with-qa.md`
-for why the log is a contract and `GLOSSARY.md` for the domain vocabulary. The schema
-is a QA contract: a new, renamed, or dropped key breaks the scripts as badly as a
-behaviour change, so coordinate with QA before landing one.
+这是阅读会话日志的参考。它描述 `FileDebugLogger` 写出、`scripts/verify-session.py` 读取的日志格式。它是日志参考，不是 PRD 的复述；日志为何是契约见 `docs/adr/0002-jsonl-log-contract-with-qa.md`，领域词汇见 `GLOSSARY.md`。日志结构是与 QA 的契约：新增、重命名或删除键对脚本的破坏程度与行为变更相同，落地前必须与 QA 协调。
 
-## `ts` and `t` are not the same thing
+## `ts` 与 `t` 不是一回事
 
-Read this once, carefully, because it is the one thing that is easy to get wrong:
+请仔细读一遍，因为这是最容易弄错的一点：
 
-- **`ts` is Unix epoch milliseconds** — an absolute wall-clock instant, the number of
-  milliseconds since 1970-01-01T00:00:00Z. It is filled on **every** line.
-- **`t` is seconds since the session started** — a relative offset, `0` at session
-  start, filled only on events that carry a session time.
+- **`ts` 是 Unix 纪元毫秒**——绝对墙上时钟时刻，即自 1970-01-01T00:00:00Z 起的毫秒数。它在**每一行**都填写。
+- **`t` 是会话开始后的秒数**——相对偏移，会话开始时为 `0`，只有携带会话时间的事件才填写。
 
-They are two different quantities with two different units. **They are not
-interchangeable and neither will be renamed.** Do not call both of them "the
-timestamp": `ts` is the wall-clock timestamp, `t` is the session-relative time. If you
-compare a `ts` value against a `t` value you are comparing milliseconds-since-1970
-against seconds-since-start and the arithmetic is meaningless.
+它们是两个不同的量，单位也不同。**二者不可互换，也都不会被重命名。** 不要把两者都叫作“时间戳”：`ts` 是墙上时钟时间戳，`t` 是会话相对时间。如果你把 `ts` 与 `t` 相比，你是在拿“1970 年起的毫秒”与“会话开始后的秒”作比较，算术没有意义。
 
-## Where the files live
+## 文件位置
 
-Inside the app sandbox, under `Documents/`:
+位于应用沙盒的 `Documents/` 下：
 
-- `Documents/debug/session-<ISO8601>.jsonl` — one JSONL file per launch. The name is
-  the launch time as ISO8601 with the colons stripped, e.g. a launch at
-  `2026-10-17T01:23:45Z` produces `session-2026-10-17T012345Z.jsonl`. A fresh run
-  writes a new file; `run-scenarios.sh` picks the newest one.
-- `Documents/debug/screenshots/<name>.png` — one PNG per screen the run showed, plus the
-  reminder/highlight evidence shots; names listed under "Screenshots" below.
+- `Documents/debug/session-<ISO8601>.jsonl`——每次启动一个 JSONL 文件。文件名是启动时间的 ISO8601 表示并去掉冒号，例如 `2026-10-17T01:23:45Z` 启动会产出 `session-2026-10-17T012345Z.jsonl`。每次新运行写一个新文件；`run-scenarios.sh` 选取最新的那个。
+- `Documents/debug/screenshots/<name>.png`——运行展示过的每个界面一张 PNG，另加提醒/高亮证据截图；名称见下文“截图”一节。
 
-The logger is only active when debug mode is enabled (`FileDebugLogger.isEnabled`);
-with it off, no files are written.
+日志器只在调试模式开启时工作（`FileDebugLogger.isEnabled`）；关闭时不写任何文件。
 
-### Pulling the files off a device
+### 从设备取出文件
 
-`devicectl` copies the whole app data container (or one subdirectory of it):
+`devicectl` 可以复制整个应用数据容器（或其中某个子目录）：
 
 ```sh
 xcrun devicectl device copy from \
@@ -49,69 +33,60 @@ xcrun devicectl device copy from \
   --destination <local-round-directory>
 ```
 
-That pulls `Documents/` — including `debug/session-*.jsonl` and `debug/screenshots/` —
-into the round directory. In the simulator the equivalent is
-`xcrun simctl get_app_container <sim-id> me.xieal.posturelab data`. `scripts/run-scenarios.sh`
-does both and then feeds the newest `session-*.jsonl` to `scripts/verify-session.py`.
+这会把 `Documents/`——包括 `debug/session-*.jsonl` 与 `debug/screenshots/`——取到本轮目录。模拟器中的等价命令是 `xcrun simctl get_app_container <sim-id> me.xieal.posturelab data`。`scripts/run-scenarios.sh` 两者都会做，然后把最新的 `session-*.jsonl` 交给 `scripts/verify-session.py`。
 
-## Line format and the full key set
+## 行格式与完整键集
 
-One JSON object per line, UTF-8, newline-terminated. **Every line carries all 38 keys.**
-The writer encodes the complete key set on every line, with `null` for values that do
-not apply, so a reader **never has to test for key presence** — a key that is not
-meaningful for a given event is present as JSON `null`, not absent. The only per-line
-variation is which keys are non-null.
+每行一个 JSON 对象，UTF-8，以换行结尾。**每行携带全部 38 个键。** 写入器在每行编码完整键集，不适用值写成 JSON `null`，因此读者**永远不必检查键是否存在**——对某个事件没有意义的键以 JSON `null` 存在，而不是缺失。每行唯一的变化是哪些键非 `null`。
 
-`scripts/verify-session.py` still hard-checks six of them as its P1 reject
-(`REQUIRED_KEYS`): `ts`, `event`, `state`, `screen`, `distance_cm`, `pitch_deg`. Those
-six are non-null on every line.
+`scripts/verify-session.py` 仍把其中六个作为 P1 拒绝条件硬校验（`REQUIRED_KEYS`）：`ts`、`event`、`state`、`screen`、`distance_cm`、`pitch_deg`。这六个键在每行都非 `null`。
 
-## The keys
+## 键
 
-| Key | Type | Meaning |
+| 键 | 类型 | 含义 |
 |---|---|---|
-| `ts` | Int64 | Unix epoch **milliseconds** when the line was produced. Present and non-null on every line. |
-| `t` | Double? | **Seconds since session start.** Filled only on events that carry a time (`sample`, `status_changed`, `features`, `reminder`, `paused`, `resumed`); `null` on the rest. |
-| `wall_clock` | String? | The same instant as `ts` rendered as ISO8601 (`withInternetDateTime`). Human-readable; use `ts` for arithmetic. |
-| `event` | String? | The event kind. See the event table. |
-| `state` | String? | Posture state after this line. On `status_changed` lines it is the new state; on every other line the writer stamps the last state it saw (initial `good`). Never `null`. |
-| `screen` | String? | Visible screen for this line. On `screen_shown` lines it is the screen just shown; elsewhere the writer stamps the last screen it saw (initial `home`). Never `null`. |
-| `distance_cm` | Double? | Distance to the book in cm, for the sample/status/reminder at this tick; `null` when no face was detected or the event carries no sample. |
-| `pitch_deg` | Double? | Head pitch in degrees for the same ticks; `null` when the face was not detected. |
-| `alert_type` | String? | Reminder posture: one of the eight `PostureKind` rawValues (see the `alert_type` vocabulary). Filled on `reminder`, `speech_timeout`, `speech_unavailable` and `speech_played` lines. |
-| `level` | Int? | Reminder level: `1` (gentle) or `2` (voice). Filled on `reminder`, `speech_timeout` and `speech_played` lines. |
-| `breach_seconds` | Double? | On a `reminder` line: accumulated breach seconds for this episode at this reminder. An absence pause stops the accumulator, so it is wall-clock time minus any pause inside the episode and can lag the distance from the episode's first breaching sample. |
-| `sensitivity` | String? | On the `config` line: `low` / `medium` / `high`. |
-| `distance_threshold_cm` | Double? | On the `config` line: the near threshold in cm for this session. |
-| `pitch_threshold_deg` | Double? | On the `config` line: the head-down threshold in degrees for this session. |
-| `baseline_distance_cm` | Double? | On the `calibration_done` line: calibrated baseline distance (median of the non-empty calibration samples). |
-| `baseline_pitch_deg` | Double? | On the `calibration_done` line: calibrated baseline pitch, the reference for head-down. |
-| `total_seconds` | Double? | On the `session_ended` line: face-present reading time. |
-| `good_seconds` | Double? | On `session_ended`: time with neither violation. |
-| `near_seconds` | Double? | On `session_ended`: cumulative time in the near violation. |
-| `head_down_seconds` | Double? | On `session_ended`: cumulative time in the head-down violation. |
-| `paused_seconds` | Double? | On `session_ended`: time the face was not detected (excluded from `total_seconds`). |
-| `near_count` | Int? | On `session_ended`: near episodes that reached level 1. |
-| `near_remind_count` | Int? | On `session_ended`: near reminder **lines**, both levels. |
-| `head_down_count` | Int? | On `session_ended`: head-down episodes that reached level 1. |
-| `head_down_remind_count` | Int? | On `session_ended`: head-down reminder **lines**, both levels. |
-| `longest_good_streak_seconds` | Double? | On `session_ended`: longest unbroken run of good seconds. |
-| `scenario` | String? | On the `session_started` line: the scripted scenario name, or `null` for a camera run. |
-| `message` | String? | On a `cue_played` line: the cue's name — `warn_before_end`, `end_soft` or `end_chime`. `null` on every other line. |
-| `battery_level` | Double? | Battery charge in `0...1`. **Writer-sampled**, not event-driven — see below. |
-| `thermal_state` | String? | `nominal` / `fair` / `serious` / `critical`. **Writer-sampled** — see below. |
-| `highlighted_feature` | String? | On a `features` line: the `PostureFeature` rawValue the debug overlay is highlighting right now, or `null` when nothing is highlighted. |
-| `feature_values` | Object? | On a `features` line: one entry per feature, keyed by `PostureFeature` rawValue, each `{"value": …, "threshold": …, "over": …}` (see below). `null` on every other line — but the key itself is present on every line like the rest. |
-| `view_mode` | String? | On a `view_mode` line: `avatar` (point-cloud avatar) or `board` (the black-board fallback). |
-| `overlay_on` | Bool? | On a `view_mode` line: whether the debug skeleton/feature overlay is on. |
-| `avatar_on` | Bool? | On a `view_mode` line: whether avatar mode is on. |
-| `posture_stats` | Object? | On the `session_ended` line: one entry per `PostureKind` rawValue with `{"episodes": …, "reminders": …, "seconds": …}` (see below). `null` on every other line — but the key itself is present on every line like the rest. |
-| `remaining_seconds` | Double? | On a `pomodoro_tick` line: seconds left in the phase the timer is in. `null` on every other line — but the key itself is present on every line like the rest. |
-| `phase` | String? | On a `pomodoro_tick` line: the phase's `PomodoroPhase` rawValue, `focus` / `shortBreak` / `longBreak`. `null` on every other line — but the key itself is present on every line like the rest. |
+| `ts` | Int64 | 产出该行时的 Unix 纪元**毫秒**。每行都存在且非 `null`。 |
+| `t` | Double? | **会话开始后的秒数。** 只有携带时间的事件才填写（`sample`、`status_changed`、`features`、`reminder`、`paused`、`resumed`）；其余为 `null`。 |
+| `wall_clock` | String? | 与 `ts` 同一时刻的 ISO8601 表示（`withInternetDateTime`）。便于人读；算术请用 `ts`。 |
+| `event` | String? | 事件类型。见事件表。 |
+| `state` | String? | 该行之后的体态状态。在 `status_changed` 行它是新状态；在其他每一行，写入器盖上它最近看到的状态（初始为 `good`）。永不为 `null`。 |
+| `screen` | String? | 该行对应的可见界面。在 `screen_shown` 行它是刚展示的界面；其他行写入器盖上最近看到的界面（初始为 `home`）。永不为 `null`。 |
+| `distance_cm` | Double? | 该 tick 的样本/状态/提醒对应的到书本距离，单位厘米；未检测到人脸或事件不携带样本时为 `null`。 |
+| `pitch_deg` | Double? | 同一 tick 的头部俯仰角，单位度；未检测到人脸时为 `null`。 |
+| `alert_type` | String? | 提醒对应的体态：八个 `PostureKind` rawValue 之一（见 `alert_type` 词汇）。在 `reminder`、`speech_timeout`、`speech_unavailable` 与 `speech_played` 行填写。 |
+| `level` | Int? | 提醒级别：`1`（轻提示）或 `2`（语音）。在 `reminder`、`speech_timeout` 与 `speech_played` 行填写。 |
+| `breach_seconds` | Double? | 在 `reminder` 行：该回合在本次提醒时累计的越阈秒数。无人暂停会停止累加器，因此它是墙上时间减去该回合内的任何暂停，可能落后于从回合首个越阈样本起的距离。 |
+| `sensitivity` | String? | 在 `config` 行：`low` / `medium` / `high`。 |
+| `distance_threshold_cm` | Double? | 在 `config` 行：本次会话的“太近”阈值，单位厘米。 |
+| `pitch_threshold_deg` | Double? | 在 `config` 行：本次会话的“低头”阈值，单位度。 |
+| `baseline_distance_cm` | Double? | 在 `calibration_done` 行：校准后的基线距离（非空校准样本的中位数）。 |
+| `baseline_pitch_deg` | Double? | 在 `calibration_done` 行：校准后的基线俯仰角，即“低头”的参照。 |
+| `total_seconds` | Double? | 在 `session_ended` 行：检测到人脸的在座时间。 |
+| `good_seconds` | Double? | 在 `session_ended` 行：没有任何体态越阈的时间。 |
+| `near_seconds` | Double? | 在 `session_ended` 行：“太近”越阈的累计时间。 |
+| `head_down_seconds` | Double? | 在 `session_ended` 行：“低头”越阈的累计时间。 |
+| `paused_seconds` | Double? | 在 `session_ended` 行：未检测到人脸的时间（不计入 `total_seconds`）。 |
+| `near_count` | Int? | 在 `session_ended` 行：达到一级的“太近”回合数。 |
+| `near_remind_count` | Int? | 在 `session_ended` 行：“太近”的提醒**行**数，两个级别都算。 |
+| `head_down_count` | Int? | 在 `session_ended` 行：达到一级的“低头”回合数。 |
+| `head_down_remind_count` | Int? | 在 `session_ended` 行：“低头”的提醒**行**数，两个级别都算。 |
+| `longest_good_streak_seconds` | Double? | 在 `session_ended` 行：最长连续良好秒数。 |
+| `scenario` | String? | 在 `session_started` 行：脚本化场景名；相机运行为 `null`。 |
+| `message` | String? | 在 `cue_played` 行：提示音名称——`warn_before_end`、`end_soft` 或 `end_chime`。其他行为 `null`。 |
+| `battery_level` | Double? | 电量比例 `0...1`。**由写入器采样**，不是事件驱动——见下文。 |
+| `thermal_state` | String? | `nominal` / `fair` / `serious` / `critical`。**由写入器采样**——见下文。 |
+| `highlighted_feature` | String? | 在 `features` 行：调试叠加层当前标红的 `PostureFeature` rawValue；没有高亮时为 `null`。 |
+| `feature_values` | Object? | 在 `features` 行：每项特征一个条目，键为 `PostureFeature` rawValue，值为 `{"value": …, "threshold": …, "over": …}`（见下文）。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
+| `view_mode` | String? | 在 `view_mode` 行：`avatar`（点云形象）或 `board`（黑板回退）。 |
+| `overlay_on` | Bool? | 在 `view_mode` 行：调试骨架/特征叠加层是否开启。 |
+| `avatar_on` | Bool? | 在 `view_mode` 行：形象模式是否开启。 |
+| `posture_stats` | Object? | 在 `session_ended` 行：每个 `PostureKind` rawValue 一个条目，值为 `{"episodes": …, "reminders": …, "seconds": …}`（见下文）。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
+| `remaining_seconds` | Double? | 在 `pomodoro_tick` 行：计时器当前阶段剩余秒数。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
+| `phase` | String? | 在 `pomodoro_tick` 行：当前阶段的 `PomodoroPhase` rawValue，`focus` / `shortBreak` / `longBreak`。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
 
-### The `feature_values` nested shape
+### `feature_values` 的嵌套结构
 
-`feature_values` is the per-tick object key; `posture_stats` (the next section) is the summary's, and every other key's value is a scalar. Its keys are the eight `PostureFeature` rawValues (`distance`, `head_pitch`, `head_roll`, `shoulder_tilt`, `head_height_drop`, `hand_to_face`, `head_forward`, `slouch`); each maps to a fixed triple:
+`feature_values` 是逐 tick 的对象键；`posture_stats`（下一节）是汇总的对象键，其他键的值都是标量。它的键是八个 `PostureFeature` rawValue（`distance`、`head_pitch`、`head_roll`、`shoulder_tilt`、`head_height_drop`、`hand_to_face`、`head_forward`、`slouch`）；每个映射到一个固定三元组：
 
 ```json
 "feature_values": {
@@ -119,15 +94,15 @@ six are non-null on every line.
 }
 ```
 
-- `value` — this sample's reading of the feature, in the feature's own unit (cm, degrees, metres, or a normalized ratio; see `PostureFeature` in `GLOSSARY.md`).
-- `threshold` — the threshold that value was judged against for this session.
-- `over` — whether the value breached its threshold.
+- `value`——本样本对该特征的读数，使用特征自己的单位（厘米、度、米或归一化比例；见 `GLOSSARY.md` 中的 `PostureFeature`）。
+- `threshold`——本次会话判定该值所用的阈值。
+- `over`——该值是否越阈。
 
-The baseline a reading was measured against is deliberately **not** in the triple; QA reads it off the `calibration_done` line. A feature whose inputs were missing is still present, with its `value` set to half the threshold and `over` `false` — an absent measurement is never recorded as a breach.
+读数所参照的基线刻意**不**放进三元组；QA 从 `calibration_done` 行读取。输入缺失的特征仍然存在，其 `value` 取阈值的一半、`over` 为 `false`——缺失的测量永远不会被记成越阈。
 
-### The `posture_stats` nested shape
+### `posture_stats` 的嵌套结构
 
-`posture_stats` is filled on the `session_ended` line only, and is JSON `null` on every other line. It has one entry per `PostureKind` rawValue — all eight, the two experimental kinds included — so a consumer never has to test for a kind. Each entry is a fixed triple:
+`posture_stats` 只在 `session_ended` 行填写，其他行为 JSON `null`。每个 `PostureKind` rawValue 一个条目——全部八个，包括两个实验级体态——因此消费者不必检查某个体态是否存在。每个条目是固定三元组：
 
 ```json
 "posture_stats": {
@@ -135,93 +110,77 @@ The baseline a reading was measured against is deliberately **not** in the tripl
 }
 ```
 
-- `episodes` — episodes of that posture that reached level 1, whether or not the line was voiced. For `near` and `head_down` this is the same number as `near_count` / `head_down_count`.
-- `reminders` — reminder **lines** emitted for that posture, both levels; an escalated episode counts twice. For `near` and `head_down` this is the same number as `near_remind_count` / `head_down_remind_count`, and it is `0` for a kind that never speaks.
-- `seconds` — accumulated breach seconds for that posture, with pauses excluded. For `near` and `head_down` it agrees with `near_seconds` / `head_down_seconds`, which the QA checker cross-checks.
+- `episodes`——该体态达到一级的回合数，无论是否发声。对 `near` 与 `head_down`，它与 `near_count` / `head_down_count` 相同。
+- `reminders`——该体态发出的提醒**行**数，两个级别都算；升级过的回合计两次。对 `near` 与 `head_down`，它与 `near_remind_count` / `head_down_remind_count` 相同；永不发声的体态为 `0`。
+- `seconds`——该体态累计的越阈秒数，不含暂停。对 `near` 与 `head_down`，它与 `near_seconds` / `head_down_seconds` 一致，QA 校验器会交叉核对。
 
-A kind that never breached is present with all three values `0`. The two experimental kinds (`head_forward`, `slouch`) never emit a reminder, so their `episodes` can be non-zero while `reminders` stays `0` — that is the intended reading, not a contradiction.
+从未越阈的体态也会存在，三个值都是 `0`。两个实验级体态（`head_forward`、`slouch`）永不发出提醒，因此它们的 `episodes` 可能非零而 `reminders` 保持 `0`——这是预期读法，不是矛盾。
 
-## Events
+## 事件
 
-| `event` | Meaning | Non-`null` keys it fills (besides the always-set `ts`, `state`, `screen`) |
+| `event` | 含义 | 除始终设置的 `ts`、`state`、`screen` 外，它填写的非 `null` 键 |
 |---|---|---|
-| `session_started` | A session began. | `scenario` |
-| `config` | The thresholds in force for the session. | `sensitivity`, `distance_threshold_cm`, `pitch_threshold_deg` |
-| `calibration_done` | Calibration finished; the baseline is set. | `baseline_distance_cm`, `baseline_pitch_deg` |
-| `screen_shown` | A screen appeared. | `screen` |
-| `sample` | One camera tick (10 Hz in a scripted run). | `t`, `distance_cm`, `pitch_deg` |
-| `status_changed` | The displayed posture state changed. | `t`, `state`, `distance_cm`, `pitch_deg` |
-| `features` | A feature sample line — one per five samples (2 Hz at the 10 Hz tick). Enough to reconstruct a decision, not enough to flood the log. | `t`, `highlighted_feature`, `feature_values` |
-| `view_mode` | A layer-state change: the avatar / black-board mode or either overlay switch changed. | `view_mode`, `overlay_on`, `avatar_on` |
-| `reminder` | A reminder fired (level 1 gentle or level 2 voice). | `t`, `alert_type`, `level`, `breach_seconds`, `distance_cm`, `pitch_deg` |
-| `speech_timeout` | The audio watchdog fired: a clip started but never reported finishing within its length + 2 s, so the queue was advanced anyway. | `alert_type`, `level` (no `t` — the player has no session clock) |
-| `speech_unavailable` | The posture's placeholder clip could not be loaded or decoded, so the reminder was silent. Nothing is played twice, and the queue advances. | `alert_type` (no `t`, no `level`) |
-| `speech_played` | A clip reported that it **started** playing. Written where the player actually starts the clip, not where it was queued, so the line never claims audio for an asset that is missing or will not play — those report `speech_unavailable` instead. It is proof that the player loaded and started the clip, not that a room heard it. | `alert_type`, `level` (no `t` — the player has no session clock) |
-| `pomodoro_tick` | The pomodoro countdown, written **once per second of the sample clock** while a phase is running, so a run is a descending series of lines instead of a single start and end. One line per sample (10 Hz) would bury the log; this is the pomodoro flow only, and a phase that is paused or parked writes nothing. | `remaining_seconds`, `phase` (no `t` — read the instant off `ts`, which is on every line) |
-| `cue_played` | A pomodoro cue reported that it **started** playing: the one-minute warning, or the end sound of a finished focus. Written where the clip really started, so a cue that could not be loaded or started writes nothing, and `EndSound.none` writes nothing at all. Like `speech_played`, it is proof that the player started the clip, not that a room heard it. | `message` (the cue name); no `t` — the player has no session clock |
-| `paused` | The absence pause started (no face for 3 s). | `t` |
-| `resumed` | The absence pause ended (a face reappeared). | `t` |
-| `session_ended` | The session ended; carries the summary. | `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `paused_seconds`, `near_count`, `near_remind_count`, `head_down_count`, `head_down_remind_count`, `longest_good_streak_seconds`, `posture_stats` |
+| `session_started` | 一次会话开始。 | `scenario` |
+| `config` | 本次会话生效的阈值。 | `sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg` |
+| `calibration_done` | 校准结束；基线已设定。 | `baseline_distance_cm`、`baseline_pitch_deg` |
+| `screen_shown` | 一个界面出现。 | `screen` |
+| `sample` | 一个相机 tick（脚本运行中为 10 Hz）。 | `t`、`distance_cm`、`pitch_deg` |
+| `status_changed` | 显示的体态状态发生变化。 | `t`、`state`、`distance_cm`、`pitch_deg` |
+| `features` | 特征采样行——每五个样本一行（10 Hz tick 下为 2 Hz）。足够重建一次判定，又不至于淹没日志。 | `t`、`highlighted_feature`、`feature_values` |
+| `view_mode` | 层状态变化：形象/黑板模式或任一叠加开关改变。 | `view_mode`、`overlay_on`、`avatar_on` |
+| `reminder` | 触发了一次提醒（一级轻提示或二级语音）。 | `t`、`alert_type`、`level`、`breach_seconds`、`distance_cm`、`pitch_deg` |
+| `speech_timeout` | 音频看门狗触发：片段开始后未在“时长 + 2 秒”内报告结束，因此队列仍被推进。 | `alert_type`、`level`（没有 `t`——播放器没有会话时钟） |
+| `speech_unavailable` | 该体态的占位片段无法加载或解码，因此提醒是静音的。不会重复播放，队列继续推进。 | `alert_type`（没有 `t`，没有 `level`） |
+| `speech_played` | 某个片段报告它**开始**播放。写在播放器真正开始片段的地方，而不是排队的地方，因此该行绝不会为缺失或无法播放的资源声称有声音——那些会写 `speech_unavailable`。它证明播放器已加载并开始片段，不证明房间里有人听到了。 | `alert_type`、`level`（没有 `t`——播放器没有会话时钟） |
+| `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
+| `cue_played` | 番茄钟提示音报告它**开始**播放：一分钟提醒，或完成专注的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
+| `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
+| `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |
+| `session_ended` | 会话结束；携带汇总。 | `total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`paused_seconds`、`near_count`、`near_remind_count`、`head_down_count`、`head_down_remind_count`、`longest_good_streak_seconds`、`posture_stats` |
 
-Ordering within one tick follows the engine: `sample`, then `paused`/`resumed`, then
-`status_changed` (only when the state changes), then any `reminder`s, then the `features`
-line when the tick is a feature sample (every fifth). When several postures fire
-`reminder`s on the same tick they appear in ascending `PostureKind.priority` order, one
-line per posture.
+单个 tick 内的顺序遵循引擎：`sample`，然后是 `paused`/`resumed`，然后是 `status_changed`（仅当状态改变），然后是任何 `reminder`，最后当该 tick 是特征样本（每第五个）时写 `features` 行。同一 tick 内多个体态触发 `reminder` 时，它们按 `PostureKind.priority` 升序出现，每个体态一行。
 
-In the pomodoro flow the same ordering holds per sample, and a sample's `pomodoro_tick`
-line comes last: a phase that ended on that sample has already moved on by the time the
-tick is written, so the tick always names the phase the sample left the timer in.
+番茄钟流程中，每个样本保持相同顺序，且该样本的 `pomodoro_tick` 行最后出现：在该样本上结束的阶段，到写 tick 时已经推进，因此 tick 总是标明样本离开计时器时所在的阶段。
 
-## Vocabularies
+## 词汇表
 
 ### `state`
 
-`good`, `no_person`, plus the eight posture rawValues: `desk_lean`, `near`,
-`head_forward`, `slouch`, `head_down`, `head_tilt`, `shoulder_tilt`, `chin_rest`.
+`good`、`no_person`，加上八个体态 rawValue：`desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 
-The ten values come from `PostureStatus` (`good`, `no_person`, or `posture(kind)`) and
-its rawValues are exactly `PostureKind`'s — there is one posture vocabulary, not two.
+这十个值来自 `PostureStatus`（`good`、`no_person` 或 `posture(kind)`），其 rawValue 与 `PostureKind` 完全一致——只有一套体态词汇，不是两套。
 
 ### `screen`
 
-`home`, `calibration`, `calibration_result`, `monitoring`, `summary`, `settings`
-(the reading flow), plus `pomodoro_main`, `pomodoro_settings`, `report_day`,
-`report_week`, `report_month` (the pomodoro flow, where the report's three scopes are
-three screen names so their screenshots cannot overwrite each other). Note `reminder`
-and `highlight` are **not** `screen` values: those screenshots are captured directly
-without a `screen_shown` line, so they never contaminate the `screen` key.
+`home`、`calibration`、`calibration_result`、`monitoring`、`summary`、`settings`（阅读流程），加上 `pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`（番茄钟流程；统计页的三个范围是三个界面名，因此它们的截图不会互相覆盖）。注意 `reminder` 与 `highlight` **不是** `screen` 值：这些截图直接捕获，不写 `screen_shown` 行，因此不会污染 `screen` 键。
 
 ### `alert_type`
 
-The same eight posture rawValues as `state`: `desk_lean`, `near`, `head_forward`,
-`slouch`, `head_down`, `head_tilt`, `shoulder_tilt`, `chin_rest`.
+与 `state` 相同的八个体态 rawValue：`desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 
 ### `level`
 
-`1` = gentle (tone + orange edge in the reading flow; the pomodoro keeps the line but
-plays no tone), `2` = voice (a bundled, pre-recorded WAV clip — there is no system TTS).
+`1` = 轻提示（阅读流程中为提示音 + 橙色边缘；番茄钟保留该行但不播放提示音），`2` = 语音（应用包内的预录 WAV 片段——没有系统 TTS）。
 
 ### `sensitivity`
 
-`low` → 25 cm / 25°, `medium` → 30 cm / 20°, `high` → 35 cm / 15°.
+`low` → 25 cm / 25°，`medium` → 30 cm / 20°，`high` → 35 cm / 15°。
 
 ### `thermal_state`
 
-`nominal`, `fair`, `serious`, `critical`.
+`nominal`、`fair`、`serious`、`critical`。
 
-## Swift-to-log name mapping
+## Swift 与日志名称映射
 
-The code keeps its own identifiers; the mapping happens only at the log boundary. This
-table is the single source of truth for the two vocabularies.
+代码保留自己的标识符；映射只发生在日志边界。本表是两套词汇的唯一事实来源。
 
-| Swift (code) | Log (JSONL) |
+| Swift（代码） | 日志（JSONL） |
 |---|---|
 | `PostureStatus.good` | `good` |
 | `PostureStatus.noPerson` | `no_person` |
-| `PostureStatus.posture(kind)` | `kind.rawValue` (one of the eight postures) |
-| `PostureKind.near` / `.headDown` / `.shoulderTilt` / … | `near` / `head_down` / `shoulder_tilt` / … (all eight rawValues) |
-| `PostureFeature.distance` / `.handToFace` / `.shoulderTilt` / … | `distance` / `hand_to_face` / `shoulder_tilt` / … (all eight rawValues) |
+| `PostureStatus.posture(kind)` | `kind.rawValue`（八种体态之一） |
+| `PostureKind.near` / `.headDown` / `.shoulderTilt` / … | `near` / `head_down` / `shoulder_tilt` / …（全部八个 rawValue） |
+| `PostureFeature.distance` / `.handToFace` / `.shoulderTilt` / … | `distance` / `hand_to_face` / `shoulder_tilt` / …（全部八个 rawValue） |
 | `ReminderLevel.gentle` / `.voice` | `level` `1` / `2` |
 | `MonitoringEvent.sessionStarted(...)` | `session_started` |
 | `MonitoringEvent.config(...)` | `config` |
@@ -236,167 +195,87 @@ table is the single source of truth for the two vocabularies.
 | `MonitoringEvent.speechTimeout(...)` | `speech_timeout` |
 | `MonitoringEvent.speechUnavailable(...)` | `speech_unavailable` |
 | `MonitoringEvent.speechPlayed(...)` | `speech_played` |
-| `MonitoringEvent.cuePlayed(...)` | `cue_played` (`message`) |
+| `MonitoringEvent.cuePlayed(...)` | `cue_played`（`message`） |
 | `MonitoringEvent.paused(...)` | `paused` |
 | `MonitoringEvent.resumed(...)` | `resumed` |
 | `MonitoringEvent.sessionEnded(...)` | `session_ended` |
-| `PomodoroPhase.focus` / `.shortBreak` / `.longBreak` | `phase` = `focus` / `shortBreak` / `longBreak` (the rawValues keep their camelCase spelling) |
+| `PomodoroPhase.focus` / `.shortBreak` / `.longBreak` | `phase` = `focus` / `shortBreak` / `longBreak`（rawValue 保留 camelCase 拼写） |
 | `PomodoroCue.warnBeforeEnd` / `.endSoft` / `.endChime` | `cue_played.message` = `warn_before_end` / `end_soft` / `end_chime` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
 | `SessionSummary.tooCloseCount` | `near_count` |
 | `SessionSummary.tooCloseRemindCount` | `near_remind_count` |
 | `SessionSummary.headDownCount` | `head_down_count` |
 | `SessionSummary.headDownRemindCount` | `head_down_remind_count` |
-| `SessionSummary.postureStats` | `posture_stats` (keyed by `PostureKind.rawValue`) |
+| `SessionSummary.postureStats` | `posture_stats`（以 `PostureKind.rawValue` 为键） |
 
-`PomodoroRecord` and `PomodoroOutcome` are **history vocabulary, not log keys**. The
-JSONL log has no `outcome` field: `completed`, `abandoned` and `interrupted` live in
-`Documents/pomodoro-history.json`, and the report counts `completedPomodoros` from the
-records whose outcome is `completed`. Likewise `PostureSegment.kind` uses the `state`
-vocabulary and adds `paused` for a pause band, which is a timeline value and never a
-`state` value. `EndSound` is a setting (`soft` / `chime` / `none`), not a key; it decides
-whether a cue clip starts and therefore whether a `cue_played` line exists at all.
+`PomodoroRecord` 与 `PomodoroOutcome` 是**历史词汇，不是日志键**。JSONL 日志没有 `outcome` 字段：`completed`、`abandoned` 与 `interrupted` 存放在 `Documents/pomodoro-history.json`，统计页从 outcome 为 `completed` 的记录计算 `completedPomodoros`。同样，`PostureSegment.kind` 使用 `state` 词汇，并额外允许 `paused` 表示暂停带；`paused` 是时间轴取值，永远不是 `state` 取值。`EndSound` 是设置项（`soft` / `chime` / `none`），不是键；它决定提示音片段是否开始，从而决定是否存在 `cue_played` 行。
 
-## Every posture is timed, logged and counted on its own
+## 每种体态独立计时、记录与计数
 
-v0.3 runs **one episode machine per `PostureKind`**, so each of the eight postures keeps
-its own breach clock, its own level-1/level-2 escalation and its own counters. The
-consequences for reading a log:
+v0.3 为**每种 `PostureKind` 运行一个回合状态机**，因此八种体态各自维护越阈时钟、一级/二级升级与计数器。阅读日志时的影响：
 
-- **A tick can carry more than one `reminder` line.** Every breaching, speakable posture
-  emits its own `reminder`; several fire on the same tick when several postures breach at
-  once, in ascending `PostureKind.priority` order. Nothing is suppressed to leave room
-  for another.
-- **The priority order only sequences the voice queue, it does not select one posture.**
-  `PostureKind.priority` (deskLean 1, near 2, headForward 3, slouch 4, headDown 5,
-  headTilt 6, shoulderTilt 7, chinRest 8) orders the *speech* queue so the player speaks
-  one line at a time; it never causes a breaching posture to go untimed, unlogged or
-  uncounted. `state` still reports only the single highest-priority breaching posture
-  (`dominant`), which is why `state` is coarser than the `reminder` lines.
-- **Experimental postures (head-forward, slouch) never speak.** At the default setting
-  (`experimentalPostures` off) they produce **no `reminder` at all** — not even a tone —
-  while still moving `state`, still writing `features` lines and still counting episodes
-  internally. With the experimental toggle on they enter the reminder stream but are
-  **capped at level 1**: at most one gentle tone, never a level-2 voice line, because
-  `PostureKind.voiceLine` is `nil` for them. So a `reminder` line whose `alert_type` is
-  `head_forward` or `slouch` is always `level` 1.
-- **`speech_unavailable` / `speech_timeout` follow the same `alert_type` rules** and are
-  only ever emitted for a kind that was allowed to speak.
+- **一个 tick 可以携带多条 `reminder` 行。** 每个越阈且可发声的体态都发出自己的 `reminder`；多个体态同时越阈时，同一 tick 会有多条，按 `PostureKind.priority` 升序。不会为了给另一个体态腾位置而抑制任何一条。
+- **优先级只给语音队列排序，不挑选单一体态。** `PostureKind.priority`（deskLean 1、near 2、headForward 3、slouch 4、headDown 5、headTilt 6、shoulderTilt 7、chinRest 8）给*语音*队列排序，让播放器一次说一条；它绝不会让越阈体态不计时、不记录或不计数。`state` 仍只报告优先级最高的单个越阈体态（`dominant`），因此 `state` 比 `reminder` 行更粗。
+- **实验级体态（头前伸、驼背）永不发声。** 在默认设置（`experimentalPostures` 关闭）下，它们**完全不产生 `reminder`**——连提示音也没有——但仍会驱动 `state`、写 `features` 行并在内部计数回合。旧的实验开关打开时，它们会进入提醒流但**最高只有一级**：最多一次轻提示，绝不会有二级语音，因为它们的 `PostureKind.voiceLine` 为 `nil`。Q4 已确认实验级体态永不触发任何提醒；上述旧开关行为只描述当前代码，待后续 ticket 对齐。
+- **`speech_unavailable` / `speech_timeout` 遵循同样的 `alert_type` 规则**，并且只为被允许发声的体态发出。
 
-## The counting convention: episodes vs reminder lines
+## 计数约定：回合与提醒行
 
-Every posture tracked by the engine has **two** counters, and they are counted
-differently. All eight reach `session_ended` through `posture_stats`; the flat
-`near_*` and `head_down_*` keys are the legacy pair that mirrors two of those entries
-for the QA checker, not the only postures that are counted:
+引擎跟踪的每种体态都有**两个**计数器，计数方式不同。全部八种都通过 `posture_stats` 进入 `session_ended`；扁平的 `near_*` 与 `head_down_*` 键是旧的一对，为 QA 校验器镜像其中两个条目，而不是唯一被计数的体态：
 
-- The `*_count` key (`near_count`, `head_down_count`) counts **episodes that reached
-  level 1** — one per episode, no matter how high it escalated. It is the same number as
-  `posture_stats[kind].episodes`.
-- The `*_remind_count` key (`near_remind_count`, `head_down_remind_count`) counts
-  **reminder lines**, both levels. It is the same number as
-  `posture_stats[kind].reminders`.
+- `*_count` 键（`near_count`、`head_down_count`）计数**达到一级的回合**——每个回合一次，无论升到多高。它与 `posture_stats[kind].episodes` 相同。
+- `*_remind_count` 键（`near_remind_count`、`head_down_remind_count`）计数**提醒行**，两个级别都算。它与 `posture_stats[kind].reminders` 相同。
 
-So an episode that escalates to level 2 adds **1** to the episode counter and **2** to
-the remind counter. Concretely, a run where a single near episode fires level 1 then
-level 2, and a head-down episode fires only level 1, ends with:
+因此，一个升级到二级的回合给回合计数器加 **1**，给提醒计数器加 **2**。具体来说，一次运行中若单个“太近”回合先发一级再发二级，“低头”回合只发一级，最终为：
 
 ```
 near_count = 1              near_remind_count = 2
 head_down_count = 1         head_down_remind_count = 1
 ```
 
-Each counter is incremented by `MonitoringEngine` as the corresponding reminder fires,
-alongside the episode's first (level 1) reminder. `near_count` is the legacy name for
-the near episode counter; there is no `head_down_episode_count`.
+`MonitoringEngine` 在对应提醒发出时递增每个计数器，与回合的首次（一级）提醒同时发生。`near_count` 是“太近”回合计数器的旧名称；不存在 `head_down_episode_count`。
 
-## Statistics semantics (`session_ended`, and what `verify-session.py` recomputes)
+## 统计语义（`session_ended`，以及 `verify-session.py` 重算什么）
 
-The checker on `scripts/verify-session.py` recomputes the summary from the `sample`
-lines alone — nothing is taken on trust from the app — using exactly these rules, so a
-log that satisfies them is a log whose summary is derivable:
+`scripts/verify-session.py` 上的校验器只从 `sample` 行重算汇总——不信任应用给出的任何数字——并严格使用以下规则；因此满足这些规则的日志，其汇总就是可推导的：
 
-- **`dt` is credited to the sample at the start of the interval.** For two consecutive
-  samples at `t0 < t1`, the interval `dt = t1 − t0` is attributed to the `t0` sample's
-  class, not the `t1` sample's. Consequence: a change in state is reflected on the
-  interval that *begins* at the transition, and the final gap from the last sample to
-  the session end is credited by the engine's `finish` but is not visible to a
-  samples-only recompute — hence the checker's ±1 s tolerance on the totals.
-- **No time accrues while the face is missing.** When the `t0` sample has a `null`
-  distance or pitch, the interval is credited to `paused_seconds` and to nothing else:
-  no `total_seconds`, no violation seconds, and the good streak neither grows nor
-  resets.
-- **`total_seconds` is face-present time**: it adds `dt` over exactly the intervals
-  whose start sample had a detected face.
-- **`good_seconds` excludes every posture, not just the first two.** It adds `dt` only
-  when the start sample had a face and **no posture breached at all** — the same condition
-  as `state = good`. Before v0.3 this counted only near and head-down, so a session spent
-  chin-resting reported itself as entirely good; if you are reading an older log, expect
-  that number to disagree with the `status_changed` timeline.
-- **The two violation counters are independent and may overlap.** `near_seconds` and
-  `head_down_seconds` each add `dt` whenever their own predicate holds, so a sample
-  that is both too close and head-down contributes the same `dt` to **both**. It is
-  therefore normal for `near_seconds + head_down_seconds + good_seconds` to exceed
-  `total_seconds`. The predicates are strict: near is `distance_cm <
-  distance_threshold_cm` (equal is not a violation), head-down is `baseline_pitch_deg −
-  pitch_deg > pitch_threshold_deg`. The other six postures also have a seconds counter,
-  but only in `posture_stats[kind].seconds`; there is no flat `*_seconds` key for them.
-- **`longest_good_streak_seconds`** is the longest unbroken run of good intervals; a breach
-  of **any** posture resets the running streak to 0, and absence neither extends it nor
-  resets it.
-- **Thresholds come from the log, not from constants**: the checker reads
-  `distance_threshold_cm` and `pitch_threshold_deg` from the `config` line and
-  `baseline_pitch_deg` from the `calibration_done` line.
+- **`dt` 记在区间起点的样本上。** 对两个连续样本 `t0 < t1`，区间 `dt = t1 − t0` 归属于 `t0` 样本的类别，而不是 `t1` 样本的类别。结果：状态变化反映在从切换点*开始*的区间上；从最后样本到会话结束的末尾空档由引擎的 `finish` 记入，但只看样本的重算看不到它——因此校验器对总计有 ±1 秒容差。
+- **人脸缺失期间不累计时间。** 当 `t0` 样本的 `distance` 或 `pitch` 为 `null` 时，该区间只记入 `paused_seconds`，不记入其他任何项：不计 `total_seconds`、不计越阈秒数，良好连续段既不增长也不重置。
+- **`total_seconds` 是有人脸在座的时间**：它只在起点样本检测到人脸的区间上累加 `dt`。
+- **`good_seconds` 排除所有体态，而不只是前两种。** 只有当起点样本有人脸且**没有任何体态越阈**时才累加 `dt`——与 `state = good` 的条件相同。v0.3 之前它只统计“太近”和“低头”，因此一次一直托腮的会话会把自己报告成完全良好；如果你在阅读更旧的日志，这个数字可能与 `status_changed` 时间轴不一致。
+- **两个越阈计数器相互独立，可能重叠。** 只要各自的谓词成立，`near_seconds` 与 `head_down_seconds` 就各自累加 `dt`，因此同时“太近”且“低头”的样本会把同一段 `dt` 计入**两者**。所以 `near_seconds + head_down_seconds + good_seconds` 超过 `total_seconds` 是正常的。谓词是严格的：“太近”为 `distance_cm < distance_threshold_cm`（相等不算越阈），“低头”为 `baseline_pitch_deg − pitch_deg > pitch_threshold_deg`。其余六种体态也有秒数计数器，但只在 `posture_stats[kind].seconds` 中；它们没有扁平的 `*_seconds` 键。
+- **`longest_good_streak_seconds`** 是最长连续良好区间；**任何**体态越阈都会把当前连续段重置为 0，无人既不会延长也不会重置它。
+- **阈值来自日志，而不是常量**：校验器从 `config` 行读取 `distance_threshold_cm` 与 `pitch_threshold_deg`，从 `calibration_done` 行读取 `baseline_pitch_deg`。
 
-## Battery and thermal state are a trend line, not a per-sample reading
+## 电量与热状态是趋势线，不是逐样本读数
 
-`battery_level` and `thermal_state` have no event behind them: `FileDebugLogger` samples
-them from the device itself and stamps every line with the most recent value. The
-sample is **refreshed at most once every 10 seconds**, so a run of consecutive lines
-shares the same value and the pair forms a coarse trend. To read them, compare the
-first and last line of a session (see AC8); do not treat a change between two adjacent
-lines as a per-sample reading. `battery_level` is `null` where the device does not
-report a charge (e.g. the simulator), and `thermal_state` is one of `nominal`, `fair`,
-`serious`, `critical`.
+`battery_level` 与 `thermal_state` 背后没有事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。阅读时比较一次会话的首行与末行（见 AC8）；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
 
-## Screenshots
+## 截图
 
-`Documents/debug/screenshots/` holds one PNG per `screen_shown` name the run reached,
-plus two direct-capture evidence shots:
+`Documents/debug/screenshots/` 为运行到达过的每个 `screen_shown` 名称保存一张 PNG，另加两张直接捕获的证据截图：
 
-- Reading flow: `home`, `calibration`, `calibration_result`, `monitoring`, `summary`,
-  `settings`.
-- Pomodoro flow: `pomodoro_main`, `pomodoro_settings`, and `report_day` /
-  `report_week` / `report_month` (one name per report scope).
-- Evidence: `reminder` (the first level-1 reminder) and `highlight` (the first
-  highlighted feature). Neither writes a `screen_shown` line.
+- 阅读流程：`home`、`calibration`、`calibration_result`、`monitoring`、`summary`、`settings`。
+- 番茄钟流程：`pomodoro_main`、`pomodoro_settings`，以及 `report_day` / `report_week` / `report_month`（每个统计范围一个名称）。
+- 证据：`reminder`（首次一级提醒）与 `highlight`（首次高亮特征）。二者都不写 `screen_shown` 行。
 
-A name only exists if its screen was reached. In a scripted reading run the `settings`
-shot is produced only with `-captureSettings`; in the pomodoro flow the settings screen
-is reached with `-settings 1`, and a report screen with `-report day|week|month`. The
-`reminder` shot exists only in a run where a level-1 reminder actually fired, and
-`verify-session.py` drops it from its expected set otherwise.
+只有到达过对应界面，名称才存在。脚本化阅读运行中，`settings` 截图只在带 `-captureSettings` 时产生；番茄钟流程中，设置页通过 `-settings 1` 到达，统计页通过 `-report day|week|month` 到达。`reminder` 截图只在实际触发过一级提醒的运行中存在，否则 `verify-session.py` 会把它从期望集合中移除。
 
-## Which key answers which acceptance criterion
+## 哪个键回答哪条验收标准
 
-This table indexes the reading-session acceptance list (AC1 = first run through
-`calibration_done`, and so on). The pomodoro round numbers its own checklist separately:
-there its AC1 is the countdown, answered by the `pomodoro_tick` series — `remaining_seconds`
-falling in step with the `ts` gap between lines, with no gap in the series — and its AC4 is
-the audio, answered by `speech_played` lines (`alert_type` + `level`) plus the absence of
-any such line while the voice switch is off.
+本表索引阅读会话验收清单（AC1 = 首次运行经过 `calibration_done`，依此类推）。番茄钟轮次单独编号自己的清单：那里的 AC1 是倒计时，由 `pomodoro_tick` 序列回答——`remaining_seconds` 与相邻行之间的 `ts` 间隔同步下降，且序列中没有断档——AC4 是音频，由 `speech_played` 行（`alert_type` + `level`）以及语音开关关闭时完全没有这类行来回答。
 
-| AC | Evidence in the log |
+| AC | 日志中的证据 |
 |---|---|
-| AC1 | Order of `screen_shown` lines (`home` → `calibration` → `calibration_result`) and the `calibration_done` line's `baseline_distance_cm` / `baseline_pitch_deg`. |
-| AC2 | `distance_cm` / `pitch_deg` on `sample` lines to find the first breach; the `t` values on `reminder` lines (`level` 1 and 2) minus that first breach; `distance_threshold_cm` / `pitch_threshold_deg` from `config`; `baseline_pitch_deg`. |
-| AC3 | `status_changed` with `state = good` after the approach; absence of `near` `reminder` lines within the cooldown window. |
-| AC4 | `reminder` lines with `alert_type = head_down`, `level` 1 and (when sustained) 2. |
-| AC5 | `status_changed` with `state = no_person`; `paused` / `resumed` lines; `paused_seconds` and the fact that `total_seconds` does not grow across the pause. |
-| AC6 | The `session_ended` summary keys: `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `longest_good_streak_seconds` (recomputed from samples). |
-| AC7 | `config`: `sensitivity`, `distance_threshold_cm`, `pitch_threshold_deg` (35/15, 30/20, 25/25); the shift in when the `reminder`s fire. |
-| AC8 | `battery_level` and `thermal_state` on the first and last lines; the `ts` span across the run. |
-| AC9 | The expected screenshot set under `Documents/debug/screenshots/` (not a log key). |
-| AC10 | Same keys as AC2/AC4 from a real-camera run: `reminder` timing and `alert_type`. |
-| AC11 | No `reminder` lines at all. |
-| AC12 | `paused` lines, no `reminder` lines, no violation seconds, and every `reminder` line carrying `t`, `alert_type` and `level`. |
+| AC1 | `screen_shown` 行的顺序（`home` → `calibration` → `calibration_result`）以及 `calibration_done` 行的 `baseline_distance_cm` / `baseline_pitch_deg`。 |
+| AC2 | `sample` 行上的 `distance_cm` / `pitch_deg` 用来找首次越阈；`reminder` 行上的 `t`（`level` 1 与 2）减去首次越阈；`config` 中的 `distance_threshold_cm` / `pitch_threshold_deg`；`baseline_pitch_deg`。 |
+| AC3 | 靠近之后 `status_changed` 的 `state = good`；冷却窗口内没有 `near` 的 `reminder` 行。 |
+| AC4 | `alert_type = head_down` 的 `reminder` 行，`level` 1 以及（持续时）2。 |
+| AC5 | `status_changed` 的 `state = no_person`；`paused` / `resumed` 行；`paused_seconds`，以及暂停期间 `total_seconds` 不增长。 |
+| AC6 | `session_ended` 的汇总键：`total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`longest_good_streak_seconds`（从样本重算）。 |
+| AC7 | `config`：`sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg`（35/15、30/20、25/25）；`reminder` 触发时机的变化。 |
+| AC8 | 首行与末行的 `battery_level` 与 `thermal_state`；整个运行的 `ts` 跨度。 |
+| AC9 | `Documents/debug/screenshots/` 下的期望截图集合（不是日志键）。 |
+| AC10 | 真机相机运行中与 AC2/AC4 相同的键：`reminder` 时机与 `alert_type`。 |
+| AC11 | 完全没有 `reminder` 行。 |
+| AC12 | `paused` 行、没有 `reminder` 行、没有越阈秒数，且每条 `reminder` 行都带 `t`、`alert_type` 与 `level`。 |

@@ -1,21 +1,21 @@
-# ADR-0005: Offline-only operation and the 3D body cloud privacy boundary
+# ADR-0005：纯离线运行与 3D 人形点云的隐私边界
 
-- **Date**: 2026-10-28
-- **Status**: Accepted
+- **日期**：2026-10-28
+- **状态**：已接受
 
-## Context
+## 背景
 
-The app watches a child's face and body in the home. Sending that stream anywhere — even to a "privacy-friendly" cloud — would turn a local posture tool into a surveillance surface, and a family cannot audit what leaves the device. At the same time the child needs positive feedback: a black screen with numbers reads as a test, while a figure that mirrors their own body reads as a mirror.
+这个应用在家庭里观察孩子的脸和身体。把这条数据流发到任何地方——哪怕是“隐私友好”的云端——都会把本地的坐姿工具变成监控面，而家庭无法审计离开了设备的内容。与此同时，孩子需要正向反馈：黑屏加数字像考试，而映出自己身体的形象像一面镜子。
 
-## Decision
+## 决策
 
-PostureLab is **offline by construction**: no network entitlement, no HTTP client, no analytics endpoint. Pomodoro history (`Documents/pomodoro-history.json`), session logs, screenshots and settings (UserDefaults) stay inside the app sandbox on the device. The parent's report is aggregated from that local history by a pure function; nothing is uploaded, and there is no account.
+PostureLab **从构造上就是离线的**：没有网络权限、没有 HTTP 客户端、没有分析端点。番茄钟历史（`Documents/pomodoro-history.json`）、会话日志、截图与设置（UserDefaults）都留在设备的应用沙盒内。家长统计页由纯函数从本地历史聚合；不上传任何内容，也没有账号。
 
-The child's mirror is a **3D body cloud synthesized from the front TrueDepth depth map and the person-segmentation mask** — a sparse coloured point set that hugs the figure, with a clean background and no points. Only depth and mask geometry are rendered: the original RGB camera image is never displayed, never persisted, and never leaves the device.
+孩子的镜像是一团**由前置 TrueDepth 深度图与人像分割遮罩合成的 3D 人形点云**——贴合人形的稀疏彩色点集，背景干净、没有点阵。渲染只使用深度与遮罩几何：原始 RGB 摄像头画面绝不显示、绝不落盘，也绝不离开设备。
 
-## Consequences
+## 影响
 
-- Deleting the app deletes all family data; "clear history" in the report is a real, local delete.
-- The figure cannot show clothing, the room or a face, which is the point: the parent's report and the child's mirror need posture, not identity.
-- The current real-device input source emits distance and pitch only, and the cloud is currently built from pose joints without a segmentation mask; on a camera run it shows its empty state. Wiring TrueDepth depth and person segmentation into the renderer, with no RGB path, is a follow-up ticket.
-- Any future sync, backup or crash-reporting feature reopens this ADR; it is not an implementation detail to slip in.
+- 删除应用即删除全部家庭数据；统计页的「清空历史」是真实的本地删除。
+- 形象无法显示衣物、房间或人脸，这正是重点：家长报告与孩子镜像需要的是体态，不是身份。
+- 当前真机输入源只产出距离与俯仰角，点云仍由姿态关节点生成且没有人像分割遮罩；在相机运行下显示为空态。把 TrueDepth 深度与人像分割接入渲染器，并保持无 RGB 通路，是后续 ticket 的工作。
+- 未来任何同步、备份或崩溃上报功能都会重开本 ADR；它不是可以顺手塞进去的实现细节。
