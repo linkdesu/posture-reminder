@@ -11,11 +11,11 @@ The app watches a child's face and body in the home. Sending that stream anywher
 
 PostureLab is **offline by construction**: no network entitlement, no HTTP client, no analytics endpoint. Pomodoro history (`Documents/pomodoro-history.json`), session logs, screenshots and settings (UserDefaults) stay inside the app sandbox on the device. The parent's report is aggregated from that local history by a pure function; nothing is uploaded, and there is no account.
 
-The child's mirror is a **3D body cloud built from pose joints** — a sparse coloured point set covering the head, torso and upper arms. The renderer draws geometry only: it never reads, displays or persists an RGB camera image, and the depth frame an input sample may carry feeds the figure and the debug overlay, never a file. The input contract itself has no image field, so an RGB frame cannot leak through code that later forgets the rule.
+The child's mirror is a **3D body cloud synthesized from the front TrueDepth depth map and the person-segmentation mask** — a sparse coloured point set that hugs the figure, with a clean background and no points. Only depth and mask geometry are rendered: the original RGB camera image is never displayed, never persisted, and never leaves the device.
 
 ## Consequences
 
 - Deleting the app deletes all family data; "clear history" in the report is a real, local delete.
 - The figure cannot show clothing, the room or a face, which is the point: the parent's report and the child's mirror need posture, not identity.
-- The current real-device input source emits distance and pitch only; joints and the coarse depth frame come from the synthetic rig, so on a camera run the cloud shows its empty state. Wiring TrueDepth body geometry into the real source is a follow-up; it must keep this boundary (no RGB) when it lands.
+- The current real-device input source emits distance and pitch only, and the cloud is currently built from pose joints without a segmentation mask; on a camera run it shows its empty state. Wiring TrueDepth depth and person segmentation into the renderer, with no RGB path, is a follow-up ticket.
 - Any future sync, backup or crash-reporting feature reopens this ADR; it is not an implementation detail to slip in.
