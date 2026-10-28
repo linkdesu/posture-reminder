@@ -30,8 +30,8 @@ Inside the app sandbox, under `Documents/`:
   the launch time as ISO8601 with the colons stripped, e.g. a launch at
   `2026-10-17T01:23:45Z` produces `session-2026-10-17T012345Z.jsonl`. A fresh run
   writes a new file; `run-scenarios.sh` picks the newest one.
-- `Documents/debug/screenshots/<name>.png` — the seven page screenshots, names listed
-  under "Screenshots" below.
+- `Documents/debug/screenshots/<name>.png` — one PNG per screen the run showed, plus the
+  reminder/highlight evidence shots; names listed under "Screenshots" below.
 
 The logger is only active when debug mode is enabled (`FileDebugLogger.isEnabled`);
 with it off, no files are written.
@@ -185,9 +185,12 @@ its rawValues are exactly `PostureKind`'s — there is one posture vocabulary, n
 
 ### `screen`
 
-`home`, `calibration`, `calibration_result`, `monitoring`, `summary`, `settings`.
-Note `reminder` is **not** a `screen` value: the reminder screenshot is captured
-directly without a `screen_shown` line, so it never contaminates the `screen` key.
+`home`, `calibration`, `calibration_result`, `monitoring`, `summary`, `settings`
+(the reading flow), plus `pomodoro_main`, `pomodoro_settings`, `report_day`,
+`report_week`, `report_month` (the pomodoro flow, where the report's three scopes are
+three screen names so their screenshots cannot overwrite each other). Note `reminder`
+and `highlight` are **not** `screen` values: those screenshots are captured directly
+without a `screen_shown` line, so they never contaminate the `screen` key.
 
 ### `alert_type`
 
@@ -196,7 +199,8 @@ The same eight posture rawValues as `state`: `desk_lean`, `near`, `head_forward`
 
 ### `level`
 
-`1` = gentle (tone + orange edge), `2` = voice (zh-CN speech).
+`1` = gentle (tone + orange edge in the reading flow; the pomodoro keeps the line but
+plays no tone), `2` = voice (a bundled, pre-recorded WAV clip — there is no system TTS).
 
 ### `sensitivity`
 
@@ -208,27 +212,50 @@ The same eight posture rawValues as `state`: `desk_lean`, `near`, `head_forward`
 
 ## Swift-to-log name mapping
 
-The code keeps its own identifiers; the mapping happens only at the log boundary.
+The code keeps its own identifiers; the mapping happens only at the log boundary. This
+table is the single source of truth for the two vocabularies.
 
 | Swift (code) | Log (JSONL) |
 |---|---|
 | `PostureStatus.good` | `good` |
 | `PostureStatus.noPerson` | `no_person` |
 | `PostureStatus.posture(kind)` | `kind.rawValue` (one of the eight postures) |
-| `PostureKind.near` / `.headDown` / … | `near` / `head_down` / … (all eight rawValues) |
-| `PostureFeature.distance` / `.handToFace` / … | `distance` / `hand_to_face` / … (all eight rawValues) |
+| `PostureKind.near` / `.headDown` / `.shoulderTilt` / … | `near` / `head_down` / `shoulder_tilt` / … (all eight rawValues) |
+| `PostureFeature.distance` / `.handToFace` / `.shoulderTilt` / … | `distance` / `hand_to_face` / `shoulder_tilt` / … (all eight rawValues) |
+| `ReminderLevel.gentle` / `.voice` | `level` `1` / `2` |
+| `MonitoringEvent.sessionStarted(...)` | `session_started` |
+| `MonitoringEvent.config(...)` | `config` |
 | `MonitoringEvent.calibrated(...)` | `calibration_done` |
+| `MonitoringEvent.screenShown(...)` | `screen_shown` |
+| `MonitoringEvent.sample(...)` | `sample` |
+| `MonitoringEvent.statusChanged(...)` | `status_changed` |
+| `MonitoringEvent.reminder(...)` | `reminder` |
 | `MonitoringEvent.features(...)` | `features` |
 | `MonitoringEvent.viewMode(...)` | `view_mode` |
+| `MonitoringEvent.pomodoroTick(...)` | `pomodoro_tick` |
 | `MonitoringEvent.speechTimeout(...)` | `speech_timeout` |
 | `MonitoringEvent.speechUnavailable(...)` | `speech_unavailable` |
 | `MonitoringEvent.speechPlayed(...)` | `speech_played` |
-| `MonitoringEvent.pomodoroTick(...)` | `pomodoro_tick` |
+| `MonitoringEvent.cuePlayed(...)` | `cue_played` (`message`) |
+| `MonitoringEvent.paused(...)` | `paused` |
+| `MonitoringEvent.resumed(...)` | `resumed` |
+| `MonitoringEvent.sessionEnded(...)` | `session_ended` |
+| `PomodoroPhase.focus` / `.shortBreak` / `.longBreak` | `phase` = `focus` / `shortBreak` / `longBreak` (the rawValues keep their camelCase spelling) |
+| `PomodoroCue.warnBeforeEnd` / `.endSoft` / `.endChime` | `cue_played.message` = `warn_before_end` / `end_soft` / `end_chime` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
 | `SessionSummary.tooCloseCount` | `near_count` |
 | `SessionSummary.tooCloseRemindCount` | `near_remind_count` |
 | `SessionSummary.headDownCount` | `head_down_count` |
 | `SessionSummary.headDownRemindCount` | `head_down_remind_count` |
+| `SessionSummary.postureStats` | `posture_stats` (keyed by `PostureKind.rawValue`) |
+
+`PomodoroRecord` and `PomodoroOutcome` are **history vocabulary, not log keys**. The
+JSONL log has no `outcome` field: `completed`, `abandoned` and `interrupted` live in
+`Documents/pomodoro-history.json`, and the report counts `completedPomodoros` from the
+records whose outcome is `completed`. Likewise `PostureSegment.kind` uses the `state`
+vocabulary and adds `paused` for a pause band, which is a timeline value and never a
+`state` value. `EndSound` is a setting (`soft` / `chime` / `none`), not a key; it decides
+whether a cue clip starts and therefore whether a `cue_played` line exists at all.
 
 ## Every posture is timed, logged and counted on its own
 
@@ -259,14 +286,16 @@ consequences for reading a log:
 ## The counting convention: episodes vs reminder lines
 
 Every posture tracked by the engine has **two** counters, and they are counted
-differently. Only the `near` and `head_down` pair reaches the `session_ended` summary
-today, but the engine keeps a pair per `PostureKind` internally for the log and the next
-slice:
+differently. All eight reach `session_ended` through `posture_stats`; the flat
+`near_*` and `head_down_*` keys are the legacy pair that mirrors two of those entries
+for the QA checker, not the only postures that are counted:
 
 - The `*_count` key (`near_count`, `head_down_count`) counts **episodes that reached
-  level 1** — one per episode, no matter how high it escalated.
+  level 1** — one per episode, no matter how high it escalated. It is the same number as
+  `posture_stats[kind].episodes`.
 - The `*_remind_count` key (`near_remind_count`, `head_down_remind_count`) counts
-  **reminder lines**, both levels.
+  **reminder lines**, both levels. It is the same number as
+  `posture_stats[kind].reminders`.
 
 So an episode that escalates to level 2 adds **1** to the episode counter and **2** to
 the remind counter. Concretely, a run where a single near episode fires level 1 then
@@ -310,8 +339,8 @@ log that satisfies them is a log whose summary is derivable:
   therefore normal for `near_seconds + head_down_seconds + good_seconds` to exceed
   `total_seconds`. The predicates are strict: near is `distance_cm <
   distance_threshold_cm` (equal is not a violation), head-down is `baseline_pitch_deg −
-  pitch_deg > pitch_threshold_deg`. The other six postures have no `*_seconds` counter yet;
-  their time shows up as absent from `good_seconds` and as `reminder` lines.
+  pitch_deg > pitch_threshold_deg`. The other six postures also have a seconds counter,
+  but only in `posture_stats[kind].seconds`; there is no flat `*_seconds` key for them.
 - **`longest_good_streak_seconds`** is the longest unbroken run of good intervals; a breach
   of **any** posture resets the running streak to 0, and absence neither extends it nor
   resets it.
@@ -332,11 +361,21 @@ report a charge (e.g. the simulator), and `thermal_state` is one of `nominal`, `
 
 ## Screenshots
 
-`Documents/debug/screenshots/` holds seven PNGs: `home`, `calibration`,
-`calibration_result`, `monitoring`, `summary`, `settings`, `reminder`. The `reminder`
-shot exists only in a run where a level-1 reminder actually fired; `verify-session.py`
-drops it from its expected set otherwise. In a scripted run the `settings` shot is
-produced only when the run was launched with the `-captureSettings` argument.
+`Documents/debug/screenshots/` holds one PNG per `screen_shown` name the run reached,
+plus two direct-capture evidence shots:
+
+- Reading flow: `home`, `calibration`, `calibration_result`, `monitoring`, `summary`,
+  `settings`.
+- Pomodoro flow: `pomodoro_main`, `pomodoro_settings`, and `report_day` /
+  `report_week` / `report_month` (one name per report scope).
+- Evidence: `reminder` (the first level-1 reminder) and `highlight` (the first
+  highlighted feature). Neither writes a `screen_shown` line.
+
+A name only exists if its screen was reached. In a scripted reading run the `settings`
+shot is produced only with `-captureSettings`; in the pomodoro flow the settings screen
+is reached with `-settings 1`, and a report screen with `-report day|week|month`. The
+`reminder` shot exists only in a run where a level-1 reminder actually fired, and
+`verify-session.py` drops it from its expected set otherwise.
 
 ## Which key answers which acceptance criterion
 
@@ -357,7 +396,7 @@ any such line while the voice switch is off.
 | AC6 | The `session_ended` summary keys: `total_seconds`, `good_seconds`, `near_seconds`, `head_down_seconds`, `longest_good_streak_seconds` (recomputed from samples). |
 | AC7 | `config`: `sensitivity`, `distance_threshold_cm`, `pitch_threshold_deg` (35/15, 30/20, 25/25); the shift in when the `reminder`s fire. |
 | AC8 | `battery_level` and `thermal_state` on the first and last lines; the `ts` span across the run. |
-| AC9 | The seven PNGs under `Documents/debug/screenshots/` (not a log key). |
+| AC9 | The expected screenshot set under `Documents/debug/screenshots/` (not a log key). |
 | AC10 | Same keys as AC2/AC4 from a real-camera run: `reminder` timing and `alert_type`. |
 | AC11 | No `reminder` lines at all. |
 | AC12 | `paused` lines, no `reminder` lines, no violation seconds, and every `reminder` line carrying `t`, `alert_type` and `level`. |

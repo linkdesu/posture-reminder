@@ -3,12 +3,12 @@ import XCTest
 /// AC2: every setting on the settings page can be changed, and is still there after the app is killed
 /// and started again.
 ///
-/// One table drives all of it. `settings` below names each of the twelve rows of the north star's
-/// table in the order the page draws them, says how to read the value it shows and how to change it
-/// through the control the page itself draws — so a thirteenth setting is one line there, and the two
-/// passes below do not change. Each setting is photographed before and after its change; the app is
-/// then killed, restarted with nothing overridden, walked back to the same page and read row by row,
-/// and every value has to be the one that was set.
+/// One table drives all of it. `settings` below names each of the twelve rows of the settings spec
+/// in `GLOSSARY.md`, in the order the page draws them, says how to read the value it shows and how
+/// to change it through the control the page itself draws — so a thirteenth setting is one line
+/// there, and the two passes below do not change. Each setting is photographed before and after
+/// its change; the app is then killed, restarted with nothing overridden, walked back to the same
+/// page and read row by row, and every value has to be the one that was set.
 ///
 /// The screenshots leave as `XCTAttachment`s under the names `AC2-<nn>-<setting>-before|after` plus
 /// `AC2-13-after-relaunch`; see `attachScreenshot`.
@@ -30,8 +30,8 @@ final class SettingsPersistenceUITests: XCTestCase {
   /// The three sounds the 结束提示音 picker offers, in the order the page lists them.
   private static let endSounds = ["柔和铃声", "铃声", "静音"]
 
-  /// The twelve settings of the north star's table. 姿态语音提醒 and its volume are one row of that
-  /// table — "开/关；音量" — so they are one case here too and are read and changed together.
+  /// The twelve settings of the domain spec (`GLOSSARY.md`). 姿态语音提醒 and its volume are one row
+  /// of that spec — "开/关；音量" — so they are one case here too and are read and changed together.
   private var settings: [Setting] {
     [
       Setting(name: "focusMinutes",
@@ -328,7 +328,7 @@ final class SettingsPersistenceUITests: XCTestCase {
     return app.first(.staticText, labelled: name)
   }
 
-  /// The voice row of the north star's table is a switch and a volume slider in one row, so they are
+  /// The voice row of the settings spec is a switch and a volume slider in one row, so they are
   /// changed together: the slider while the switch is on, because it greys out and stops taking taps
   /// when the switch is off, and then the switch into the state it was not in when the row was read.
   private func changeVoiceRow() {

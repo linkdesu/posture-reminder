@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Same shape as `Settings`: the published value is written through `clamped()` and read back in
 /// `init`, so the settings screen and storage share one gate; a missing or corrupt stored blob
-/// falls back to the north-star defaults instead of failing; and `suppressPersistence` lets the
-/// launch arguments override a value for one run without it becoming the user's saved setting.
+/// falls back to the defaults recorded in `GLOSSARY.md` instead of failing; and
+/// `suppressPersistence` lets the launch arguments override a value for one run without
+/// it becoming the user's saved setting.
 final class PomodoroSettingsStore: ObservableObject {
   @Published var settings: PomodoroSettings {
     didSet {
@@ -30,7 +31,8 @@ final class PomodoroSettingsStore: ObservableObject {
     // `didSet` does not run during initialisation, so reading a stored value back never rewrites it.
   }
 
-  /// Back to the north-star defaults. A user action, so it persists like any other change.
+  /// Back to the defaults recorded in `GLOSSARY.md`. A user action, so it persists like any
+  /// other change.
   func reset() {
     settings = PomodoroSettings()
   }

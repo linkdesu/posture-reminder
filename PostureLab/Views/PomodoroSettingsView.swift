@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The twelve pomodoro settings of the north star, in the order of its table, plus the app-level
-/// debug switch.
+/// The twelve pomodoro settings of the domain spec (`GLOSSARY.md`), in the order of its table, plus
+/// the app-level debug switch.
 ///
 /// Every integer row builds its stepper from `PomodoroSettings.ranges` — the one table
 /// `PomodoroSettings.clamped()` also enforces — so the screen can never offer a limit the store
@@ -68,7 +68,7 @@ struct PomodoroSettingsView: View {
         }
 
         Section("姿态提醒") {
-          // The switch and the volume slider are one row of the north-star table, so they stay
+          // The switch and the volume slider are one row of the settings spec, so they stay
           // together and the slider greys out instead of disappearing.
           Toggle(isOn: $settingsStore.settings.postureVoiceEnabled) {
             settingLabel(title: "姿态语音提醒",
@@ -138,7 +138,7 @@ struct PomodoroSettingsView: View {
     "\(Int((settingsStore.settings.postureVoiceVolume * 100).rounded()))%"
   }
 
-  /// The three end sounds, named the way the north-star table describes them.
+  /// The three end sounds, named the way `GLOSSARY.md` describes them.
   private static func soundName(_ sound: EndSound) -> String {
     switch sound {
     case .soft: "柔和铃声"

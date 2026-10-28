@@ -7,7 +7,7 @@ enum EndSound: String, Codable, CaseIterable, Equatable {
   case none
 }
 
-/// The settings of a pomodoro session, with the defaults and ranges of the product north star.
+/// The settings of a pomodoro session, with the defaults and ranges recorded in `GLOSSARY.md`.
 ///
 /// The synthesized memberwise initialiser does not clamp: launch-argument overrides
 /// (`-focusMinutes 1`) deliberately reach below the user-facing range so simulated runs stay
@@ -46,7 +46,7 @@ struct PomodoroSettings: Equatable, Codable {
 
   /// Pulls every setting back into its legal range: the user-facing gate for a value written by the
   /// settings screen or restored from storage. The focus length is also snapped onto its 5-minute
-  /// step, which is part of its north-star range.
+  /// step, which is part of the focus range recorded in `GLOSSARY.md`.
   func clamped() -> PomodoroSettings {
     var next = self
     next.focusMinutes = Self.stepped(focusMinutes, within: Self.focusRange, step: Self.focusStep)

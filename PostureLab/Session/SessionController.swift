@@ -313,7 +313,7 @@ final class SessionController: ObservableObject {
   /// when there is nobody to press it".
   ///
   /// `autoStartFocus` is off by default for a reason that belongs to the child: each pomodoro is the
-  /// child's to begin, and the north star does not want them running back to back on their own. That
+  /// child's to begin, and the domain spec does not want them running back to back on their own. That
   /// reason is about the child's experience, and a scripted run has no child in it - nobody can tap
   /// 开始, so a `-pomodoro` scenario would park on the wait after its first focus and finish with a
   /// single record. The replay presses the button instead, exactly as `autoStartIfSimulating` already
@@ -1016,7 +1016,7 @@ final class SessionController: ObservableObject {
     if snapshot != pomodoroSnapshot { pomodoroSnapshot = snapshot }
   }
 
-  /// The child's screen never plays the level-1 tone (north star: zero attention interruption) and
+  /// The child's screen never plays the level-1 tone (`GLOSSARY.md`: zero attention interruption) and
   /// speaks only when the pomodoro settings allow it. The engine still times, logs and counts every
   /// reminder; only the sound is dropped.
   private func applyPomodoroAudio(_ chosen: PomodoroSettings) {
