@@ -13,15 +13,17 @@ PostureLab 是纯离线的儿童专注与阅读坐姿应用。本技能用于真
 
 ```sh
 cd /Volumes/Data/worktrees/posture-lab/depth-pose
-scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug>
-# 例：scripts/verify-preflight.sh 1a2b3c4 0.6.5 11 r16-v065-sim
+scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug> [--keep-sim]
+# 正式开跑：scripts/verify-preflight.sh 1a2b3c4 0.6.6 12 r16-v066-sim --keep-sim
+# 只跑预检 / dry-run：不带 --keep-sim，跑完即关闭并删除本轮模拟器
 ```
 
-等价于 `verify.py preflight --sha … --version … --build … --slug …`。slug 已经是 `r<N>-xxx` 时直接作为轮次目录；否则取 `tmp/verify/` 下最大的 N 加一。结果写入 `tmp/verify/<run-id>/preflight.json`，并把冻结值并入 `state.json`。任何一项不过都以非零码退出，`preflight.json.ok` 为 `false`。
+等价于 `verify.py preflight --sha … --version … --build … --slug …`。slug 已经是 `r<N>-xxx` 时直接作为轮次目录；`tl-` 开头的是 TL 自测 smoke，也直接作为目录名，不占 r 序号；否则取 `tmp/verify/` 下最大的 N 加一。结果写入 `tmp/verify/<run-id>/preflight.json`，并把冻结值并入 `state.json`。任何一项不过都以非零码退出，`preflight.json.ok` 为 `false`。
 
 检查项（按执行顺序）：
 
 1. 记下 `~/Library/Logs/DiagnosticReports/PostureLab*.ips` 崩溃报告基线；
+1a. 若有**非本轮**的 `pl-r*` 模拟器处于 Booted，判 **ENV-BLOCKED** 并在 `preflight.json` 列出名称和 UDID（`frozen.otherBootedRoundSims`），**不自动删**，交给人工处理后重跑预检。`pr-tl-*`、`pl-tl-*` 等不在匹配范围内；
 2. 工具链是 Xcode 27（`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）、`simctl` 可用、`/Volumes/Data` 与用户目录剩余空间都不少于 20 GB（`--min-free-gb` 可调）；
 3. 用 `git archive <SHA>` 导出代码快照，解到本轮专属目录 `/Volumes/Data/verify-builds/posture-lab/<run-id>/src` 并在那里构建（DerivedData 在同目录 `dd/`）。不碰共享 worktree 的未提交改动，也不用 `/tmp/pl-verify-build`；
 4. 给本轮单独建一台模拟器（`pl-<run-id>`，iPhone 17），boot 完成后把 UDID 写进 `state.json`；
@@ -30,6 +32,8 @@ scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮�
 7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 42 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
 8. 预检期间不得新增崩溃报告；
 9. 把 SHA、快照哈希（`snapshot.tar` 的 sha256）、二进制哈希和 UDID 冻结进 `preflight.json.frozen`。
+
+**本轮模拟器的清理**：`verify.py preflight` 用 `finally` 兜住正常退出、失败、Ctrl-C 与 TERM/HUP，`verify-preflight.sh` 再用 `trap … EXIT INT TERM HUP` 调 `verify.py preflight-cleanup --run <run-id>` 兜底（Python 被强杀时也能删）。规则：只有带 `--keep-sim` **且预检通过**时才保留模拟器给 `up`/`drive`；其余情况（只跑预检、dry-run、失败、中断）一律关闭并删除。结果写在 `preflight.json.simCleanup`（`kept` / `deleted`）。正式轮次结束后必须 `verify.py down --run <run-id> --delete-sim`。
 
 之后的 `up`、`drive` 只安装 preflight 冻结的那份产物（`frozen.appPath`），每次重装后自动预授权相机；没有通过的 preflight 时 `up`、`drive` 直接拒绝运行。轮次结束用 `verify.py down --run <run-id> --delete-sim` 删掉本轮模拟器。
 

@@ -47,9 +47,28 @@ Preconditions：
 - 70 秒刚好跨过第一个 60 秒专注；太早截图只能看到专注中，太晚会进入休息。不要把休息截图当作专注证据。
 - `cue_played` 只证明播放器启动了片段，不证明房间听见；不要声称“听到了”。
 
-## 屏幕常亮取证（v0.6.5）
+## 屏幕常亮取证（v0.6.5 起，v0.6.6 补 resume / foreground）
 
-- 常亮不再用 lldb 读（r15 读不出值）。DEBUG 构建在 `Documents/debug/idle-*.jsonl` 里每个时刻写一行：`{"t":<墙钟毫秒>,"trigger":"focus_start|pause|focus_end|background","idle_timer_disabled":<bool>}`。
-- 四个时刻：专注开始（点「开始」）、暂停（手动暂停或无人自动暂停，各写一次）、专注结束、切到后台。值是写完后应用上**实际的** `isIdleTimerDisabled`，不是策略的期望值。
-- 判据：`focus_start` 为 `true`（App 在前台时）；`pause`、`focus_end`、`background` 为 `false`。恢复计时不写行。
+- 常亮不再用 lldb 读（r15 读不出值）。DEBUG 构建在 `Documents/debug/idle-*.jsonl` 里每个时刻写一行：`{"t":<墙钟毫秒>,"trigger":"focus_start|pause|resume|focus_end|background|foreground","idle_timer_disabled":<bool>}`。
+- 六个时刻：
+  - `focus_start`：点「开始」；
+  - `pause`：手动暂停或无人自动暂停，各写一次；
+  - `resume`（v0.6.6）：暂停后点「继续」，或无人自动暂停后人回到画面、计时自动恢复；
+  - `focus_end`：专注结束（完成或放弃；暂停中直接结束只记这一行，不记 `resume`）；
+  - `background`：scene 不再 active（切到后台；启动瞬间 scene 先报一次非 active，也会写 `false`）；
+  - `foreground`（v0.6.6）：scene 重新变为 active，任何状态下都写。
+- 值是**状态真正生效、写完常亮之后**应用上**实际的** `isIdleTimerDisabled`，不是策略的期望值；`foreground` 在 scene 变为 active 之后才写。
+- **每次启动是一个独立文件** `idle-<启动时刻>.jsonl`。同一容器里启动几次就有几个文件，合并读时会看到多行启动时的 `background false`（r16 dry-run 的「两行」就是 preflight 先无参启动、再跑短用例的两次启动，各一行，不是重复写入）。按文件分开判。
+- 启动判据：**启动时至少有一行 `false`**（`background false`，之后通常紧跟 `foreground false`）；不要求恰好一行。
+- 判据：`focus_start`、`resume` 为 `true`；专注计时中的 `foreground` 为 `true`；`pause`、`focus_end`、`background` 为 `false`；休息中或首页（未开始专注）回到前台的 `foreground` 为 `false`。
 - 这是独立文件、独立键名，`docs/qa-log-schema.md` 的 42 键契约不变，`session-*.jsonl` 的逐行契约检查不受影响。
+
+### 常亮验收场景
+
+| 场景 | 操作 | `idle-*.jsonl` 应出现（按顺序） |
+| --- | --- | --- |
+| 手动暂停与继续 | 开始专注 → 点「暂停」→ 点「继续」 | `focus_start true` → `pause false` → `resume true` |
+| 无人自动暂停与恢复 | `-scenario pauseWhileBreach -focusMinutes 1`（脚本 10–14 s 无人，超过 3 s 自动暂停，之后人回来；真机：离开画面 ≥3 s 再回来） | `pause false` → `resume true` |
+| 专注中切后台再回来 | 专注计时中按 Home（`simctl launch` 其他 App 或真机上滑）→ 再切回 PostureLab | `background false` → `foreground true` |
+| 休息中切后台再回来 | 休息计时中切后台 → 切回 | `background false` → `foreground false` |
+| 首页切后台再回来 | 未点「开始」时切后台 → 切回 | `background false` → `foreground false` |
