@@ -396,6 +396,10 @@ final class SessionController: ObservableObject {
     guard !pomodoroRunFinished, var pomodoro,
           pomodoro.isRunning || pomodoroFocusOpen else { return }
     let t = now()
+    // Before the tick can end the focus: a phase that completes here closes the timeline at `t`, and
+    // the band it closes must already be the `no_data` one rather than the last posture stretched
+    // over the silence (v0.6.1).
+    recordSampleGapIfNeeded(at: t)
     let events = pomodoro.tick()
     self.pomodoro = pomodoro
     syncPomodoroFocus()
@@ -663,9 +667,9 @@ final class SessionController: ObservableObject {
   /// Closes the focus: the timeline ends at `t` and the record takes the segments, the reminders and
   /// the real focus time with it.
   private func closePomodoroFocus(record: PomodoroRecord, at t: TimeInterval) {
-    // A focus that never saw a sample still has a「识别中」段, and it ends here so the timeline adds
-    // up to the plan instead of dropping the gap.
-    logDetectingSegment(pomodoroTimeline.finished(at: t))
+    // A focus that never saw a sample still has a「识别中」段, and a stalled stream still has an open
+    // `no_data` band; both end here so the timeline adds up to the plan instead of dropping the gap.
+    logBandSegment(pomodoroTimeline.finished(at: t))
 
     var finished = record
     finished.postureSegments = pomodoroTimeline.segments
@@ -708,12 +712,26 @@ final class SessionController: ObservableObject {
   private func accumulatePomodoroSegment(at t: TimeInterval) {
     let kind: String? = pomodoroFocusPaused ? PosturePalette.pausedKind : engine?.status.rawValue
     guard let kind else { return }
-    logDetectingSegment(pomodoroTimeline.observe(kind, at: t))
+    logBandSegment(pomodoroTimeline.observe(kind, at: t))
   }
 
-  /// The「识别中」段's one log line, written when the segment closes. `nil` when this sample closed
-  /// no such segment, so a focus writes exactly one line.
-  private func logDetectingSegment(_ segment: PostureSegment?) {
+  /// The sample stream's silence, noticed by the wall-clock ticker: once the focus has a sample but
+  /// none has arrived for `FocusTimeline.sampleGapThreshold`, the timeline stops crediting the last
+  /// posture and opens a `no_data` band (v0.6.1). The report screen is the common cause — it gives
+  /// the depth sensor up, so a focus that keeps running while the parent is reading was previously
+  /// counted as good posture for the whole visit.
+  ///
+  /// A paused focus is left alone: a pause already has a band of its own, and its semantics are
+  /// unchanged. Breaks never reach here — a focus timeline only exists while `pomodoroFocusOpen`.
+  private func recordSampleGapIfNeeded(at t: TimeInterval) {
+    guard pomodoroFocusOpen, !pomodoroFocusPaused else { return }
+    pomodoroTimeline.noteSampleGap(at: t)
+  }
+
+  /// A `segment` log line, written when a band that is not a posture closes: `detecting` (the wait
+  /// before the first sample) or `no_data` (a stretch after it with no sample at all). `nil` when
+  /// this sample or finish closed no such band, so posture changes write nothing.
+  private func logBandSegment(_ segment: PostureSegment?) {
     guard let segment else { return }
     logger.log(.segment(kind: segment.kind, start: segment.start, end: segment.end))
   }

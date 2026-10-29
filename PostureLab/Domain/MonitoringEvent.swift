@@ -30,9 +30,10 @@ enum MonitoringEvent: Equatable {
   /// claims a sound the device did not make. The cue's name rides in the log's existing `message`
   /// key rather than a key of its own.
   case cuePlayed(cue: String)
-  /// A focus timeline segment, written when the 「识别中」段 closes: the stretch from the 开始 tap to
-  /// the focus's first posture sample. Times are Unix epoch seconds, so they sit on the same axis as
-  /// the record's `startedAt`.
+  /// A focus timeline segment, written when a non-posture band closes: the「识别中」段 from the 开始
+  /// tap to the focus's first posture sample (`detecting`), or a stretch after it with no sample at
+  /// all (`no_data`, v0.6.1). Times are Unix epoch seconds, so they sit on the same axis as the
+  /// record's `startedAt`.
   case segment(kind: String, start: TimeInterval, end: TimeInterval)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
@@ -147,7 +148,8 @@ struct LogRecord: Codable {
   var remaining_seconds: Double?
   /// The pomodoro phase rawValue (`focus` / `shortBreak` / `longBreak`), on a `pomodoro_tick` line.
   var phase: String?
-  /// The timeline segment kind, on a `segment` line: `detecting` for the 识别中段.
+  /// The timeline segment kind, on a `segment` line: `detecting` for the 识别中段, `no_data` for a
+  /// stalled stream after the first sample.
   var segment_kind: String?
   /// The segment's start and end, Unix epoch milliseconds, on a `segment` line.
   var segment_start: Int64?
