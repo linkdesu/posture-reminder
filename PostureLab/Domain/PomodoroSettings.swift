@@ -21,7 +21,6 @@ struct PomodoroSettings: Equatable, Codable {
   var autoStartFocus: Bool = false
   var dailyGoal: Int = 4                // 1...12
   var endSound: EndSound = .soft        // .soft / .chime / .none
-  var remindBeforeEnd: Bool = false     // 1-minute warning before the end
   var postureVoiceEnabled: Bool = true  // posture voice reminders
   var postureVoiceVolume: Double = 0.8  // 0...1, the same settings row as the switch above
   var monitorDuringBreak: Bool = false
@@ -49,13 +48,55 @@ struct PomodoroSettings: Equatable, Codable {
   /// step, which is part of the focus range recorded in `GLOSSARY.md`.
   func clamped() -> PomodoroSettings {
     var next = self
-    next.focusMinutes = Self.stepped(focusMinutes, within: Self.focusRange, step: Self.focusStep)
-    next.shortBreakMinutes = Self.bounded(shortBreakMinutes, within: Self.shortBreakRange)
-    next.longBreakMinutes = Self.bounded(longBreakMinutes, within: Self.longBreakRange)
-    next.focusPerLongBreak = Self.bounded(focusPerLongBreak, within: Self.focusPerLongBreakRange)
-    next.dailyGoal = Self.bounded(dailyGoal, within: Self.dailyGoalRange)
+    next.focusMinutes = Self.clamp(focusMinutes, for: "focusMinutes") ?? focusMinutes
+    next.shortBreakMinutes = Self.clamp(shortBreakMinutes, for: "shortBreakMinutes") ?? shortBreakMinutes
+    next.longBreakMinutes = Self.clamp(longBreakMinutes, for: "longBreakMinutes") ?? longBreakMinutes
+    next.focusPerLongBreak = Self.clamp(focusPerLongBreak, for: "focusPerLongBreak")
+      ?? focusPerLongBreak
+    next.dailyGoal = Self.clamp(dailyGoal, for: "dailyGoal") ?? dailyGoal
     next.postureVoiceVolume = min(max(postureVoiceVolume, 0), 1)
     return next
+  }
+
+  /// One value through the same gate `clamped()` enforces: clamped into the setting's range and, for
+  /// the focus length, snapped onto its step. Nil for a key that is not an integer setting here.
+  ///
+  /// Both the stepper and the manual entry write through this, so a typed number and a stepped one
+  /// land on exactly the same values. No range contains zero, which is what makes "never store zero"
+  /// true for every path into the store.
+  static func clamp(_ value: Int, for key: String) -> Int? {
+    guard let range = ranges[key] else { return nil }
+    let step = step(for: key)
+    return step == 1 ? bounded(value, within: range) : stepped(value, within: range, step: step)
+  }
+
+  /// How far one press of a row's stepper moves, and the multiple a manual entry is snapped onto.
+  static func step(for key: String) -> Int {
+    key == "focusMinutes" ? focusStep : 1
+  }
+
+  /// A manual entry read back as a legal value: surrounding blanks are ignored, full-width digits
+  /// (what a Chinese keyboard's number pad can emit) are read as their ASCII counterparts, and the
+  /// number is clamped by `clamp(_:for:)`.
+  ///
+  /// Nil means "not a number this row can use", and every caller answers that the same way: the
+  /// value the row already held is kept, so unparsable text can neither crash nor be stored.
+  static func value(fromManualEntry text: String, for key: String) -> Int? {
+    guard ranges[key] != nil else { return nil }
+    let digits = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      .map(Self.asciiDigit)
+    guard !digits.isEmpty, let number = Int(String(digits)) else { return nil }
+    return clamp(number, for: key)
+  }
+
+  /// A full-width digit as its ASCII counterpart; anything else unchanged.
+  private static func asciiDigit(_ character: Character) -> Character {
+    guard let scalar = character.unicodeScalars.first,
+          character.unicodeScalars.count == 1,
+          (0xFF10...0xFF19).contains(scalar.value),
+          let ascii = Unicode.Scalar(scalar.value - 0xFF10 + 0x30)
+    else { return character }
+    return Character(ascii)
   }
 
   private static func bounded(_ value: Int, within range: ClosedRange<Int>) -> Int {

@@ -22,9 +22,6 @@ enum PomodoroEvent: Equatable {
   /// The focus ended because the child stayed away past the limit (B5). No break follows it, and
   /// the next focus waits for a `.start`.
   case interrupted(PomodoroRecord)
-  /// The running focus is inside its last minute (B4). Reported once per focus, and only while
-  /// `PomodoroSettings.remindBeforeEnd` is on.
-  case endingSoon(remainingSeconds: Double)
   case breakSkipped(from: PomodoroPhase)
   /// The session is over; the UI can wind down.
   case finishedAll
@@ -38,16 +35,14 @@ enum PomodoroEvent: Equatable {
 /// remaining values, and a pause simply re-anchors.
 ///
 /// The sample carries face presence too, so the same stream also decides how much of a focus the
-/// child was actually there for: a focus burns time only while a face is in frame (B1), an absence
-/// past `absenceLimit` ends it (B5), and the last minute is announced once (B4).
+/// child was actually there for: a focus burns time only while a face is in frame (B1), and an
+/// absence past `absenceLimit` ends it (B5).
 struct PomodoroEngine {
   /// A tick is 0.1 s; this only absorbs the drift of floating-point anchor subtraction, so a
   /// countdown never misses its end by one tick or ends a tick early.
   private static let completionTolerance: Double = 1e-9
   /// B5: an absence longer than this inside one running focus ends that focus as interrupted.
   private static let absenceLimit: Double = 300
-  /// B4: how close to the end of a focus the one-minute warning fires.
-  private static let endingSoonSeconds: Double = 60
 
   private var settings: PomodoroSettings
   /// Sample time zero in epoch seconds. Records and segments are stamped in epoch seconds while
@@ -86,9 +81,6 @@ struct PomodoroEngine {
   /// nothing yet. Remembered so a command that (re)starts a countdown can honour B1 without a
   /// sample of its own.
   private var facePresent: Bool? = nil
-  /// Whether the focus in flight has already reported its one-minute warning (B4).
-  private var warnedEndingSoon = false
-
   init(settings: PomodoroSettings, startedAt: Date = Date()) {
     let planned = Double(settings.focusMinutes * 60)
     self.settings = settings
@@ -112,8 +104,7 @@ struct PomodoroEngine {
   ///
   /// The plan a focus already started under stays fixed — its `plannedSeconds` and its countdown
   /// were decided when it began, which is exactly what makes "the next pomodoro uses the new
-  /// length" true — so this only governs what comes next and the switches that gate events on the
-  /// focus in flight (B4).
+  /// length" true — so this only governs what comes next.
   mutating func update(settings: PomodoroSettings) {
     self.settings = settings
   }
@@ -261,16 +252,7 @@ struct PomodoroEngine {
         return enterNextFocus(at: t)
       }
     }
-    return warnEndingSoon()
-  }
-
-  /// B4: the one-minute warning. Reported once per focus, on the first sample that finds the running
-  /// focus inside its last minute, and never when the setting is off.
-  private mutating func warnEndingSoon() -> [PomodoroEvent] {
-    guard settings.remindBeforeEnd, phase == .focus, focusOpen, !warnedEndingSoon,
-          remainingSeconds <= Self.endingSoonSeconds else { return [] }
-    warnedEndingSoon = true
-    return [.endingSoon(remainingSeconds: remainingSeconds)]
+    return []
   }
 
   /// The command that restarts a countdown carries no time (a command is not a sample), so it is
@@ -364,8 +346,6 @@ struct PomodoroEngine {
                             outcome: .abandoned,
                             focusIndex: focusIndex)
     focusOpen = true
-    // B4: the warning belongs to a focus, so the new focus starts owing it again.
-    warnedEndingSoon = false
   }
 
   private mutating func close(outcome: PomodoroOutcome,

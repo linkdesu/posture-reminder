@@ -843,7 +843,15 @@ final class MonitoringEngineTests: XCTestCase {
 
     let afterLaunch = Settings(defaults: defaults)
     XCTAssertEqual(afterLaunch.sensitivity, .medium)
+    // Nothing was written for either switch, so a fresh store reports the build's own defaults: the
+    // overlay is on in a debug build and off in a release build, and never the staged `true`.
+    XCTAssertNil(defaults.object(forKey: "settings.debugEnabled"),
+                 "the launch override was persisted as the user's setting")
+    #if DEBUG
+    XCTAssertTrue(afterLaunch.debugEnabled)
+    #else
     XCTAssertFalse(afterLaunch.debugEnabled)
+    #endif
 
     afterLaunch.sensitivity = .low
     let afterUserChange = Settings(defaults: defaults)

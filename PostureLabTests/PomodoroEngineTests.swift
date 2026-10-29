@@ -19,12 +19,6 @@ private func absentSamples(_ count: Int, from start: TimeInterval = 0) -> [Postu
   }
 }
 
-/// The one-minute warnings in a batch, so a test can say "once" or "never" without knowing the rest
-/// of the events.
-private func endingSoonEvents(_ events: [PomodoroEvent]) -> [PomodoroEvent] {
-  events.filter { if case .endingSoon = $0 { return true } else { return false } }
-}
-
 @discardableResult
 private func feed(_ engine: inout PomodoroEngine, _ stream: [PostureSample]) -> [PomodoroEvent] {
   stream.flatMap { engine.ingest($0) }
@@ -49,7 +43,6 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(settings.autoStartFocus, false)
     XCTAssertEqual(settings.dailyGoal, 4)
     XCTAssertEqual(settings.endSound, .soft)
-    XCTAssertEqual(settings.remindBeforeEnd, false)
     XCTAssertEqual(settings.postureVoiceEnabled, true)
     XCTAssertEqual(settings.postureVoiceVolume, 0.8)
     XCTAssertEqual(settings.monitorDuringBreak, false)
@@ -320,51 +313,57 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(engine.remainingSeconds, 1500)
   }
 
-  // MARK: - The one-minute warning
+  // MARK: - Manual entry
 
-  func testEndingSoonFiresOnceAtSixtySecondsOnlyWhenTheSettingIsOn() {
-    var settings = PomodoroSettings()
-    settings.remindBeforeEnd = true
-    var engine = makeEngine(settings)
-    _ = engine.command(.start)
-    XCTAssertEqual(feed(&engine, samples(14_390)), [])
-    XCTAssertEqual(engine.remainingSeconds, 61)
+  /// The row's text field writes through exactly this gate: a number out of range becomes the nearest
+  /// legal value, the focus length is snapped onto its step, and no path can produce the zero a stored
+  /// setting must never hold.
+  func testManualEntryClampsEveryIntegerSetting() {
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "0", for: "focusMinutes"), 5)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "999", for: "focusMinutes"), 60)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "12", for: "focusMinutes"), 10)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "13", for: "focusMinutes"), 15)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: " 30 ", for: "focusMinutes"), 30)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "０", for: "shortBreakMinutes"), 1)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "99", for: "shortBreakMinutes"), 15)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "0", for: "longBreakMinutes"), 5)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "0", for: "focusPerLongBreak"), 2)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "0", for: "dailyGoal"), 1)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "１３", for: "focusMinutes"), 15)
 
-    var events = feed(&engine, samples(10, from: 1439))
-    XCTAssertEqual(events, [.endingSoon(remainingSeconds: 60)])
-    XCTAssertEqual(engine.remainingSeconds, 60)
-
-    // The rest of the last minute stays quiet, and the focus still completes on time.
-    events = feed(&engine, samples(600, from: 1440))
-    XCTAssertEqual(endingSoonEvents(events), [])
-    XCTAssertEqual(events.count, 2)
-    guard case .completed(let record) = events[0] else {
-      return XCTFail("expected a completed pomodoro")
-    }
-    XCTAssertEqual(record.endedAt, 1500)
-    XCTAssertEqual(events[1], .phaseChanged(to: .shortBreak, index: 1))
-
-    // With the setting off the same run says nothing about the last minute.
-    var quiet = makeEngine()
-    XCTAssertEqual(quiet.command(.start), [.phaseChanged(to: .focus, index: 1)])
-    events = feed(&quiet, samples(15_000))
-    XCTAssertEqual(endingSoonEvents(events), [])
-    XCTAssertEqual(events.count, 2)
+    // Not a number this row can use: the caller keeps the value it already had.
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "", for: "focusMinutes"))
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "   ", for: "focusMinutes"))
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "abc", for: "focusMinutes"))
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "5.5", for: "focusMinutes"))
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "-5", for: "focusMinutes"), 5)
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "10", for: "endSound"))
   }
 
-  func testTogglingRemindBeforeEndMidFocusArmsTheWarning() {
-    var engine = makeEngine()                      // the setting is off at the start
-    _ = engine.command(.start)
-    XCTAssertEqual(feed(&engine, samples(14_390)), [])
-    XCTAssertEqual(engine.remainingSeconds, 61)
+  /// Every integer setting refuses to hold zero, whichever way the value arrived.
+  func testNoIntegerSettingCanBeStoredAsZero() {
+    XCTAssertEqual(PomodoroSettings.ranges.count, 5)
+    for key in PomodoroSettings.ranges.keys {
+      guard let clamped = PomodoroSettings.clamp(0, for: key) else {
+        XCTFail("\(key) is missing from the clamp table")
+        continue
+      }
+      XCTAssertGreaterThan(clamped, 0, "\(key) accepted zero")
+    }
 
-    // The parent flips it on during the focus: the warning belongs to this focus, not the next one.
     var settings = PomodoroSettings()
-    settings.remindBeforeEnd = true
-    engine.update(settings: settings)
+    settings.focusMinutes = 0
+    settings.shortBreakMinutes = 0
+    settings.longBreakMinutes = 0
+    settings.focusPerLongBreak = 0
+    settings.dailyGoal = 0
 
-    let events = feed(&engine, samples(10, from: 1439))
-    XCTAssertEqual(events, [.endingSoon(remainingSeconds: 60)])
+    let clamped = settings.clamped()
+    XCTAssertEqual(clamped.focusMinutes, 5)
+    XCTAssertEqual(clamped.shortBreakMinutes, 1)
+    XCTAssertEqual(clamped.longBreakMinutes, 5)
+    XCTAssertEqual(clamped.focusPerLongBreak, 2)
+    XCTAssertEqual(clamped.dailyGoal, 1)
   }
 
   // MARK: - Ending early

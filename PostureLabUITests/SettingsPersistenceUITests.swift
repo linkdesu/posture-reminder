@@ -3,15 +3,15 @@ import XCTest
 /// AC2: every setting on the settings page can be changed, and is still there after the app is killed
 /// and started again.
 ///
-/// One table drives all of it. `settings` below names each of the twelve rows of the settings spec
+/// One table drives all of it. `settings` below names each of the eleven rows of the settings spec
 /// in `GLOSSARY.md`, in the order the page draws them, says how to read the value it shows and how
-/// to change it through the control the page itself draws — so a thirteenth setting is one line
+/// to change it through the control the page itself draws — so a twelfth setting is one line
 /// there, and the two passes below do not change. Each setting is photographed before and after
 /// its change; the app is then killed, restarted with nothing overridden, walked back to the same
 /// page and read row by row, and every value has to be the one that was set.
 ///
 /// The screenshots leave as `XCTAttachment`s under the names `AC2-<nn>-<setting>-before|after` plus
-/// `AC2-13-after-relaunch`; see `attachScreenshot`.
+/// `AC2-12-after-relaunch`; see `attachScreenshot`.
 final class SettingsPersistenceUITests: XCTestCase {
 
   private var app: XCUIApplication!
@@ -30,22 +30,22 @@ final class SettingsPersistenceUITests: XCTestCase {
   /// The three sounds the 结束提示音 picker offers, in the order the page lists them.
   private static let endSounds = ["柔和铃声", "铃声", "静音"]
 
-  /// The twelve settings of the domain spec (`GLOSSARY.md`). 姿态语音提醒 and its volume are one row
+  /// The eleven settings of the domain spec (`GLOSSARY.md`). 姿态语音提醒 and its volume are one row
   /// of that spec — "开/关；音量" — so they are one case here too and are read and changed together.
   private var settings: [Setting] {
     [
       Setting(name: "focusMinutes",
-              read: { self.stepperValue(of: "专注时长", unit: "分钟") },
-              change: { self.step("专注时长", unit: "分钟") }),
+              read: { self.integerValue(of: "专注时长") },
+              change: { self.step("专注时长") }),
       Setting(name: "shortBreakMinutes",
-              read: { self.stepperValue(of: "短休息", unit: "分钟") },
-              change: { self.step("短休息", unit: "分钟") }),
+              read: { self.integerValue(of: "短休息") },
+              change: { self.step("短休息") }),
       Setting(name: "longBreakMinutes",
-              read: { self.stepperValue(of: "长休息", unit: "分钟") },
-              change: { self.step("长休息", unit: "分钟") }),
+              read: { self.integerValue(of: "长休息") },
+              change: { self.step("长休息") }),
       Setting(name: "focusPerLongBreak",
-              read: { self.stepperValue(of: "几个专注后长休息", unit: "个") },
-              change: { self.step("几个专注后长休息", unit: "个") }),
+              read: { self.integerValue(of: "几个专注后长休息") },
+              change: { self.step("几个专注后长休息") }),
       Setting(name: "autoStartBreak",
               read: { self.switchValue(of: "自动开始休息") },
               change: { self.flip("自动开始休息") }),
@@ -53,14 +53,11 @@ final class SettingsPersistenceUITests: XCTestCase {
               read: { self.switchValue(of: "自动开始下一个专注") },
               change: { self.flip("自动开始下一个专注") }),
       Setting(name: "dailyGoal",
-              read: { self.stepperValue(of: "每日目标番茄数", unit: "个") },
-              change: { self.step("每日目标番茄数", unit: "个") }),
+              read: { self.integerValue(of: "每日目标番茄数") },
+              change: { self.step("每日目标番茄数") }),
       Setting(name: "endSound",
               read: { self.endSoundValue() },
               change: { self.chooseAnotherSound() }),
-      Setting(name: "remindBeforeEnd",
-              read: { self.switchValue(of: "结束前提醒") },
-              change: { self.flip("结束前提醒") }),
       Setting(name: "postureVoice",
               read: { "\(self.switchValue(of: "姿态语音提醒")) \(self.volumeValue())" },
               change: { self.changeVoiceRow() }),
@@ -110,7 +107,7 @@ final class SettingsPersistenceUITests: XCTestCase {
 
     XCTAssertTrue(wait(upTo: 10, for: { self.settingsPageIsUp() }),
                   "the settings page did not come back after the relaunch")
-    attachScreenshot(of: app, named: "AC2-13-after-relaunch")
+    attachScreenshot(of: app, named: "AC2-12-after-relaunch")
 
     for setting in settings {
       XCTAssertEqual(setting.read(), expected[setting.name],
@@ -199,11 +196,15 @@ final class SettingsPersistenceUITests: XCTestCase {
 
   // MARK: - Reading a row
 
-  /// The value an integer row shows, "25 分钟".
-  private func stepperValue(of title: String, unit: String) -> String {
-    let value = visibleValue(of: reveal(title), matching: "\\d+ \(unit)")
-    XCTAssertNotNil(value, "\(title) shows no \"NN \(unit)\" value")
-    return value ?? ""
+  /// The number an integer row shows, "25", read off the row's own editable field.
+  private func integerValue(of title: String) -> String {
+    reveal(title)
+    let field = app.first(.textField, labelled: "\(title)数值")
+    guard field.exists, let raw = field.value as? String else {
+      XCTFail("\(title) has no number field to read")
+      return ""
+    }
+    return raw
   }
 
   /// The state of a switch in the page's own words.
@@ -268,9 +269,9 @@ final class SettingsPersistenceUITests: XCTestCase {
   /// The stepper's two halves are used where the row keeps them in the tree and reached by coordinate
   /// where it does not — the control is drawn at the row's trailing edge — and either direction is
   /// tried, so a row parked on a limit still moves.
-  private func step(_ title: String, unit: String) {
+  private func step(_ title: String) {
     let element = reveal(title)
-    let before = stepperValue(of: title, unit: unit)
+    let before = integerValue(of: title)
     let buttons = element.descendants(matching: .button).allElementsBoundByIndex
     let taps: [() -> Void]
     if buttons.count >= 2 {
@@ -284,7 +285,7 @@ final class SettingsPersistenceUITests: XCTestCase {
       tap()
       // The row redraws its value a frame after the tap; give it that frame before deciding the tap
       // missed and trying the other half.
-      if wait(upTo: 1, for: { self.stepperValue(of: title, unit: unit) != before }) { return }
+      if wait(upTo: 1, for: { self.integerValue(of: title) != before }) { return }
     }
     XCTFail("\(title) did not move off \(before)")
   }
@@ -293,7 +294,9 @@ final class SettingsPersistenceUITests: XCTestCase {
     reveal(title)
     let control = app.first(.switch, labelStartingWith: title)
     XCTAssertTrue(control.exists, "\(title) has no switch to tap")
-    control.tap()
+    // A Form toggle's accessible element spans the whole row, and only its trailing knob takes the
+    // tap: the middle of the row is the label, which toggles nothing.
+    control.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
   }
 
   /// Picks the first sound that is not the one already selected.

@@ -1,30 +1,10 @@
 import Foundation
 
-enum ReminderMode: String, CaseIterable, Equatable {
-  case sound
-  case voice
-  case both
-
-  var displayName: String {
-    switch self {
-    case .sound: return "音效"
-    case .voice: return "语音"
-    case .both: return "音效+语音"
-    }
-  }
-}
-
 final class Settings: ObservableObject {
   @Published var sensitivity: Sensitivity {
     didSet {
       guard !suppressPersistence else { return }
       defaults.set(sensitivity.rawValue, forKey: Keys.sensitivity)
-    }
-  }
-  @Published var reminderMode: ReminderMode {
-    didSet {
-      guard !suppressPersistence else { return }
-      defaults.set(reminderMode.rawValue, forKey: Keys.reminderMode)
     }
   }
   @Published var debugEnabled: Bool {
@@ -71,8 +51,15 @@ final class Settings: ObservableObject {
     self.defaults = defaults
 
     sensitivity = Sensitivity(rawValue: defaults.string(forKey: Keys.sensitivity) ?? "") ?? .medium
-    reminderMode = ReminderMode(rawValue: defaults.string(forKey: Keys.reminderMode) ?? "") ?? .both
+    // The overlay is a development aid: a debug build ships with it on so a simulator run shows the
+    // joints without a launch argument, while a release build ships with it off and keeps the switch.
+    #if DEBUG
+    debugEnabled = defaults.object(forKey: Keys.debugEnabled) != nil
+      ? defaults.bool(forKey: Keys.debugEnabled)
+      : true
+    #else
     debugEnabled = defaults.bool(forKey: Keys.debugEnabled)
+    #endif
     // A baseline of nil means "never calibrated", so presence of the key decides, not the value.
     baselineDistanceCM = defaults.object(forKey: Keys.baselineDistanceCM) != nil
       ? defaults.double(forKey: Keys.baselineDistanceCM)
@@ -118,7 +105,6 @@ final class Settings: ObservableObject {
 
   private enum Keys {
     static let sensitivity = "settings.sensitivity"
-    static let reminderMode = "settings.reminderMode"
     static let debugEnabled = "settings.debugEnabled"
     static let baselineDistanceCM = "settings.baselineDistanceCM"
     static let baselinePitchDeg = "settings.baselinePitchDeg"

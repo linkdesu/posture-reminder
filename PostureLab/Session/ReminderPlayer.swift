@@ -3,11 +3,9 @@ import Foundation
 
 /// A pomodoro cue: the timer's own sounds, which are neither posture reminders nor speech.
 ///
-/// The raw value is a wire value twice over — it lands in the log's `message` key, and for the two end
-/// sounds it is also the name of the bundled clip (`end_<EndSound.rawValue>.wav`). Keep both stable.
+/// The raw value is a wire value twice over — it lands in the log's `message` key, and it is also the
+/// name of the bundled clip (`end_<EndSound.rawValue>.wav`). Keep both stable.
 enum PomodoroCue: String, Equatable {
-  /// One minute before a focus ends.
-  case warnBeforeEnd = "warn_before_end"
   case endSoft = "end_soft"
   case endChime = "end_chime"
 }
@@ -44,7 +42,6 @@ final class ReminderPlayer: NSObject, AVAudioPlayerDelegate {
   /// The kind whose clip is in flight, so a late playback error can still name it in the log.
   private var currentKind: PostureKind?
   private var cachedTone: Data?
-  private var cachedWarningTone: Data?
   private var didConfigureSession = false
   /// When the last gentle tone started; `playTone` drops anything inside `toneCoalesceWindow` of it.
   private var lastToneStart: TimeInterval = -TimeInterval.infinity
@@ -93,15 +90,28 @@ final class ReminderPlayer: NSObject, AVAudioPlayerDelegate {
   /// Cues ignore `isVoiceEnabled` and `playsGentleTones`: those two switches govern the posture
   /// reminders, and the timer's own sounds are governed by the pomodoro settings that pick the cue.
   func play(cue: PomodoroCue) {
+    guard begin(cue: cue) else { return }
+    logger.log(.cuePlayed(cue: cue.rawValue))
+  }
+
+  /// The same clip from the settings page's 试听 button: it has to be audible before any pomodoro is
+  /// started, so it writes no `cue_played` line. That line is the timer's own evidence, and a
+  /// preview is not the timer.
+  func preview(cue: PomodoroCue) {
+    _ = begin(cue: cue)
+  }
+
+  /// Starts `cue`'s clip; answers whether the device really started playing it.
+  private func begin(cue: PomodoroCue) -> Bool {
     cuePlayer?.stop()
     cuePlayer = nil
-    guard let player = cueSource(cue), player.duration > 0 else { return }
+    guard let player = cueSource(cue), player.duration > 0 else { return false }
     configureSessionIfNeeded()
     player.volume = Self.cueVolume
     player.prepareToPlay()
-    guard player.play() else { return }
+    guard player.play() else { return false }
     cuePlayer = player
-    logger.log(.cuePlayed(cue: cue.rawValue))
+    return true
   }
 
   func stop() {
@@ -263,59 +273,16 @@ final class ReminderPlayer: NSObject, AVAudioPlayerDelegate {
   /// dragged to zero would answer a different question than the end-sound switch asks.
   private static let cueVolume: Float = 0.9
 
-  /// The audio behind a cue: a bundled clip for the two end sounds, a generated tone for the warning.
+  /// The audio behind a cue: a bundled clip for the two end sounds.
   ///
   /// The end sounds are clips (`end_<EndSound.rawValue>.wav`), because a parent picks one by name and
-  /// a recording pass may replace them; `none` never reaches here, it is not a cue at all. The warning
-  /// has no clip of its own — it is a signal rather than a sound someone chose — so it stays out of
-  /// the folder the recordings will replace. A missing end-sound asset returns nil and plays nothing:
-  /// a fallback tone would hide a broken bundle behind a sound the settings never asked for.
+  /// a recording pass may replace them; `none` never reaches here, it is not a cue at all. A missing
+  /// end-sound asset returns nil and plays nothing: a fallback tone would hide a broken bundle behind
+  /// a sound the settings never asked for.
   private func cueSource(_ cue: PomodoroCue) -> AVAudioPlayer? {
-    switch cue {
-    case .warnBeforeEnd:
-      return try? AVAudioPlayer(data: warningToneData())
-    case .endSoft, .endChime:
-      guard let url = Bundle.main.url(forResource: cue.rawValue,
-                                      withExtension: Self.clipExtension) else { return nil }
-      return try? AVAudioPlayer(contentsOf: url)
-    }
-  }
-
-  private func warningToneData() -> Data {
-    if let cachedWarningTone { return cachedWarningTone }
-    let data = ReminderPlayer.makeWarningTone()
-    cachedWarningTone = data
-    return data
-  }
-
-  /// Builds the one-minute warning in memory: two 660Hz blips with a gap between them, each with a
-  /// raised-cosine envelope so neither edge clicks. Quieter than the gentle tone, because it arrives
-  /// while the child is working rather than while they are being reminded.
-  private static func makeWarningTone() -> Data {
-    let sampleRate = 44100.0
-    let frequency = 660.0
-    let blip = 0.12
-    let gap = 0.08
-    let frameCount = Int(sampleRate * (blip * 2 + gap))
-    let peak = 0.3
-    var samples = [Int16](repeating: 0, count: frameCount)
-    for index in 0..<frameCount {
-      let t = Double(index) / sampleRate
-      // Where this sample sits inside a blip, or nil for the silence between them.
-      let intoBlip: Double?
-      if t < blip {
-        intoBlip = t
-      } else if t >= blip + gap, t < blip * 2 + gap {
-        intoBlip = t - blip - gap
-      } else {
-        intoBlip = nil
-      }
-      guard let intoBlip else { continue }
-      let envelope = sin(.pi * intoBlip / blip)
-      let value = sin(2 * .pi * frequency * intoBlip) * envelope * peak
-      samples[index] = Int16(value * Double(Int16.max))
-    }
-    return wav(from: samples, sampleRate: sampleRate)
+    guard let url = Bundle.main.url(forResource: cue.rawValue,
+                                    withExtension: Self.clipExtension) else { return nil }
+    return try? AVAudioPlayer(contentsOf: url)
   }
 
   /// Builds a 0.15s 880Hz mono 16-bit WAV in memory with a fade-out to avoid a click.
