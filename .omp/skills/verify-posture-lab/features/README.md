@@ -31,8 +31,8 @@
 
 ## 特性列表
 
-- [番茄钟专注与休息](./pomodoro-focus-and-break.md)：主页倒计时、阶段流转、开始/暂停/恢复/放弃、今日目标、阶段提示音。
-- [体态监测与语音提醒](./posture-monitoring-and-voice.md)：3D 人形点云、静默基线、8 种体态、15 秒预录语音、无人暂停、调试叠加层。
-- [番茄钟设置](./pomodoro-settings.md)：11 项参数（含手动输入与夹取）、提示音试听、调试开关、真实控件交互与重启持久化。
+- [番茄钟专注与休息](./pomodoro-focus-and-break.md)：冷启动即有摄像头预览与点云、主页倒计时、阶段流转、开始/暂停/恢复/「休息」（`abandoned`）、`-holdStart` 停驻证据、整块胶囊热区、今日目标、阶段提示音。
+- [体态监测与语音提醒](./posture-monitoring-and-voice.md)：3D 人形点云（冷启动即显示）、静默基线、8 种体态、15 秒预录语音、无人暂停、调试叠加层（随时显示、中文关节名、算法来源行）。
+- [番茄钟设置](./pomodoro-settings.md)：11 项参数（含手动输入、点按全选与夹取）、「监测」与「调试」分区（灵敏度/形象模式/调试模式/实验性体态）、提示音试听、真实控件交互与重启持久化。
 - [统计页与历史](./posture-report-and-history.md)：日/周/月视图、姿态时间轴、`focusedSeconds`/`pausedSeconds` 对账、历史持久化与清空。
 - [离线与沙盒隐私](./offline-and-sandbox-privacy.md)：零网络、无 RGB 落盘、38-key JSONL 契约。
