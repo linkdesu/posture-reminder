@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 RUNS = ROOT / "tmp" / "verify"
 BUILD = Path("/tmp/pl-verify-build")
-BUNDLE = "me.xieal.posturelab"
+BUNDLE = "me.xieal.posturelab.depth"
 DEFAULT_SIM = "C12DA589-2444-4F2E-A943-4D6BAFB02BF1"
 DEFAULT_DEVICE = "00008110-001271181AD3801E"
 DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
