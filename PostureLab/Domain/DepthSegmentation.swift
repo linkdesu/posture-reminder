@@ -82,90 +82,132 @@ enum DepthSegmentation {
 
   /// The largest plausible body component, or nil when the frame has nobody in it.
   static func segment(_ image: DepthImage, options: Options = Options()) -> BodyMask? {
-    guard let nearest = image.nearestDepth(ignoreFraction: options.nearestIgnoreFraction) else {
-      return nil
-    }
+    // 一次直方图同时给出「最近读数」与「背景 75 分位」：每帧只扫一遍像素，不排序七万个读数。
+    let histogram = image.depthHistogram()
+    let validCount = histogram.reduce(0, +)
+    guard validCount > 0,
+          let nearest = DepthImage.percentile(histogram,
+                                              total: validCount,
+                                              fraction: options.nearestIgnoreFraction),
+          let background = DepthImage.percentile(histogram, total: validCount, fraction: 0.75)
+    else { return nil }
     // A flat wall fills the frame with one distance; without a near object standing out of it there
     // is nobody in the picture, and thresholding a wall would manufacture a body out of sensor noise.
-    let sorted = image.metres.filter { $0 > 0.05 && $0 < 5 }.sorted()
-    // The 75th percentile, not the median: a child leaning close can fill most of the frame, and a
-    // median taken over the person's own pixels would call the person the background.
-    let background = Double(sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.75))])
-    guard Double(nearest) < background - options.minimumStandout else { return nil }
+    guard Double(nearest) < Double(background) - options.minimumStandout else { return nil }
 
     let near = Double(nearest) - 0.02
     let far = Double(nearest) + options.depthSpan
 
     var candidates = [Bool](repeating: false, count: image.width * image.height)
-    for y in 0..<image.height {
-      for x in 0..<image.width where image.isValid(x: x, y: y) {
-        let depth = Double(image.value(x: x, y: y))
-        candidates[y * image.width + x] = depth >= near && depth <= far
-      }
+    let metres = image.metres
+    for index in 0..<candidates.count {
+      let reading = Double(metres[index])
+      candidates[index] = reading > 0.05 && reading < 5 && reading >= near && reading <= far
     }
 
     // The background filter alone is not enough: a hand at the same distance is a separate
     // component. Keep the largest one.
     var visited = [Bool](repeating: false, count: candidates.count)
-    var best: (cells: [Bool], minX: Int, minY: Int, maxX: Int, maxY: Int, count: Int)?
     var stack: [Int] = []
     stack.reserveCapacity(256)
 
+    // 第一遍只数每个连通块的大小并记下它的起点，不复制整张位图：0.6.1 每遇到一个连通块就分配一个
+    // 全尺寸数组，Debug 构建下这是关节推算里最贵的一段。
+    var bestStart = -1
+    var bestCount = 0
     for start in 0..<candidates.count where candidates[start] && !visited[start] {
-      var component = [Bool](repeating: false, count: candidates.count)
       var count = 0
-      var minX = image.width
-      var minY = image.height
-      var maxX = -1
-      var maxY = -1
+      var componentMinX = image.width
+      var componentMinY = image.height
+      var componentMaxX = -1
+      var componentMaxY = -1
       stack.removeAll(keepingCapacity: true)
       stack.append(start)
       visited[start] = true
-
       while let index = stack.popLast() {
+        count += 1
         let x = index % image.width
         let y = index / image.width
-        component[index] = true
-        count += 1
-        minX = min(minX, x)
-        minY = min(minY, y)
-        maxX = max(maxX, x)
-        maxY = max(maxY, y)
-
+        componentMinX = min(componentMinX, x)
+        componentMinY = min(componentMinY, y)
+        componentMaxX = max(componentMaxX, x)
+        componentMaxY = max(componentMaxY, y)
         // 4-connected: a body is one surface, and diagonal jumps across the background gap that
         // separates an arm from a chair would merge the two.
-        let neighbours = [
-          x > 0 ? index - 1 : -1,
-          x + 1 < image.width ? index + 1 : -1,
-          y > 0 ? index - image.width : -1,
-          y + 1 < image.height ? index + image.width : -1,
-        ]
-        for neighbour in neighbours where neighbour >= 0 {
-          guard !visited[neighbour], candidates[neighbour] else { continue }
-          visited[neighbour] = true
-          stack.append(neighbour)
+        if x > 0, candidates[index - 1], !visited[index - 1] {
+          visited[index - 1] = true
+          stack.append(index - 1)
+        }
+        if x + 1 < image.width, candidates[index + 1], !visited[index + 1] {
+          visited[index + 1] = true
+          stack.append(index + 1)
+        }
+        if y > 0, candidates[index - image.width], !visited[index - image.width] {
+          visited[index - image.width] = true
+          stack.append(index - image.width)
+        }
+        if y + 1 < image.height, candidates[index + image.width], !visited[index + image.width] {
+          visited[index + image.width] = true
+          stack.append(index + image.width)
         }
       }
-
       guard count > 0 else { continue }
       guard Double(count) >= options.minimumAreaFraction * Double(candidates.count) else { continue }
-      guard Double(maxX - minX + 1) >= options.minimumWidthFraction * Double(image.width),
-            Double(maxY - minY + 1) >= options.minimumHeightFraction * Double(image.height)
+      guard Double(componentMaxX - componentMinX + 1) >= options.minimumWidthFraction * Double(image.width),
+            Double(componentMaxY - componentMinY + 1) >= options.minimumHeightFraction * Double(image.height)
       else { continue }
-
-      if best == nil || count > best!.count {
-        best = (component, minX, minY, maxX, maxY, count)
+      if count > bestCount {
+        bestCount = count
+        bestStart = start
       }
     }
 
-    guard let best else { return nil }
+    guard bestStart >= 0 else { return nil }
+    // 第二遍只把赢家标出来，顺便拿到包围盒；`cells` 自己就是这一遍的已访问表。
+    var cells = [Bool](repeating: false, count: candidates.count)
+    var minX = image.width
+    var minY = image.height
+    var maxX = -1
+    var maxY = -1
+    stack.removeAll(keepingCapacity: true)
+    stack.append(bestStart)
+    cells[bestStart] = true
+    while let index = stack.popLast() {
+      let x = index % image.width
+      let y = index / image.width
+      minX = min(minX, x)
+      minY = min(minY, y)
+      maxX = max(maxX, x)
+      maxY = max(maxY, y)
+      if x > 0, candidates[index - 1], !cells[index - 1] {
+        cells[index - 1] = true
+        stack.append(index - 1)
+      }
+      if x + 1 < image.width, candidates[index + 1], !cells[index + 1] {
+        cells[index + 1] = true
+        stack.append(index + 1)
+      }
+      if y > 0, candidates[index - image.width], !cells[index - image.width] {
+        cells[index - image.width] = true
+        stack.append(index - image.width)
+      }
+      if y + 1 < image.height, candidates[index + image.width], !cells[index + image.width] {
+        cells[index + image.width] = true
+        stack.append(index + image.width)
+      }
+    }
+
+    guard Double(maxX - minX + 1) >= options.minimumWidthFraction * Double(image.width),
+          Double(maxY - minY + 1) >= options.minimumHeightFraction * Double(image.height)
+    else { return nil }
+
     return BodyMask(width: image.width,
                     height: image.height,
-                    cells: best.cells,
-                    minX: best.minX,
-                    minY: best.minY,
-                    maxX: best.maxX,
-                    maxY: best.maxY,
-                    count: best.count)
+                    cells: cells,
+                    minX: minX,
+                    minY: minY,
+                    maxX: maxX,
+                    maxY: maxY,
+                    count: bestCount)
   }
 }

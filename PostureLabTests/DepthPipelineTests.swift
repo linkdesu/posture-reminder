@@ -62,6 +62,23 @@ final class DepthPipelineTests: XCTestCase {
                metres: [Float](repeating: 1.4, count: width * height))!
   }
 
+  /// The same seated body at TrueDepth's own size: 320 by 240, head disc radius 26, torso 120 px
+  /// wide, wall at 2 m. `DepthJointSource` resamples this down before segmenting it.
+  private func wideBodyImage() -> DepthImage {
+    let wideWidth = 320
+    let wideHeight = 240
+    var metres = [Float](repeating: background, count: wideWidth * wideHeight)
+    for y in 0..<wideHeight {
+      for x in 0..<wideWidth {
+        let inHead = hypot(Double(x - 160), Double(y - 60)) <= 26
+        let inTorso = y >= 78 && y <= 200 && abs(Double(x - 160)) <= 60
+        guard inHead || inTorso else { continue }
+        metres[y * wideWidth + x] = 0.5
+      }
+    }
+    return DepthImage(width: wideWidth, height: wideHeight, metres: metres)!
+  }
+
   // MARK: - Segmentation
 
   func testSegmentationKeepsTheBodyAndDropsTheWall() throws {
@@ -262,6 +279,30 @@ final class DepthPipelineTests: XCTestCase {
   private func isBoundary(_ mask: BodyMask, x: Int, y: Int) -> Bool {
     !mask.contains(x: x - 1, y: y) || !mask.contains(x: x + 1, y: y)
       || !mask.contains(x: x, y: y - 1) || !mask.contains(x: x, y: y + 1)
+  }
+
+  // MARK: - Resampling
+
+  func testResamplingHalvesTheFrameAndKeepsTheBodyOffTheWall() throws {
+    let wide = wideBodyImage()
+    let small = wide.resampled(maxWidth: 160)
+
+    XCTAssertEqual(small.width, 160)
+    XCTAssertEqual(small.height, 120)
+    // 躯干中心还是 0.5 m，画面角落还是 2 m 的墙：缩放不能把人抹掉，也不能把墙拉近。
+    XCTAssertEqual(small.value(x: 80, y: 90), 0.5, accuracy: 0.06)
+    XCTAssertEqual(small.value(x: 1, y: 1), background, accuracy: 0.06)
+  }
+
+  func testAWideFrameIsResampledBeforeTheJointsAreRead() throws {
+    let estimate = DepthJointSource().estimate(from: wideBodyImage())
+
+    XCTAssertNotNil(estimate.joints[.neck])
+    let left = try XCTUnwrap(estimate.joints[.leftShoulder])
+    let right = try XCTUnwrap(estimate.joints[.rightShoulder])
+    XCTAssertGreaterThan(left.y, estimate.joints[.neck]?.y ?? 1)
+    XCTAssertGreaterThan(right.y, estimate.joints[.neck]?.y ?? 1)
+    XCTAssertEqual(estimate.distanceCM ?? 0, 50, accuracy: 6)
   }
 
   // MARK: - Coarse grid
