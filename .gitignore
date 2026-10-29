@@ -1,5 +1,15 @@
 build/
 DerivedData/
 *.xcodeproj/xcuserdata/
-.omp/
+# .omp/ 下大部分是指向 flash-kitchen 的符号链接与本地状态；只跟踪项目验证技能。
+!.omp/
+.omp/*
+!.omp/skills/
+.omp/skills/*
+!.omp/skills/verify-posture-lab/
+!.omp/skills/verify-posture-lab/**
+tmp/
 artifacts/
+
+__pycache__/
+*.pyc

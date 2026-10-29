@@ -1,0 +1,42 @@
+# 离线与沙盒隐私
+
+应用从构造上离线：没有网络权限、没有 HTTP 客户端、没有分析端点；番茄钟历史、日志、截图与设置只留在本机沙盒。主页的 3D 人形点云不展示也不落盘原始 RGB 画面；JSONL 日志每行必须携带完整的 38 个键。
+
+## Sub-features
+
+- `privacy-offline-source`：源码中没有 `URLSession`、`Network`、`WKWebView`、socket 等联网 API，也没有 URL 字面量。
+- `privacy-offline-runtime`：运行中的 App 不持有 internet socket。
+- `privacy-sandbox-files`：沙盒只允许 JSONL/JSON/PNG/TXT 与系统自有缓存；不允许 jpg/heic/mp4/dng/raw/bin 等图像或原始帧。
+- `privacy-rgb`：不展示、不落盘原始 RGB；点云是渲染几何，不是相机照片。
+- `privacy-log-contract`：每行 JSONL 恰好 38 个键，`ts` 为 epoch 毫秒，缺失值为 `null`。
+
+## How to get to it (user POV)
+
+- 无用户界面入口；这些是运行时属性。
+- 用户能观察到的是：飞行模式下所有功能仍可用；统计页与设置页重启后仍在；没有任何登录/账号页面。
+
+## Driving it with XCUITest & simctl/devicectl
+
+Preconditions：
+
+- `verify.py up` 与 `doctor` 已通过，至少完成一个 `drive` 场景。
+- 运行时容器路径在 `state.json.appContainerDataPath`。
+
+- **源码离线审计。** 运行 `python3 scripts/audit-offline.py`；退出码 0 且输出结尾为 `AC8 PASS`。`verify.py evidence` 会把结果写到 `audits/offline.txt`。
+- **运行时 socket 审计。** 在应用运行时执行 `lsof -nP -p <pid> -i`；不得有 internet socket。真机上用 `nettop` 或 `lsof` 对同一 pid 检查。
+- **沙盒审计。** 运行 `python3 scripts/audit-sandbox.py <appContainerDataPath> --json <run>/scenarios/<scenario>/sandbox-audit.json`；退出码 0，manifest 中不得出现禁止后缀或 raw/frame/depth/rgb 等命中。`verify.py drive` 已在每个场景自动执行。
+- **38-key 契约。** `verify.py evidence` 对每个 `session-*.jsonl` 逐行检查键集合恰好为 38 个，并运行 `scripts/verify-session.py --no-screenshots`。也可手工：
+  ```sh
+  python3 scripts/verify-session.py <log> --no-screenshots --quiet
+  ```
+- **无 RGB 证据。** 检查沙盒 manifest：只有 `Documents/debug/screenshots/*.png` 与日志/历史；没有相机帧、深度帧、视频。截图是应用自绘的 PNG，不是相册照片。
+- **证据。** 保留 `audits/offline.txt`、每个场景的 `sandbox-audit.json`、`verification/contract.txt`；失败时保留原始 JSONL。
+
+## Gotchas
+
+- 模拟器的 `Library/` 由 iOS 写入 Saved State、Metal cache、SplashBoard 快照；`audit-sandbox.py` 把它们标为 system-owned，但仍会检查禁止后缀与名称提示。
+- `battery_level` 在模拟器常为 `null`；这是设备不报告，不是 schema 缺键。
+- 截图 PNG 是允许的；不要因为“有 PNG”就判定 RGB 泄漏，要确认它不是相机帧/深度图。
+- Q4 已确认点云由 TrueDepth 深度图 + 人像分割遮罩合成；当前代码由关节点几何生成，真机源也没有深度。隐私审计能证明“没有 RGB 落盘”，不能证明“已实现 TrueDepth 合成”。
+- `audit-offline.py` 会先剥离注释；文档链接不算联网 API。
+- 不要把 `artifacts/` 下的旧证据当作本轮证据；一切新证据只写 `tmp/verify/<run-id>/`。
