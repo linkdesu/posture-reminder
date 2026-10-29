@@ -120,6 +120,7 @@ Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环�
 | 场景 | 做什么 | 判据（`scenarios/<场景>/*.json`） |
 |---|---|---|
 | `break-count` | `pomodoroDay` 1 分钟专注，在 20 s（专注中）、75 s（休息中）、135 s（下一段专注）截图并 OCR | 「今天 x/目标」依次为 0 → **1**（休息中已加一）→ 1（不重复加） |
+| `abandon-count` | XCUITest `VerifyDriveUITests/testDriveAbandonDoesNotCountToday`：停驻在 1 分钟专注上，**真点**「开始专注」，跑 5 s 后**真点**「离开」提前结束，读主页「今日目标」标签前后两次，并对前后截图 OCR「今天 x/目标」；再从 `Documents/pomodoro-history.json` 读回记录 | 界面与 OCR 计数前后相等（不加一）；历史里至少一条 `abandoned`、没有 `completed`（`abandon-count.json.ok`） |
 | `settings-scroll` | XCUITest `VerifyDriveUITests/testDriveSettingsScrollCountsTenSettings`：逐项滚到并数出番茄钟 10 项，滚到下半屏截图 | `count=10`、无「屏幕常亮」行，`drive-settings-bottom.png` 存在 |
 | `settings-toggle` | XCUITest 真点一次「自动开始休息」，再从 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist` 读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
 | `upgrade-063` | 构建 0.6.3（`c9d5f42`，缓存在 `verify-builds/posture-lab/legacy-063`）→ 装上 → XCUITest 在 **0.6.3 的界面上真点**「屏幕常亮」关掉 → 读回存储 `keepScreenAwake=false` → 覆盖安装冻结新版 → 设置页无常亮行、旧 key 存活、专注 `focus_start` 为 true | `upgrade.json.ok` |
@@ -167,6 +168,8 @@ tmp/verify/<run-id>/
     └── verification/*.txt
 ```
 
+**分批运行**：`evidence` 只判本批真跑过的核心场景（`pomodoro-focus`、`posture-voice`、`pause`、`report`、`settings`，以 `state.json` 的记录或场景目录里的 `provenance.json` 为准），没跑的列在 `verification.json.skipped`，不算失败；本批跑过的 `drive:*` / `case:*` 判定一并汇总进 `results`。一个场景都没跑时 `ok=false`。
+
 证据标准：
 
 - 驱动真实用户路径（启动参数、真实控件、真实杀进程重启），不用内部 setter 或测试后门。
@@ -181,7 +184,7 @@ tmp/verify/<run-id>/
 .omp/skills/verify-posture-lab/scripts/verify.py down --run r9-skill-smoke
 ```
 
-`down` 只终止本次验证启动的 App，并把 `pl-verify` 关机（不删除）。它不删除 `tmp/verify/<run-id>/`，并在退出前确认 `state.json`、截图、JSONL、审计输出仍然存在。
+`down` 只终止本次验证启动的 App，并把 `pl-verify` 关机（不删除）。它不删除 `tmp/verify/<run-id>/`，并在退出前确认证据仍然存在：总是要求 `state.json`、`verification.json`、`audits/offline.txt`；本批跑过 `up` 才要求 `launch/pomodoro_main.png`，跑过 `pomodoro-focus` 才要求它的截图与 `provenance.json`。分批没跑的场景不会让 `down` 以 1 退出。
 
 清理后再次确认：
 
@@ -196,6 +199,8 @@ ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 
 - `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`preflight-cleanup`、`up`、`doctor`、`drive [场景]`、`case`、`list-cases`、`png`、`ascii`、`evidence`、`down`。
 - 仓库 `scripts/test_audit_sandbox.py`：`audit-sandbox.py` 的自测（系统文件白名单不误报、真违规 exit 1）。
+- `scripts/test_verify.py`：`verify.py` 的自测（不碰模拟器）：分批 `evidence` / `down` 只判本批场景、`abandon-count` 的判定。
+- 仓库 `scripts/test_verify_session.py`：`verify-session.py` AC6 的自测：多番茄日志按 `session_started` 分段、每个 `session_ended` 只和本段样本比对；没有 `session_ended` 的短日志记 SKIP（`--expect-summary` 时 FAIL）；数字真错仍 FAIL。
 - `scripts/ocr.swift`：Vision OCR，preflight 用 `swiftc` 编译到本轮构建目录后使用。
 - 仓库 `scripts/verify-preflight.sh`：preflight 的包装，参数依次是目标 SHA、预期版本号、预期 build 号、轮次 slug。
 - `scripts/audit-offline.py`、`scripts/audit-sandbox.py`、`scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py`、`scripts/check-overlay.py`：仓库既有验收脚本，由 `verify.py` 以显式路径调用。

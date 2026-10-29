@@ -34,6 +34,7 @@ Preconditions：
 - **读提示音。** `cue_played` 的 `message` 为 `end_soft` / `end_chime`；`endSound=none` 时没有任何 `cue_played`。
 - **手动暂停与恢复。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,name=pl-verify" -only-testing:PostureLabUITests/ManualPauseUITests test`；测试会点击真实「暂停」并检查倒计时冻结与时间轴灰带。
 - **今日目标（归零即加一）。** `verify.py drive --run <run-id> break-count`：20 s 专注中「今天 0/N」、75 s 休息中「今天 **1**/N」、135 s 下一段专注仍「今天 1/N」，判据见 `scenarios/break-count/break-count.json`。
+- **今日目标（离开不计）。** `verify.py drive --run <run-id> abandon-count`：XCUITest 真点「开始专注」再真点「离开」提前结束，主页「今天 x/N」前后相等，历史里是 `abandoned` 而不是 `completed`，判据见 `scenarios/abandon-count/abandon-count.json`。不手写 plist、不靠启动参数伪造结果。
 - **今日目标（对账）。** 主页截图 `mid-focus.png` 应显示「今天 x/目标」；`pomodoro_tick` 与 `pomodoro-history.json` 的完成数应与之对账。
 - **「离开」按钮与提前结束。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,name=pl-verify" -only-testing:PostureLabUITests/PomodoroControlsUITests test`：停驻时不显示「离开」、开始后显示「离开」，点「离开」后倒计时重置为整轮且没有「跳过休息」（截图 `AC-ended-early-reset`）；点「开始专注」胶囊的边缘也能开始（截图 `AC-start-whole-capsule`）。文案唯一来源是 `PomodoroCopy.endFocusEarly`，归档状态仍是 `abandoned`。
 - **停驻前证据。** DEBUG 构建可用 `-scenario headDown -holdStart 1 -focusMinutes 5 -debug 0` 让脚本场景保持第一个专注停驻（`-holdStart 1` 为 DEBUG 专用启动参数）：开始专注前就有 3D 点云（模拟器 BodyRig 场景；无人体时为矢量轮廓），且没有「离开」按钮；截图 `AC-parked-before-start`。

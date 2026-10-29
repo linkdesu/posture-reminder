@@ -29,6 +29,7 @@ Preconditions：
   ```sh
   python3 scripts/verify-session.py <log> --quiet
   ```
+  AC6 按 `session_started` 把多番茄日志分段，每个 `session_ended` 只和本段样本比对（多段时输出 `AC6[i/n]`）；整份日志没有 `session_ended`（如升级场景「装上→启动→杀掉」的短日志）记 `AC6 SKIP`，需要强制时加 `--expect-summary`。
 - **无图像证据。** 检查沙盒 manifest：只有 `Documents/debug/session-*.jsonl`、`Documents/pomodoro-history.json` 与偏好文件；没有 PNG/JPG/HEIC/MOV/MP4，也没有相机帧、深度帧或原始传感器数据。留档截图是设备侧 `simctl io screenshot` 拍的，位于证据目录，不属于应用容器。
 - **证据。** 保留 `audits/offline.txt`、每个场景的 `sandbox-audit.json`、`verification/contract.txt`；失败时保留原始 JSONL。
 

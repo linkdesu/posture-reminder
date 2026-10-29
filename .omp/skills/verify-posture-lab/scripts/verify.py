@@ -5,7 +5,7 @@
   .omp/skills/verify-posture-lab/scripts/verify.py preflight --sha <SHA> --version <x.y.z> --build <N> --slug <slug>
   .omp/skills/verify-posture-lab/scripts/verify.py up --run <run-id>
   .omp/skills/verify-posture-lab/scripts/verify.py doctor --run <run-id> [--version x.y.z --build N]
-  .omp/skills/verify-posture-lab/scripts/verify.py drive --run <run-id> [all|pause|break-count|settings-scroll|settings-toggle|upgrade-063]
+  .omp/skills/verify-posture-lab/scripts/verify.py drive --run <run-id> [all|pause|break-count|abandon-count|settings-scroll|settings-toggle|upgrade-063]
   .omp/skills/verify-posture-lab/scripts/verify.py case --run <run-id> <用例名>...   （list-cases 列出全部）
   .omp/skills/verify-posture-lab/scripts/verify.py png|ascii <png>...
   .omp/skills/verify-posture-lab/scripts/verify.py evidence --run <run-id>
@@ -481,6 +481,20 @@ def check_contract(log: Path, out: Path) -> bool:
     return ok
 
 
+CORE_SCENARIOS = ("pomodoro-focus", "posture-voice", "pause", "report", "settings")
+
+
+def ran_scenarios(rd: Path, state: dict) -> set[str]:
+    """本批真跑过的核心场景：state.json 里有记录，或场景目录里有 provenance / 持久化结果。
+    分批跑（例如只跑 drive pause）时，没跑的场景不在这里，evidence / down 都不判它。"""
+    ran = set(state.get("scenarios", {}))
+    for name in CORE_SCENARIOS:
+        sdir = rd / "scenarios" / name
+        if (sdir / "provenance.json").exists() or (sdir / "report-persistence.json").exists():
+            ran.add(name)
+    return ran & set(CORE_SCENARIOS)
+
+
 def command_evidence(args) -> int:
     run_id = resolve_run(args.run)
     state = read_state(run_id)
@@ -493,7 +507,11 @@ def command_evidence(args) -> int:
     offline.write_text(r.stdout + r.stderr + f"\n[exit {r.returncode}]\n")
     results["offline"] = r.returncode == 0
 
-    for scenario in ("pomodoro-focus", "posture-voice", "pause", "report", "settings"):
+    ran = ran_scenarios(rd, state)
+    skipped = [name for name in CORE_SCENARIOS if name not in ran]
+    for scenario in CORE_SCENARIOS:
+        if scenario not in ran:
+            continue  # 本批没跑：不判，记进 skipped，不再算失败
         sdir = rd / "scenarios" / scenario
         ver = sdir / "verification"
         log = newest_log(sdir)
@@ -530,13 +548,23 @@ def command_evidence(args) -> int:
         audit = sdir / "sandbox-audit.json"
         results[f"{scenario}:sandbox"] = audit.exists()
 
+    # drive 扩展场景与 case 用例由各自子命令判过，这里只汇总本批真跑过的那些。
+    for name, entry in sorted(state.get("checks", {}).items()):
+        if name.startswith(("drive:", "case:")):
+            results[name] = bool(entry.get("ok"))
+    batch = [name for name in results if name != "offline"]
+    if not batch:
+        results["batch:nonEmpty"] = False  # 一个场景都没跑，不能算通过
     summary = {"when": now(), "runId": run_id, "results": results,
+               "ran": sorted(ran), "skipped": skipped,
                "ok": all(results.values())}
     (rd / "verification.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     state.setdefault("checks", {})["evidence"] = {
         "ok": summary["ok"], "detail": results, "at": now()}
     write_state(run_id, state)
     print(json.dumps(results, ensure_ascii=False, indent=2))
+    if skipped:
+        print("本批未跑、不判：" + "，".join(skipped))
     return 0 if summary["ok"] else 1
 
 
@@ -556,10 +584,13 @@ def command_down(args) -> int:
     if getattr(args, "preflight_only", False):
         print("cleanup: preflight-only run, evidence kept at", rd)
         return 0
-    expected = ["state.json", "launch/pomodoro_main.png", "verification.json",
-                "scenarios/pomodoro-focus/mid-focus.png",
-                "scenarios/pomodoro-focus/provenance.json",
-                "audits/offline.txt"]
+    # 只要求本批真跑过的东西留下证据：没跑 up 就不要 launch 截图，没跑 pomodoro-focus 就不要它的文件。
+    expected = ["state.json", "verification.json", "audits/offline.txt"]
+    if "launch" in state.get("checks", {}):
+        expected.append("launch/pomodoro_main.png")
+    if "pomodoro-focus" in ran_scenarios(rd, state):
+        expected += ["scenarios/pomodoro-focus/mid-focus.png",
+                     "scenarios/pomodoro-focus/provenance.json"]
     missing = [item for item in expected if not (rd / item).exists()]
     print("cleanup: evidence kept at", rd)
     if missing:
@@ -1226,7 +1257,55 @@ def drive_break_count(run_id: str, state: dict, sim: str) -> int:
     return 0 if ok else 1
 
 
+def judge_abandon_count(ui: dict, ocr_before, ocr_after) -> tuple[bool, str]:
+    """离开计数的判定：真点了「离开」、界面读到的前后计数相等，截图 OCR 读到的也相等且与界面一致。"""
+    before, after = ui.get("before"), ui.get("after")
+    reasons = []
+    if ui.get("endTapped") != "true":
+        reasons.append("没有真点到「离开」")
+    if before in (None, "nil") or before != after:
+        reasons.append(f"界面计数 {before}→{after}")
+    ob = ocr_before[0] if ocr_before else None
+    oa = ocr_after[0] if ocr_after else None
+    if ob is None or oa is None or ob != oa:
+        reasons.append(f"截图 OCR 计数 {ob}→{oa}")
+    elif str(oa) != str(after):
+        reasons.append(f"OCR {oa} 与界面 {after} 不一致")
+    ok = not reasons
+    return ok, (f"离开前 {before} → 离开后 {after}（OCR {ob}→{oa}）" if ok else "；".join(reasons))
+
+
+def drive_abandon_count(run_id: str, state: dict, sim: str) -> int:
+    """XCUITest 真点「开始专注」再真点「离开」提前结束，读主页「今天 x/目标」：不能加一；
+    历史里应有一条 abandoned、没有 completed。"""
+    out = scenario_dir(run_id, "abandon-count")
+    install_sim(sim)
+    test = run_xcuitest(run_id, sim, "testDriveAbandonDoesNotCountToday", out)
+    ui = kv_text(out / "drive-abandon-values.txt")
+    ocr_bin = frozen_ocr(run_id)
+    counts = {}
+    for stem in ("drive-abandon-before", "drive-abandon-after"):
+        png = out / f"{stem}.png"
+        texts = ocr(ocr_bin, png) if ocr_bin and png.exists() else []
+        (out / f"ocr-{stem}.txt").write_text("\n".join(texts) + "\n")
+        counts[stem] = today_count(texts)
+    copy_documents(container_sim(sim), out / "Documents")
+    terminate_sim(sim)
+    history = history_file(out)
+    records = json.loads(history.read_text()) if history.exists() else []
+    outcomes = [r.get("outcome") for r in records]
+    ok, detail = judge_abandon_count(ui, counts["drive-abandon-before"], counts["drive-abandon-after"])
+    history_ok = outcomes.count("abandoned") >= 1 and "completed" not in outcomes
+    ok = ok and history_ok and test["ok"]
+    write_json(out / "abandon-count.json", {"ok": ok, "test": test, "ui": ui, "ocr": counts,
+                                            "historyOutcomes": outcomes, "when": now()})
+    check(state, "drive:abandon-count", ok, f"{detail}；历史 {outcomes}；XCUITest exit={test.get('exit')}")
+    write_state(run_id, state)
+    return 0 if ok else 1
+
+
 DRIVE_EXTRA = {
+    "abandon-count": drive_abandon_count,
     "break-count": drive_break_count,
     "settings-scroll": drive_settings_scroll,
     "settings-toggle": drive_settings_toggle,
