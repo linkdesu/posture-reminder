@@ -4,6 +4,8 @@
 
 **v0.6 是一次破坏性的契约变更：键集从 38 个增至 42 个（新增 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`），事件表新增 `segment`。** 按 ADR-0002，schema 变更必须先让 QA 知情；本轮由 TL 负责把这次变更写进 `tmp/handoff/omp-questions.md` 告知 QA，本文档只记录契约本身。倒计时与专注起点同时改用墙钟口径（见「ts 与 t 不是一回事」一节末尾），新增的「识别中」段见「识别中段与时间轴不变量」。
 
+**v0.6.1 不改变键数，也不新增事件：** 只给 `segment_kind` 增加取值 `no_data`（「无数据」段——首样本之后样本流中断的那段墙钟时间）。已经按 42 键读取日志的读者无需改动；按取值穷举 `segment_kind` 的读者需要接受这个新值。详见「样本中断与「无数据」段」。
+
 ## `ts` 与 `t` 不是一回事
 
 请仔细读一遍，因为这是最容易弄错的一点：
@@ -87,9 +89,9 @@ xcrun devicectl device copy from \
 | `posture_stats` | Object? | 在 `session_ended` 行：每个 `PostureKind` rawValue 一个条目，值为 `{"episodes": …, "reminders": …, "seconds": …}`（见下文）。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
 | `remaining_seconds` | Double? | 在 `pomodoro_tick` 行：计时器当前阶段剩余秒数。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
 | `phase` | String? | 在 `pomodoro_tick` 行：当前阶段的 `PomodoroPhase` rawValue，`focus` / `shortBreak` / `longBreak`。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
-| `segment_kind` | String? | 在 `segment` 行：被关闭的那段时间轴段的种类。v0.6 只有一个取值 `detecting`，即「识别中」段——从点击「开始」到该专注第一个姿态样本。其他行为 `null`。 |
-| `segment_start` | Int64? | 在 `segment` 行：该段起点的 Unix 纪元**毫秒**，即孩子点「开始」的墙钟时刻。其他行为 `null`。 |
-| `segment_end` | Int64? | 在 `segment` 行：该段终点的 Unix 纪元**毫秒**，即该专注第一个姿态样本到达的墙钟时刻。其他行为 `null`。 |
+| `segment_kind` | String? | 在 `segment` 行：被关闭的那段时间轴段的种类，取值 `detecting`（「识别中」段，从点击「开始」到该专注第一个姿态样本）或 `no_data`（「无数据」段，v0.6.1：首样本之后样本流中断、下一个样本或专注结束才闭合）。其他行为 `null`。 |
+| `segment_start` | Int64? | 在 `segment` 行：该段起点的 Unix 纪元**毫秒**。`detecting` 是孩子点「开始」的墙钟时刻；`no_data` 是中断前**最后一个样本**到达的墙钟时刻。其他行为 `null`。 |
+| `segment_end` | Int64? | 在 `segment` 行：该段终点的 Unix 纪元**毫秒**。`detecting` 是该专注第一个姿态样本到达的墙钟时刻；`no_data` 是让样本流恢复的那个样本（或专注结束）的墙钟时刻。其他行为 `null`。 |
 | `segment_seconds` | Double? | 在 `segment` 行：该段时长，秒，等于 `(segment_end − segment_start) / 1000`。其他行为 `null`。 |
 
 这四个 `segment_*` 键只在 `segment` 行非 `null`；其余所有行都写 JSON `null`，键本身仍然存在。
@@ -143,7 +145,7 @@ xcrun devicectl device copy from \
 | `speech_unavailable` | 该体态的占位片段无法加载或解码，因此提醒是静音的。不会重复播放，队列继续推进。 | `alert_type`（没有 `t`，没有 `level`） |
 | `speech_played` | 某个片段报告它**开始**播放。写在播放器真正开始片段的地方，而不是排队的地方，因此该行绝不会为缺失或无法播放的资源声称有声音——那些会写 `speech_unavailable`。它证明播放器已加载并开始片段，不证明房间里有人听到了。 | `alert_type`、`level`（没有 `t`——播放器没有会话时钟） |
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
-| `segment` | 一个专注内的「识别中」段关闭：从孩子点击「开始」到该专注**第一个姿态样本**到达。这段墙钟时间不并入第一段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的「识别中」段（首样本与点击同一瞬间）不写行。只有 `detecting` 段产生这个事件；`good`、各体态与 `no_person` 段不写。 | `segment_kind`（固定 `detecting`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
+| `segment` | 一个专注内的非姿态时间轴段关闭：`detecting`（从孩子点击「开始」到该专注**第一个姿态样本**到达）或 `no_data`（v0.6.1：首样本之后样本流中断，直到下一个样本到达或专注结束）。这段墙钟时间不并入任何姿态段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的段不写行。只有 `detecting` 与 `no_data` 段产生这个事件；`good`、各体态、`no_person` 与 `paused` 段不写。 | `segment_kind`（`detecting` 或 `no_data`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
 | `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
 | `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
 | `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |
@@ -153,16 +155,26 @@ xcrun devicectl device copy from \
 
 番茄钟流程中，每个样本保持相同顺序，且该样本的 `pomodoro_tick` 行最后出现：在该样本上结束的阶段，到写 tick 时已经推进，因此 tick 总是标明样本离开计时器时所在的阶段。
 
-## 识别中段与时间轴不变量
+## 识别中段、无数据段与时间轴不变量
 
-v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「识别中」，随后是姿态段（`good`、八种体态、`no_person`），暂停时插入 `paused` 段。段的 kind 常量是 `detecting`（引擎、时间轴与图例共用这一个标识），界面与图例的中文写「识别中」；与 `paused` 一样，它只是时间轴取值，**永远不是 `state` 取值**——`state` 仍然是最近一次判定（初始为 `good`）。
+v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「识别中」，随后是姿态段（`good`、八种体态、`no_person`），暂停时插入 `paused` 段，样本流中断时插入 `no_data` 段。段的 kind 常量是 `detecting`、`no_data` 与 `paused`（引擎、时间轴与图例共用这些标识），界面与图例的中文分别写「识别中」「无数据」「暂停」；与 `paused` 一样，前两者只是时间轴取值，**永远不是 `state` 取值**——`state` 仍然是最近一次判定（初始为 `good`）。
 
 - **独立成段，不并入第一段，也不丢弃。** 孩子点「开始」时深度流刚启动、人脸往往还没被测量到；这段墙钟时间单独记成一个 `detecting` 段，从点击「开始」到该专注第一个姿态样本到达。它不会为了好看被合并进第一个 `good` 段，也不会被当作启动噪声丢掉。
 - **不计入坏姿势统计。** 这段时间没有任何体态判定，所以不产生 `reminder`，也不增加任何 `posture_stats[kind]` 的 `episodes` / `reminders` / `seconds`，更不会把 `state` 推到某种体态。
 - **不计入良好占比的分母。** 良好占比只在姿态段上计算：「识别中」的秒数既不计入 `good_seconds`，也不计入 `total_seconds`。把它算成良好，等于给一段没测量过的相机启动时间记功；算成坏姿势则更没依据。
 - **与「不在画面」（`no_person`）是两件事。** `no_person` 是相机**量过**并回答“没有人”；`detecting` 是相机**还没回答**。两者在时间轴与图例上各有独立条目、各自颜色（见 `GLOSSARY.md` 的「识别中」与「不在画面」），日志里前者走 `state`，后者走 `segment_kind`。
-- **时间轴不变量**：一个专注的 `detecting` 段与各姿态段（`good`、八种体态、`no_person`）的时长之和 = `plannedSeconds`（±1 秒）。`paused` 段不在这个总和里：暂停是倒计时之外的墙钟时间，暂停期间倒计时冻结，暂停时长也不占用计划时长，只单独累计在 `pausedSeconds` 与灰色 `paused` 段里。
-- **只有「识别中」段写 `segment` 行。** 段关闭时写一行，携带 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`；`good`、各体态与 `no_person` 段不写这个事件，它们由 `sample` / `status_changed` 行与 `state` 重建。`segment_seconds` 应等于 `(segment_end − segment_start) / 1000`，可以据此交叉核对。若第一个姿态样本与点击「开始」落在同一瞬间，这段长度为 0、没有可画的等待，于是不作为独立段，也不写 `segment` 行——时间轴直接从该样本起算，不变量照旧成立。
+- **时间轴不变量**：一个专注的 `detecting` 段、`no_data` 段与各姿态段（`good`、八种体态、`no_person`）的时长之和 = `plannedSeconds`（±1 秒）。`paused` 段不在这个总和里：暂停是倒计时之外的墙钟时间，暂停期间倒计时冻结，暂停时长也不占用计划时长，只单独累计在 `pausedSeconds` 与灰色 `paused` 段里。
+- **只有 `detecting` 与 `no_data` 段写 `segment` 行。** 段关闭时写一行，携带 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`；`good`、各体态、`no_person` 与 `paused` 段不写这个事件（后三者由 `sample` / `status_changed` 行与 `state`、`paused` / `resumed` 行重建）。`segment_seconds` 应等于 `(segment_end − segment_start) / 1000`，可以据此交叉核对。若第一个姿态样本与点击「开始」落在同一瞬间，这段长度为 0、没有可画的等待，于是不作为独立段，也不写 `segment` 行——时间轴直接从该样本起算，不变量照旧成立。
+
+### 样本中断与「无数据」段
+
+姿态样本只证明到**最后一个样本到达的那一刻**。v0.6.1 之前，样本流中断后仍张开的那一段会一直沿用上一个 kind（常为 `good`），于是「统计页开着、深度流停下」的整段时间被记成良好坐姿，良好占比虚高。现在由 SessionController 的墙钟 ticker 判定：一个专注已经有样本，且距最后一个样本超过 **1 秒**（`FocusTimeline.sampleGapThreshold`；样本本身约 10 Hz，一整秒没有样本说明流停了，而不是掉帧），就在**最后一个样本的时刻**闭合当前段，并开一段 `no_data`；下一个样本到达时（或专注结束时）闭合它。
+
+- **颜色与「识别中」相同。** 两者都在说“相机没有给出答案”，所以共用同一档最浅的冷灰；图例仍各占一行（「识别中」与「无数据」），以免把专注中途的停流误读成启动等待。
+- **不计分。** `no_data` 既不加 `good_seconds`，也不加任何 `posture_stats[kind].seconds`，并且**不在良好占比的分母里**；它只作为时间轴段出现在历史与统计页上。
+- **暂停不受影响。** 暂停期间样本流若也停了，段仍是 `paused`（暂停本来就在倒计时之外）；暂停语义与 v0.6 一致。
+- **首样本之前不会产生 `no_data`。** 那段仍由 `detecting` 覆盖：`segment_start` 是点击「开始」的时刻，而不是最后一个样本（那时还没有样本）。
+- **日志**：`no_data` 段闭合时写一行 `segment`，四个键的语义同前；键集仍是 42 个。
 
 示例（只列出与事件相关的键，其余键按契约写 JSON `null`）：
 
@@ -174,6 +186,15 @@ v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「
 ```
 
 这一行表示：孩子在 `07:33:20` 点了「开始」（`segment_start`），`4.23` 秒后首个姿态样本到达并关闭「识别中」段；该专注此后从这一个样本起进入姿态段。
+
+```json
+{"ts": 1793000096000, "event": "segment", "state": "good", "screen": "pomodoro_main",
+ "segment_kind": "no_data", "segment_start": 1793000042000,
+ "segment_end": 1793000096000, "segment_seconds": 54.0,
+ "wall_clock": "2026-10-26T07:34:56Z", "t": null}
+```
+
+这一行表示：最后一个姿态样本到达于 `07:34:02`，此后 54 秒没有任何样本（例如家长打开了统计页），`07:34:56` 的样本恢复并关闭「无数据」段；这 54 秒既不算良好，也不算任何体态。
 
 ## 词汇表
 
@@ -205,7 +226,7 @@ v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「
 
 ### `segment_kind`
 
-`detecting`——「识别中」段：从点击「开始」到该专注第一个姿态样本之间那段墙钟时间。v0.6 只有这一个取值。`paused` 是时间轴取值，但不是 `segment_kind` 取值：暂停不写 `segment` 行，暂停时长从 `paused` / `resumed` 行与历史里的 `pausedSeconds` 读取。
+`detecting`——「识别中」段：从点击「开始」到该专注第一个姿态样本之间那段墙钟时间（v0.6）。`no_data`——「无数据」段（v0.6.1）：该专注已有样本后，样本流中断超过 1 秒；段起点是中断前最后一个样本的时刻，终点是恢复样本或专注结束的时刻。`paused` 是时间轴取值，但不是 `segment_kind` 取值：暂停不写 `segment` 行，暂停时长从 `paused` / `resumed` 行与历史里的 `pausedSeconds` 读取。
 
 ## Swift 与日志名称映射
 
@@ -246,7 +267,7 @@ v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「
 | `SessionSummary.headDownRemindCount` | `head_down_remind_count` |
 | `SessionSummary.postureStats` | `posture_stats`（以 `PostureKind.rawValue` 为键） |
 
-`PomodoroRecord` 与 `PomodoroOutcome` 是**历史词汇，不是日志键**。JSONL 日志没有 `outcome` 字段：`completed`、`abandoned` 与 `interrupted` 存放在 `Documents/pomodoro-history.json`，统计页从 outcome 为 `completed` 的记录计算 `completedPomodoros`。同样，`PostureSegment.kind` 使用 `state` 词汇，并额外允许 `paused`（暂停带）与 `detecting`（识别中带）；这两个都是时间轴取值，永远不是 `state` 取值。`EndSound` 是设置项（`soft` / `chime` / `none`），不是键；它决定提示音片段是否开始，从而决定是否存在 `cue_played` 行。
+`PomodoroRecord` 与 `PomodoroOutcome` 是**历史词汇，不是日志键**。JSONL 日志没有 `outcome` 字段：`completed`、`abandoned` 与 `interrupted` 存放在 `Documents/pomodoro-history.json`，统计页从 outcome 为 `completed` 的记录计算 `completedPomodoros`。同样，`PostureSegment.kind` 使用 `state` 词汇，并额外允许 `paused`（暂停带）、`detecting`（识别中带）与 `no_data`（无数据带，v0.6.1）；这三个都是时间轴取值，永远不是 `state` 取值。`EndSound` 是设置项（`soft` / `chime` / `none`），不是键；它决定提示音片段是否开始，从而决定是否存在 `cue_played` 行。
 
 ## 中文术语 ↔ UI 文案 ↔ 日志事件映射
 
@@ -257,10 +278,11 @@ v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「
 | 离开 | 专注控制行按钮「离开」 | 无同名 JSONL 事件；关闭专注时写一条 `session_ended` 汇总，该番茄在 `Documents/pomodoro-history.json` 记 `"outcome": "abandoned"` | 不是 `paused` / `resumed`，也没有 `abandon` 这个 JSONL 事件名 |
 | 无人 | 统计页/历史图例写「不在画面」 | `status_changed` 行 `state: "no_person"`；连续 3 秒无人写 `paused`，人脸回来写 `resumed` | 不是「离开」按钮，也不是 `abandoned` |
 | 识别中（v0.6） | 统计页时间轴与图例写「识别中」 | 关闭时一行 `segment`：`segment_kind: "detecting"` + `segment_start` / `segment_end` / `segment_seconds`；此前没有任何姿态样本，所以没有 `sample` 行可依 | 不是 `no_person`（相机还没回答），不是 `paused`（不在倒计时之外），也不是「离开」 |
+| 无数据（v0.6.1） | 统计页时间轴与图例写「无数据」，颜色同「识别中」 | 关闭时一行 `segment`：`segment_kind: "no_data"` + `segment_start`（最后一个样本的时刻）/ `segment_end` / `segment_seconds`；它之前有姿态样本，之后由恢复样本或 `session_ended` 闭合 | 不是 `no_person`（那是有样本且判定无人），不是 `paused`（暂停是主动状态、在倒计时之外），也不是「识别中」（那是首样本之前） |
 | 超时中断（无人超过 300 秒） | 专注结束，停在停驻状态 | 结束时那条 `session_ended`；历史 `"outcome": "interrupted"` | 历史里不会出现 `abandoned` |
 | 手动暂停 | 按钮「暂停」；暂停后按钮回到「开始专注」 | 没有 `paused` / `resumed` 行——这两个事件只表示无人；暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴段 | 不是 `no_person`，也不是 `abandoned` |
 
-一句话：**按钮「离开」只落到历史的 `abandoned`；absence 只落到 `paused` / `resumed` 与 `state: "no_person"`；「识别中」只落到 `segment` 行的 `segment_kind: "detecting"`。** 三者的英文键都不叫对方的名字。
+一句话：**按钮「离开」只落到历史的 `abandoned`；absence 只落到 `paused` / `resumed` 与 `state: "no_person"`；「识别中」与「无数据」只落到 `segment` 行的 `segment_kind: "detecting"` / `"no_data"`。** 这些英文键都不叫对方的名字。
 
 ## 每种体态独立计时、记录与计数
 
@@ -294,7 +316,7 @@ head_down_count = 1         head_down_remind_count = 1
 - **`dt` 记在区间起点的样本上。** 对两个连续样本 `t0 < t1`，区间 `dt = t1 − t0` 归属于 `t0` 样本的类别，而不是 `t1` 样本的类别。结果：状态变化反映在从切换点*开始*的区间上；从最后样本到会话结束的末尾空档由引擎的 `finish` 记入，但只看样本的重算看不到它——因此校验器对总计有 ±1 秒容差。
 - **人脸缺失期间不累计时间。** 当 `t0` 样本的 `distance` 或 `pitch` 为 `null` 时，该区间只记入 `paused_seconds`，不记入其他任何项：不计 `total_seconds`、不计越阈秒数，良好连续段既不增长也不重置。
 - **`total_seconds` 是有人脸在座的时间**：它只在起点样本检测到人脸的区间上累加 `dt`。
-- **「识别中」段不进入这些汇总。** 该段发生在第一个姿态样本之前，本来就没有 `sample` 行，所以只从样本重算的校验器天然看不到它；它也不计入 `total_seconds` 与 `good_seconds`，因此良好占比的分母里没有它。它的时长只从 `segment` 行读取（见「识别中段与时间轴不变量」）。
+- **「识别中」与「无数据」段不进入这些汇总。** 前者发生在第一个姿态样本之前，本来就没有 `sample` 行；后者发生在样本流中断期间，同样没有样本可依。两者都不计入 `total_seconds` 与 `good_seconds`，因此良好占比的分母里没有它们；`no_data` 尤其不能记到中断前的最后一个姿态上。它们的时长只从 `segment` 行读取（见「识别中段、无数据段与时间轴不变量」）。
 - **`good_seconds` 排除所有体态，而不只是前两种。** 只有当起点样本有人脸且**没有任何体态越阈**时才累加 `dt`——与 `state = good` 的条件相同。v0.3 之前它只统计“太近”和“低头”，因此一次一直托腮的会话会把自己报告成完全良好；如果你在阅读更旧的日志，这个数字可能与 `status_changed` 时间轴不一致。
 - **两个越阈计数器相互独立，可能重叠。** 只要各自的谓词成立，`near_seconds` 与 `head_down_seconds` 就各自累加 `dt`，因此同时“太近”且“低头”的样本会把同一段 `dt` 计入**两者**。所以 `near_seconds + head_down_seconds + good_seconds` 超过 `total_seconds` 是正常的。谓词是严格的：“太近”为 `distance_cm < distance_threshold_cm`（相等不算越阈），“低头”为 `baseline_pitch_deg − pitch_deg > pitch_threshold_deg`。其余六种体态也有秒数计数器，但只在 `posture_stats[kind].seconds` 中；它们没有扁平的 `*_seconds` 键。
 - **`longest_good_streak_seconds`** 是最长连续良好区间；**任何**体态越阈都会把当前连续段重置为 0，无人既不会延长也不会重置它。
@@ -319,7 +341,7 @@ v0.5 起应用不写任何图像文件：`FileDebugLogger.screenshot(_:)` 只把
 | 验收 | 日志中的证据 |
 |---|---|
 | 倒计时 | `pomodoro_tick` 序列：`remaining_seconds` 与相邻行之间的 `ts` 间隔同步下降，`phase` 只在阶段切换处改变，序列中没有断档。 |
-| 时间轴完整（v0.6） | 每个专注开头至多有一行 `segment`（首样本即时到达时没有这一行）：`segment_kind: "detecting"`，`segment_start` 是点击「开始」的墙钟毫秒，`segment_end` 是首个姿态样本到达的墙钟毫秒，`segment_seconds` 与 `(segment_end − segment_start) / 1000` 一致；它 + 各姿态段的时长之和 = `plannedSeconds`（±1 秒），`paused` 段不计入该总和。 |
+| 时间轴完整（v0.6 / v0.6.1） | 每个专注开头至多有一行 `segment`（首样本即时到达时没有这一行）：`segment_kind: "detecting"`，`segment_start` 是点击「开始」的墙钟毫秒，`segment_end` 是首个姿态样本到达的墙钟毫秒，`segment_seconds` 与 `(segment_end − segment_start) / 1000` 一致。之后每段样本中断都有一行 `segment_kind: "no_data"`，起点是中断前最后一个样本的时刻，终点是恢复样本或专注结束。`detecting` + `no_data` + 各姿态段的时长之和 = `plannedSeconds`（±1 秒），`paused` 段不计入该总和。 |
 | 阶段流转 | `pomodoro_tick` 的 `phase` 从 `focus` 走到 `shortBreak` / `longBreak`，再回到 `focus`；每完成一个专注有一条 `session_ended`。 |
 | 音频 | `speech_played` 行（`alert_type` + `level`）；语音开关关闭时完全没有这类行。阶段结束提示音只写 `cue_played`（`end_soft` / `end_chime`），静音时没有。 |
 | 暂停 | `paused` / `resumed` 行；暂停期间倒计时冻结，暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴带。 |
