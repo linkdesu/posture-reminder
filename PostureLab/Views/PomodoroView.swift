@@ -31,31 +31,40 @@ struct PomodoroView: View {
       Color.black
         .ignoresSafeArea()
 
-      // The live camera is the ground as soon as the app opens. A scripted run has no camera, so
-      // there the point cloud keeps the plain black ground the rig's figures were drawn for.
-      if !controller.isSimulating {
-        CameraPreview(session: controller.cameraSession)
+      // The live camera and the likeness are the ground as soon as the app opens, unless a parent
+      // turned 形象模式 off — that switch is the one way to take the mirror away. A scripted run has
+      // no camera, so there the point cloud keeps the plain black ground the rig's figures were
+      // drawn for.
+      if settings.avatarEnabled {
+        if !controller.isSimulating {
+          CameraPreview(session: controller.cameraSession)
+            .ignoresSafeArea()
+            .opacity(0.55)
+          // A quiet scrim so the cloud and its labels stay legible over a bright room.
+          Color.black.opacity(0.25)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        }
+
+        // The likeness is the ground of the screen, not a card inside a layout. It also draws the
+        // quiet placeholder while there is no geometry yet, so the ground never turns into a blank
+        // warning.
+        AvatarView(geometry: controller.latestGeometry,
+                   assessment: childAssessment,
+                   drawsGround: controller.isSimulating)
           .ignoresSafeArea()
-          .opacity(0.55)
-        // A quiet scrim so the cloud and its labels stay legible over a bright room.
-        Color.black.opacity(0.25)
-          .ignoresSafeArea()
-          .allowsHitTesting(false)
+          // When the overlay is up it is inset for the controls and the likeness takes the same
+          // frame, so the skeleton stays on the body. See `controlsClearance`.
+          .padding(.bottom, showsDebugOverlay ? Self.controlsClearance : 0)
+          // The drawing has no text of its own; this name lets a test tell 形象模式 on from off
+          // without reading pixels.
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel("形象预览")
       }
 
-      // The likeness is the ground of the screen, not a card inside a layout. It also draws the
-      // quiet placeholder while there is no geometry yet, so the ground never turns into a blank
-      // warning.
-      AvatarView(geometry: controller.latestGeometry,
-                 assessment: childAssessment,
-                 drawsGround: controller.isSimulating)
-        .ignoresSafeArea()
-        // When the overlay is up it is inset for the controls and the likeness takes the same frame,
-        // so the skeleton stays on the body. See `controlsClearance`.
-        .padding(.bottom, showsDebugOverlay ? Self.controlsClearance : 0)
-
       // Joint data is a parent's view of the measurement, so it sits under the controls and is never
-      // a target. It shows only while a focus is running; a break or a pause has no live reading.
+      // a target. It is on whenever debug mode is on; the readings themselves need a running focus,
+      // and before one the rows show their formula with a dash.
       if showsDebugOverlay {
         DebugOverlayView(geometry: controller.latestGeometry, assessment: childAssessment)
           .ignoresSafeArea()

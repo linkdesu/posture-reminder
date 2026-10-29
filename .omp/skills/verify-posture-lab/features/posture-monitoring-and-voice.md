@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- `posture-cloud`：`pomodoro_main` 常驻 3D 人形点云，背景干净；冷启动即显示（开始专注前就有）；真机另有摄像头预览，画面仅在本机屏幕上显示、不落盘、不上传（没有 RGB 落盘通路）。
+- `posture-cloud`：`pomodoro_main` 常驻 3D 人形点云，背景干净；冷启动即显示（开始专注前就有）；真机另有摄像头预览，画面仅在本机屏幕上显示、不落盘、不上传（没有 RGB 落盘通路）；设置页「形象模式」关闭时预览与点云一起隐藏。
 - `posture-baseline`：专注启动后前 3 秒有效人脸样本中位数建立距离/俯仰基线。
 - `posture-kinds`：识别 `desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 - `posture-tiers`：稳定级、 中度级可发声；实验级只记录与调试高亮，永不触发任何提醒。

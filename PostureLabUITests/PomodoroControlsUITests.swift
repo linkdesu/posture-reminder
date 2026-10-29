@@ -61,6 +61,22 @@ final class PomodoroControlsUITests: XCTestCase {
     attachScreenshot(of: app, named: "AC-start-whole-capsule")
   }
 
+  /// 形象模式 is the one way to take the mirror away: on, the likeness is an element of the child's
+  /// screen; off, it is gone and the black ground is all that is left.
+  func testAvatarSwitchTakesTheMirrorAway() {
+    let on = launchApp(PomodoroLaunch.parkedPreview() + ["-avatar", "1"])
+    XCTAssertTrue(on.first(.any, labelled: "形象预览").waitForExistence(timeout: 30),
+                  "形象模式 on did not show the likeness")
+    on.terminate()
+
+    let off = launchApp(PomodoroLaunch.parkedPreview() + ["-avatar", "0"])
+    XCTAssertTrue(off.first(.button, labelled: "开始专注").waitForExistence(timeout: 30),
+                  "the child's screen did not come up with 形象模式 off")
+    XCTAssertFalse(off.first(.any, labelled: "形象预览").exists,
+                   "形象模式 off still shows the likeness")
+    attachScreenshot(of: off, named: "AC-avatar-off")
+  }
+
   /// The countdown the child sees, in whole seconds; -1 when it is not on screen.
   private func countdownSeconds(in app: XCUIApplication) -> Int? {
     let element = app.first(.staticText, labelStartingWith: "剩余 ")
