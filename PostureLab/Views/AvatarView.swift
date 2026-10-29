@@ -47,6 +47,10 @@ struct AvatarView: View {
 
   var body: some View {
     Canvas(opaque: true, rendersAsynchronously: false) { context, size in
+      #if DEBUG
+      // 一帧一次；`rendersAsynchronously` 打开后这个闭包不在主线程，计数由 PerfMonitor 加锁。
+      PerfMonitor.shared.recordFrame()
+      #endif
       context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
 
       guard let geometry, !geometry.joints.isEmpty else {

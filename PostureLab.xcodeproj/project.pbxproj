@@ -33,6 +33,7 @@
 		602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D597B6333310C45A83D6402 /* ReminderPlayer.swift */; };
 		615F29CABD4A4D803D1CC61E /* PomodoroSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */; };
 		6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */; };
+		727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040D7563C8041E76DE061B4A /* PerfMonitor.swift */; };
 		7CA32D1FA92C371E7CFF1B67 /* Pose.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCBAEB16FED6503FA1D580B8 /* Pose.swift */; };
 		840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */; };
 		8B46FC5F26C523A188889FDD /* SelectAllNumberField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */; };
@@ -98,6 +99,7 @@
 
 /* Begin PBXFileReference section */
 		01417FF66BD4502D7D8F0556 /* SessionSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSummary.swift; sourceTree = "<group>"; };
+		040D7563C8041E76DE061B4A /* PerfMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfMonitor.swift; sourceTree = "<group>"; };
 		0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsView.swift; sourceTree = "<group>"; };
 		0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthPipelineTests.swift; sourceTree = "<group>"; };
 		11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroStore.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 			isa = PBXGroup;
 			children = (
 				16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */,
+				040D7563C8041E76DE061B4A /* PerfMonitor.swift */,
 			);
 			path = Debug;
 			sourceTree = "<group>";
@@ -481,6 +484,7 @@
 				8C65F76A4BF512D746EDEFD1 /* JointSource.swift in Sources */,
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
+				727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */,
 				92D5FE4A613E780A737E0FAF /* PomodoroCopy.swift in Sources */,
 				18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */,
 				B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */,

@@ -162,6 +162,10 @@ struct MonitoringEngine {
     let assessment = PostureClassifier.assess(sample,
                                               baseline: baseline,
                                               thresholds: config.thresholds)
+    #if DEBUG
+    // 每秒判定的次数：一次 ingest 正好判定一次，埋点贴在这里才不会漏掉暂停/无人之外的样本。
+    PerfMonitor.shared.recordAssessment()
+    #endif
     latestAssessment = assessment
 
     // A pause is a hard gate: while it lasts the screen says "nobody there" even when the body is

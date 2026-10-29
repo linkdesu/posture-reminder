@@ -185,7 +185,15 @@ extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
 
     lastEmittedAt = t
     lastDepth = image
+    #if DEBUG
+    // 关节推算单次耗时：起点紧贴调用，终点在返回之后，包含重采样、分割、点云与朝向。
+    let estimateStartedAt = ProcessInfo.processInfo.systemUptime
+    let estimate = jointSource.estimate(from: image)
+    PerfMonitor.shared.recordJointEstimate(seconds: ProcessInfo.processInfo.systemUptime - estimateStartedAt)
+    emit(estimate, at: t)
+    #else
     emit(jointSource.estimate(from: image), at: t)
+    #endif
   }
 
   /// Copies the depth plane into a Swift array, then drops the pixel buffer. One plane, one read:

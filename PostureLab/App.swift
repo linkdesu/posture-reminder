@@ -75,6 +75,11 @@ struct PostureLabApp: App {
     }
     self.settings = settings
     self.pomodoroSettings = pomodoroSettings
+    // 调试性能埋点：每秒一行，写 `Documents/debug/perf-*.jsonl` 并打到标准输出。只在 DEBUG 构建
+    // 里存在，与 QA 的 42 键日志契约无关（不同文件、不同键名）。
+    #if DEBUG
+    PerfMonitor.shared.start()
+    #endif
     controller = SessionController(settings: settings,
                                    logger: logger,
                                    scenarios: scenarios,
