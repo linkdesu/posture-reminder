@@ -114,9 +114,10 @@ struct PomodoroEngine {
     let dt = lastSampleT.map { sample.t - $0 } ?? 0
 
     // A paused interval is the only thing that grows `pausedSeconds`: the focus clock is frozen, so
-    // the time is credited to the pause instead of the focus. Breaks are outside the record. An
-    // absence is not a pause (B1); it is only ever left out of the focus.
-    if !isRunning, focusOpen {
+    // the time is credited to the pause instead of the focus. A manual pause stops the countdown; an
+    // absence keeps it "running" but holds it (B1), so both are time outside the focus and both are
+    // credited here — the same pause band the parent's timeline draws.
+    if focusOpen, !isRunning || absentSince != nil {
       record.pausedSeconds += max(0, dt)
     }
 

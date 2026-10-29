@@ -380,10 +380,12 @@ final class SessionController: ObservableObject {
     pomodoroLastT = sample.t
 
     // The timer always gets the sample - it is the clock - while the posture engine gets it only
-    // while posture is monitored and the focus is actually being counted. Decided before the timer
-    // ticks, because this sample belongs to the focus that is open when it arrives.
+    // while posture is monitored. A manual pause is the hard gate (ADR-0003) and stops the feed; an
+    // absence pause does not, because the engine is what times the three-second no-person rule and
+    // writes the `paused`/`resumed` pair the log contract names (B1, B2).
     let monitoring = monitorsPomodoroPosture
-    if monitoring, !pomodoroFocusPaused {
+    let manualPause = pomodoroFocusOpen && !pomodoro.isRunning
+    if monitoring, !manualPause {
       feedPosture(sample)
     } else {
       // No engine in flight — a parked focus, a break, a pause — so this sample feeds only the
@@ -399,6 +401,12 @@ final class SessionController: ObservableObject {
     syncPomodoroFocus()
     for event in events { handlePomodoroEvent(event, at: sample.t) }
     syncPomodoroPause()
+    // An absence still feeds the engine, so its own no-face frame must not become the avatar's
+    // subject: the child is not there, and the last frame is dropped exactly as before.
+    if pomodoro.isPausedByAbsence {
+      latestGeometry = nil
+      latestAssessment = nil
+    }
     // After the events, so a phase that ended on this sample is reported as the phase the countdown
     // has already moved on to.
     logPomodoroTickIfDue(at: sample.t)

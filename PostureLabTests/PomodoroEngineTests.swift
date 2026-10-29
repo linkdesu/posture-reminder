@@ -245,13 +245,15 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(engine.isPausedByAbsence, true)
     XCTAssertEqual(engine.remainingSeconds, 900)    // the countdown holds where it stood
     XCTAssertEqual(engine.record.focusedSeconds, 600)
-    XCTAssertEqual(engine.record.pausedSeconds, 0)  // an absence is not a pause
+    // AC5: the away time is not focus time, so it is credited to the pause exactly like a manual
+    // one — the whole 60 s band the parent's timeline draws grey.
+    XCTAssertEqual(engine.record.pausedSeconds, 59.8, accuracy: 0.2)
 
     feed(&engine, samples(11, from: 659.9))         // back at 660.0, still there at 661.0
     XCTAssertEqual(engine.isPausedByAbsence, false)
     XCTAssertEqual(engine.remainingSeconds, 899)
     XCTAssertEqual(engine.record.focusedSeconds, 601)  // 661 s of clock, 60 s of it away
-    XCTAssertEqual(engine.record.pausedSeconds, 0)
+    XCTAssertEqual(engine.record.pausedSeconds, 59.9, accuracy: 0.2)
     XCTAssertEqual(engine.phase, .focus)
   }
 
@@ -300,7 +302,9 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(record.endedAt, 900.2)
     XCTAssertEqual(record.plannedSeconds, 1500)
     XCTAssertEqual(record.focusedSeconds, 600)      // ten minutes in, and never the absence
-    XCTAssertEqual(record.pausedSeconds, 0)
+    // The whole absence is time outside the focus, so it is credited to the pause the same way a
+    // manual one is (AC5); the interval up to the interrupting tick is included.
+    XCTAssertEqual(record.pausedSeconds, 300.1, accuracy: 0.2)
     XCTAssertEqual(record.skippedBreak, false)
     XCTAssertEqual(record.focusIndex, 1)
 
@@ -311,6 +315,36 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(engine.remainingSeconds, 1500)
     XCTAssertEqual(feed(&engine, absentSamples(100, from: 901)), [])
     XCTAssertEqual(engine.remainingSeconds, 1500)
+  }
+
+  /// AC5: an absence pauses the focus exactly like a manual pause does, and the record says how
+  /// long it lasted. The countdown holds where it stood and the minute lands in `pausedSeconds`
+  /// instead of the focus, so `focusedSeconds + pausedSeconds` still accounts for the wall clock.
+  func testAnAbsenceHoldsTheCountdownAndIsCreditedAsPausedSeconds() {
+    var settings = PomodoroSettings()
+    settings.focusMinutes = 5
+    var engine = makeEngine(settings)
+    _ = engine.command(.start)
+
+    feed(&engine, samples(100))                      // t = 0.1 ... 10.0, face present
+    let atAbsence = engine.remainingSeconds
+    XCTAssertEqual(atAbsence, 290, accuracy: 0.1)
+
+    feed(&engine, absentSamples(40, from: 10))       // t = 10.1 ... 14.0, no face
+    XCTAssertTrue(engine.isPausedByAbsence)
+    XCTAssertEqual(engine.remainingSeconds, atAbsence, accuracy: 1e-9,
+                   "an absence moved the countdown")
+    XCTAssertEqual(engine.record.pausedSeconds, 3.9, accuracy: 0.15)
+
+    feed(&engine, samples(30, from: 14))             // t = 14.1 ... 17.0, the child is back
+    XCTAssertFalse(engine.isPausedByAbsence)
+    XCTAssertEqual(engine.remainingSeconds, 287.1, accuracy: 0.1,
+                   "the focus did not resume where it stopped")
+
+    let record = engine.record
+    XCTAssertEqual(record.pausedSeconds, 4.0, accuracy: 0.15)
+    XCTAssertEqual(record.focusedSeconds + record.pausedSeconds, 16.9, accuracy: 0.2,
+                   "the record stopped accounting for its wall clock")
   }
 
   // MARK: - Manual entry
