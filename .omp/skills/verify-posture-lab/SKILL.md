@@ -13,9 +13,8 @@ PostureLab 是纯离线的儿童专注与阅读坐姿应用。本技能用于真
 
 ```sh
 cd /Volumes/Data/worktrees/posture-lab/depth-pose
-scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug> [--keep-sim]
-# 正式开跑：scripts/verify-preflight.sh 1a2b3c4 0.6.6 12 r16-v066-sim --keep-sim
-# 只跑预检 / dry-run：不带 --keep-sim，跑完即关闭并删除本轮模拟器
+scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug>
+# 例：scripts/verify-preflight.sh 1a2b3c4 0.6.7 13 r17-v067-sim
 ```
 
 等价于 `verify.py preflight --sha … --version … --build … --slug …`。slug 已经是 `r<N>-xxx` 时直接作为轮次目录；`tl-` 开头的是 TL 自测 smoke，也直接作为目录名，不占 r 序号；否则取 `tmp/verify/` 下最大的 N 加一。结果写入 `tmp/verify/<run-id>/preflight.json`，并把冻结值并入 `state.json`。任何一项不过都以非零码退出，`preflight.json.ok` 为 `false`。
@@ -23,26 +22,28 @@ scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮�
 检查项（按执行顺序）：
 
 1. 记下 `~/Library/Logs/DiagnosticReports/PostureLab*.ips` 崩溃报告基线；
-1a. 若有**非本轮**的 `pl-r*` 模拟器处于 Booted，判 **ENV-BLOCKED** 并在 `preflight.json` 列出名称和 UDID（`frozen.otherBootedRoundSims`），**不自动删**，交给人工处理后重跑预检。`pr-tl-*`、`pl-tl-*` 等不在匹配范围内；
+1a. 若处于 Booted 的模拟器**超过一台**，或有**任何一台不是 `pl-verify`**，判 **ENV-BLOCKED**，在 `preflight.json` 的 `frozen.bootedBlockers` 和输出里列出名称和 UDID，**不自动关、不自动删**，交给人工处理后重跑预检；
 2. 工具链是 Xcode 27（`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）、`simctl` 可用、`/Volumes/Data` 与用户目录剩余空间都不少于 20 GB（`--min-free-gb` 可调）；
 3. 用 `git archive <SHA>` 导出代码快照，解到本轮专属目录 `/Volumes/Data/verify-builds/posture-lab/<run-id>/src` 并在那里构建（DerivedData 在同目录 `dd/`）。不碰共享 worktree 的未提交改动，也不用 `/tmp/pl-verify-build`；
-4. 给本轮单独建一台模拟器（`pl-<run-id>`，iPhone 17），boot 完成后把 UDID 写进 `state.json`；
+4. 只用**固定模拟器 `pl-verify`**（iPhone 17，iOS 27.0）：每轮复用，不新建、不删除（不存在时才建一次）；先卸载 App 保证沙盒干净，boot 完成后把 UDID 写进 `state.json`。构建用 `build-for-testing`，同一份冻结产物里带 `.xctestrun`，供 `drive` 的 XCUITest 入口使用；
 5. 产物 `Info.plist` 的版本号与 build 号必须等于预期值；装进模拟器后再读一次已安装的 `Info.plist`，并核对已安装二进制的哈希；
 6. `simctl privacy grant camera` 预授权，无参启动后截图，OCR 确认没有系统权限弹窗；
 7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 42 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
 8. 预检期间不得新增崩溃报告；
 9. 把 SHA、快照哈希（`snapshot.tar` 的 sha256）、二进制哈希和 UDID 冻结进 `preflight.json.frozen`。
 
-**本轮模拟器的清理**：`verify.py preflight` 用 `finally` 兜住正常退出、失败、Ctrl-C 与 TERM/HUP，`verify-preflight.sh` 再用 `trap … EXIT INT TERM HUP` 调 `verify.py preflight-cleanup --run <run-id>` 兜底（Python 被强杀时也能删）。规则：只有带 `--keep-sim` **且预检通过**时才保留模拟器给 `up`/`drive`；其余情况（只跑预检、dry-run、失败、中断）一律关闭并删除。结果写在 `preflight.json.simCleanup`（`kept` / `deleted`）。正式轮次结束后必须 `verify.py down --run <run-id> --delete-sim`。
+**固定模拟器的收尾**：`verify.py preflight` 用 `finally` 兜住正常退出、失败、Ctrl-C 与 TERM/HUP，`verify-preflight.sh` 再用 `trap … EXIT INT TERM HUP` 调 `verify.py preflight-cleanup --run <run-id>` 兜底。规则只有一条：**`pl-verify` 永远保留，只关机**。预检（含只跑预检、dry-run、失败、中断）结束时关机，结果写在 `preflight.json.simCleanup`（`shutdown`）；`up` 会再把它开起来；一轮结束 `verify.py down --run <run-id>` 也只关机。`--keep-sim`、`--delete-sim` 已删除。
 
-之后的 `up`、`drive` 只安装 preflight 冻结的那份产物（`frozen.appPath`），每次重装后自动预授权相机；没有通过的 preflight 时 `up`、`drive` 直接拒绝运行。轮次结束用 `verify.py down --run <run-id> --delete-sim` 删掉本轮模拟器。
+之后的 `up`、`drive`、`case` 只安装 preflight 冻结的那份产物（`frozen.appPath`），每次重装后自动预授权相机；没有通过的 preflight 时直接拒绝运行。`up` 开机前同样检查：有 `pl-verify` 以外的模拟器在 Booted 就 ENV-BLOCKED。
+
+**工具链**：`verify.py` 在进程启动时就设置 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，`preflight`/`up`/`doctor`/`drive`/`case`/`evidence`/`down`/`audit` 等所有入口及其子进程都继承它，非交互 shell 里也能直接调 `xcrun simctl`。
 
 ## Launch
 
 前置：
 
 - macOS 与 Xcode 27；本机 `xcode-select -p` 可能指向 CommandLineTools，因此每条命令都显式设置 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`。
-- 默认模拟器 UDID：`C12DA589-2444-4F2E-A943-4D6BAFB02BF1`（iPhone 17）。真机：`00008110-001271181AD3801E`（iPhone 13），需解锁。
+- 模拟器：固定的 `pl-verify`（UDID 见 `preflight.json.frozen.udid`）。真机：`00008110-001271181AD3801E`（iPhone 13），需解锁。
 - Bundle id：`me.xieal.posturelab.depth`（深度版）。
 
 模拟器从干净数据目录启动：
@@ -108,20 +109,38 @@ Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环�
 
 - `pomodoro-focus`：`-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1 -endSound chime`，在 35 秒、70 秒与 130 秒截图；130 秒时休息结束，历史写入第一条完成记录；70 秒日志快照用于历史对账。
 - `posture-voice`：`-scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1`，30 秒截图，覆盖多体态串行语音与二级播放。
-- `pause`：`-scenario pauseWhileBreach -focusMinutes 1 -debug 0`，30 秒截图，覆盖无人暂停。
+- `pause`：`-scenario pauseWhileBreach -focusMinutes 1 -debug 0`，30 秒截图，**等满 35 秒**（脚本跑完、历史落盘）再收证据、结束进程，覆盖无人暂停。
 - `settings`：`-settings 1`，截图设置页。
 - `report`：先 `-seedHistory 30 -report day` 截图并复制历史；然后杀进程、**不重装**、以 `-report day` 重开，证明历史来自磁盘。
 
 每次启动都记录 `launch-args.txt`、`provenance.json`、截图、`Documents/` 与 `sandbox-audit.json`。详细特性入口见 `features/`。
 
-XCUITest 只用于模拟器无法用 launch argument 表达的真实点击（例如设置页 10 项参数逐项修改、手动输入数字与杀进程重启持久化）：
+`drive` 也可以只跑一个场景：`verify.py drive --run <run-id> <场景>`，场景是 `pomodoro-focus`、`posture-voice`、`pause`、`settings`，以及下面这些（v0.6.7 起）：
+
+| 场景 | 做什么 | 判据（`scenarios/<场景>/*.json`） |
+|---|---|---|
+| `break-count` | `pomodoroDay` 1 分钟专注，在 20 s（专注中）、75 s（休息中）、135 s（下一段专注）截图并 OCR | 「今天 x/目标」依次为 0 → **1**（休息中已加一）→ 1（不重复加） |
+| `settings-scroll` | XCUITest `VerifyDriveUITests/testDriveSettingsScrollCountsTenSettings`：逐项滚到并数出番茄钟 10 项，滚到下半屏截图 | `count=10`、无「屏幕常亮」行，`drive-settings-bottom.png` 存在 |
+| `settings-toggle` | XCUITest 真点一次「自动开始休息」，再从 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist` 读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
+| `upgrade-063` | 构建 0.6.3（`c9d5f42`，缓存在 `verify-builds/posture-lab/legacy-063`）→ 装上 → XCUITest 在 **0.6.3 的界面上真点**「屏幕常亮」关掉 → 读回存储 `keepScreenAwake=false` → 覆盖安装冻结新版 → 设置页无常亮行、旧 key 存活、专注 `focus_start` 为 true | `upgrade.json.ok` |
+
+XCUITest 入口用 preflight 的 `build-for-testing` 产物跑 `xcodebuild test-without-building -xctestrun …`，截图与文本是 `.keepAlways` 附件，`verify.py` 用 `xcresulttool export attachments` 导出到场景目录。升级场景会从 `.xctestrun` 里去掉被测 App，免得 xcodebuild 用新版覆盖已装的 0.6.3。不再直接写 plist 伪造旧版设置。
+
+### 扩展用例（`verify.py case`）
+
+r16 由 omp 临时写的 `r16.py` / `run_cases.sh` 覆盖的用例已沉淀为正式子命令，并登记在 `features/*.md`：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
-  -project PostureLab.xcodeproj -scheme PostureLab \
-  -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" \
-  -only-testing:PostureLabUITests/SettingsPersistenceUITests test
+.omp/skills/verify-posture-lab/scripts/verify.py list-cases
+.omp/skills/verify-posture-lab/scripts/verify.py case --run <run-id> ac12-manual-pause ac12-manual-report
+.omp/skills/verify-posture-lab/scripts/verify.py case --run <run-id> all
+.omp/skills/verify-posture-lab/scripts/verify.py png scenarios/ac9-parked/parked.png --json out.json   # 点云包围盒/占屏比
+.omp/skills/verify-posture-lab/scripts/verify.py ascii scenarios/ac9-parked/parked.png
 ```
+
+每个用例都会：（除 `keep` 用例外）重装冻结产物、按时间表截图 / 切后台 / 回前台、等满计划时长、导出 `Documents/` 与沙盒审计、OCR 每张截图、写 `provenance.json`。`*-report` 用例沿用前一个用例的沙盒，要和它一起跑。
+
+**omp 不得自己写脚本**（不得在 `tmp/verify/**/tools/` 或任何地方新建驱动脚本、Python/Shell 片段）。需要的用例不在 `list-cases` 里，就停下来报 BLOCKED，由 QA 先登记到 `features/*.md`、TL 加进 `verify.py`。
 
 ## Evidence
 
@@ -162,7 +181,7 @@ tmp/verify/<run-id>/
 .omp/skills/verify-posture-lab/scripts/verify.py down --run r9-skill-smoke
 ```
 
-`down` 只终止本次验证启动的 App；只有 `state.json.bootedByUs` 为真时才关闭模拟器。它不删除 `tmp/verify/<run-id>/`，并在退出前确认 `state.json`、截图、JSONL、审计输出仍然存在。
+`down` 只终止本次验证启动的 App，并把 `pl-verify` 关机（不删除）。它不删除 `tmp/verify/<run-id>/`，并在退出前确认 `state.json`、截图、JSONL、审计输出仍然存在。
 
 清理后再次确认：
 
@@ -175,7 +194,8 @@ ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 
 ## Helpers
 
-- `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`up`、`doctor`、`drive`、`evidence`、`down`；除 `preflight` 外都接受 `--run <run-id>`。
+- `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`preflight-cleanup`、`up`、`doctor`、`drive [场景]`、`case`、`list-cases`、`png`、`ascii`、`evidence`、`down`。
+- 仓库 `scripts/test_audit_sandbox.py`：`audit-sandbox.py` 的自测（系统文件白名单不误报、真违规 exit 1）。
 - `scripts/ocr.swift`：Vision OCR，preflight 用 `swiftc` 编译到本轮构建目录后使用。
 - 仓库 `scripts/verify-preflight.sh`：preflight 的包装，参数依次是目标 SHA、预期版本号、预期 build 号、轮次 slug。
 - `scripts/audit-offline.py`、`scripts/audit-sandbox.py`、`scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py`、`scripts/check-overlay.py`：仓库既有验收脚本，由 `verify.py` 以显式路径调用。

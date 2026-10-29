@@ -5,8 +5,8 @@
 ## 基线前置条件
 
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`；本机默认的 `xcode-select` 可能指向 CommandLineTools。
-- 模拟器 UDID：`C12DA589-2444-4F2E-A943-4D6BAFB02BF1`（iPhone 17）。真机：`00008110-001271181AD3801E`（iPhone 13，需解锁）。
-- Bundle id：`me.xieal.posturelab`。
+- 模拟器：固定的 `pl-verify`（iPhone 17 / iOS 27.0），每轮复用、不新建不删除，一轮结束只关机；开跑前有多台或非 `pl-verify` 的模拟器在 Booted 即 ENV-BLOCKED（列出名称与 UDID，不自动处理）。真机：`00008110-001271181AD3801E`（iPhone 13，需解锁）。
+- Bundle id：`me.xieal.posturelab.depth`。
 - 每次运行从一个干净沙盒开始：`verify.py up` 会卸载/安装应用；`drive` 的每个场景都会重装。
 - 证据目录：`tmp/verify/<run-id>/`；运行器自动维护 `tmp/verify/latest`。不要在 `artifacts/` 下写新证据。
 - 开跑前先跑 `scripts/verify-preflight.sh <SHA> <版本号> <build号> <slug>`，不过就标 ENV-BLOCKED，不开跑；应用启动后再跑 `verify.py doctor --run <run-id>`，全绿再驱动；环境异常一律标 ENV-BLOCKED 或 BLOCKED，禁止临场修环境。
@@ -14,12 +14,13 @@
 ## 驱动约定
 
 - 所有命令都在仓库根目录执行，路径写绝对或仓库相对路径。
-- 用 `verify.py preflight` 与 `verify.py up|doctor|drive|evidence|down --run <run-id>` 完成生命周期；不要手工拼接另一套状态目录。
+- 用 `verify.py preflight` 与 `verify.py up|doctor|drive|case|evidence|down --run <run-id>` 完成生命周期；不要手工拼接另一套状态目录。
+- **omp 不得自己写脚本。** 扩展用例只用 `verify.py case <用例名>`（`verify.py list-cases` 列出全部）与 `verify.py drive <场景>`；缺用例就报 BLOCKED，先登记到本目录对应特性文件，再由 TL 加进 `verify.py`。
 - 应用无参启动即进入 `pomodoro_main`；`-pomodoro` 参数已删除，不要传入。
 - 模拟器没有可脚本化点击，能用启动参数表达的状态用启动参数；必须真实点击的设置页修改、手动输入数字、提示音试听与手动暂停用 XCUITest。
 - 优先使用稳定标识：`pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`、accessibility label、日志事件名。
 - 每个场景重装应用，避免设置、历史与日志在场景之间泄漏。
-- 清理只终止本次启动的 App；只有 `state.json.bootedByUs` 为真时才关闭模拟器。
+- 清理只终止本次启动的 App，并把 `pl-verify` 关机（不删除）。
 
 ## 取证与失败报告准则
 

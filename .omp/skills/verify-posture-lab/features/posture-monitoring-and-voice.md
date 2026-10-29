@@ -49,3 +49,8 @@ Preconditions：
 - 语音是预录 WAV，不是系统 TTS；`speech_played` 只证明片段开始，不证明房间听见。
 - 模拟器没有真实摄像头；`deskLean` 等场景的 joints/depth 来自 `BodyRig`，不能把它们当作真机 TrueDepth 证据。
 - 隐私边界（0.4/0.5，ADR-0007 与 ADR-0005 修订）：任何构建都不显示摄像头画面，容器内也不能有任何图像文件（应用自绘调试图改为只留内存）。设备侧 `simctl io screenshot` 拍的证据图不属于容器。
+
+## 扩展用例（`verify.py case`）
+
+- `ac10-debug-on` / `ac10-debug-off`：调试叠加层开/关，「暂停/离开」坐标不变；`ac10-debug-on` 顺带取首页 foreground=false。
+- `ac9-parked`：`-holdStart 1` 停驻主页只有两个图标按钮；自动写 `cloud-geometry.json`（点云包围盒占屏比）与 `cloud-ascii.txt`。也可单独 `verify.py png|ascii <png>`。

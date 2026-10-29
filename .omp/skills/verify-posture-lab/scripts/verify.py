@@ -5,7 +5,9 @@
   .omp/skills/verify-posture-lab/scripts/verify.py preflight --sha <SHA> --version <x.y.z> --build <N> --slug <slug>
   .omp/skills/verify-posture-lab/scripts/verify.py up --run <run-id>
   .omp/skills/verify-posture-lab/scripts/verify.py doctor --run <run-id> [--version x.y.z --build N]
-  .omp/skills/verify-posture-lab/scripts/verify.py drive --run <run-id>
+  .omp/skills/verify-posture-lab/scripts/verify.py drive --run <run-id> [all|pause|break-count|settings-scroll|settings-toggle|upgrade-063]
+  .omp/skills/verify-posture-lab/scripts/verify.py case --run <run-id> <用例名>...   （list-cases 列出全部）
+  .omp/skills/verify-posture-lab/scripts/verify.py png|ascii <png>...
   .omp/skills/verify-posture-lab/scripts/verify.py evidence --run <run-id>
   .omp/skills/verify-posture-lab/scripts/verify.py down --run <run-id>
 
@@ -27,9 +29,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 RUNS = ROOT / "tmp" / "verify"
 BUNDLE = "me.xieal.posturelab.depth"
-DEFAULT_SIM = "C12DA589-2444-4F2E-A943-4D6BAFB02BF1"
+DEFAULT_SIM = ""  # 模拟器一律用 preflight 冻结的固定模拟器 pl-verify
 DEFAULT_DEVICE = "00008110-001271181AD3801E"
 DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
+# 所有入口（preflight/up/doctor/drive/case/evidence/down…）都从这里起步：非交互 shell 里也能直接
+# 调 xcrun simctl / xcresulttool，子进程一律继承。
+os.environ["DEVELOPER_DIR"] = DEVELOPER_DIR
+# 固定的验收模拟器：每轮复用，不新建、不删除；一轮结束只关机。
+FIXED_SIM_NAME = "pl-verify"
 
 # 与 docs/qa-log-schema.md 的 42 键契约一致；顺序无关，集合必须完全相等。
 LOG_KEYS = {
@@ -214,7 +221,7 @@ def audit_sandbox(container: str, dest: Path) -> subprocess.CompletedProcess:
 
 
 def launch_and_capture(sim: str, scenario: str, args: list[str], shots: list[tuple[int, str]],
-                       run_id: str) -> dict:
+                       run_id: str, end_at: float | None = None) -> dict:
     """重装、启动一个场景，按相对秒数截图，导出 Documents 与沙盒审计。"""
     out = run_dir(run_id) / "scenarios" / scenario
     out.mkdir(parents=True, exist_ok=True)
@@ -233,6 +240,11 @@ def launch_and_capture(sim: str, scenario: str, args: list[str], shots: list[tup
             logs = sorted(live.glob("session-*.jsonl"))
             if logs:
                 shutil.copy2(logs[-1], out / "session-at-70.jsonl")
+    if end_at is not None:
+        # 例如 pause：脚本要跑完（35 秒）再收证据、结束进程，否则历史还没落盘（r16 观察项）。
+        wait = end_at - (time.time() - t0)
+        if wait > 0:
+            time.sleep(wait)
     container = container_sim(sim)
     audit = audit_sandbox(container, out / "sandbox-audit.json")
     copy_documents(container, out / "Documents")
@@ -287,6 +299,12 @@ def command_up(args) -> int:
     state.update({"gitSha": frozen["gitSha"], "udid": frozen["udid"], "deviceId": frozen["udid"],
                   "appPath": frozen["appPath"], "binarySha256": frozen["binarySha256"]})
     sim = state["udid"]
+    blockers = [d for d in booted_blockers() if d["udid"] != sim]
+    if blockers:
+        check(state, "onlyFixedSimBooted", False, {"booted": blockers})
+        write_state(run_id, state)
+        sys.exit("ENV-BLOCKED：有 pl-verify 以外的模拟器在 Booted：" +
+                 "，".join(f"{d['name']} {d['udid']}" for d in blockers))
     boot(sim, state)
     state["bootedByUs"] = True
     install_sim(sim)
@@ -378,15 +396,23 @@ def command_drive(args) -> int:
          [(30, "desk-lean.png")]),
         ("pause",
          ["-scenario", "pauseWhileBreach", "-focusMinutes", "1", "-debug", "0"],
-         [(30, "absence-pause.png")]),
+         [(30, "absence-pause.png")], 35),
         ("settings",
          ["-settings", "1"],
          [(5, "settings.png")]),
     ]
-    for scenario, launch, shots in scenarios:
-        provenance = launch_and_capture(sim, scenario, launch, shots, run_id)
+    only = getattr(args, "scenario", "all")
+    if only in DRIVE_EXTRA:
+        return DRIVE_EXTRA[only](run_id, state, sim)
+    for scenario, launch, shots, *end in scenarios:
+        if only not in ("all", scenario):
+            continue
+        provenance = launch_and_capture(sim, scenario, launch, shots, run_id,
+                                        end_at=end[0] if end else None)
         state.setdefault("scenarios", {})[scenario] = provenance
         write_state(run_id, state)
+    if only != "all":
+        return 0
 
     # 统计页：先 seed 三个范围，再杀进程无 seed 重开，证明历史来自磁盘。
     report_dir = run_dir(run_id) / "scenarios" / "report"
@@ -521,11 +547,9 @@ def command_down(args) -> int:
     if state["target"] == "sim":
         sim = state["udid"]
         terminate_sim(sim)
-        if state.get("bootedByUs"):
-            sh(["xcrun", "simctl", "shutdown", sim], check=False)
-        if getattr(args, "delete_sim", False) and state.get("simCreatedByPreflight"):
-            sh(["xcrun", "simctl", "delete", sim], check=False)
-            state["simDeleted"] = True
+        # 固定模拟器 pl-verify：一轮结束只关机，不删除。
+        sh(["xcrun", "simctl", "shutdown", sim], check=False)
+        state["simShutdown"] = not sim_booted(sim)
     state["pid"] = 0
     state["checks"]["cleanup"] = {"ok": True, "detail": "app terminated; evidence kept", "at": now()}
     write_state(run_id, state)
@@ -588,16 +612,34 @@ def next_run_id(slug: str) -> str:
     return f"r{max(numbers, default=0) + 1}-{slug}"
 
 
-def create_sim(run_id: str) -> str:
-    """给本轮单独建一台 iPhone 17；按运行时从新到旧尝试，第一个兼容的为准。"""
+def all_sims() -> list[dict]:
+    data = json.loads(sh_out(["xcrun", "simctl", "list", "-j", "devices"], check=False) or "{}")
+    return [{"name": d.get("name", ""), "udid": d["udid"], "state": d.get("state", "")}
+            for devices in data.get("devices", {}).values() for d in devices]
+
+
+def fixed_sim() -> str:
+    """固定模拟器 pl-verify 的 UDID；没有就建一台（iPhone 17，按运行时从新到旧取第一个兼容的）。
+    每轮复用，绝不删除。"""
+    for d in all_sims():
+        if d["name"] == FIXED_SIM_NAME:
+            return d["udid"]
     data = json.loads(sh_out(["xcrun", "simctl", "list", "-j", "runtimes"]))
     runtimes = [r["identifier"] for r in data.get("runtimes", [])
                 if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS")]
     for runtime in reversed(runtimes):
-        r = sh(["xcrun", "simctl", "create", f"pl-{run_id}", SIM_DEVICE_TYPE, runtime], check=False)
+        r = sh(["xcrun", "simctl", "create", FIXED_SIM_NAME, SIM_DEVICE_TYPE, runtime], check=False)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
     return ""
+
+
+def booted_blockers() -> list[dict]:
+    """开跑前的 Booted 设备：超过一台，或有任何一台不是 pl-verify，就全部列出（ENV-BLOCKED）。"""
+    booted = [{"name": d["name"], "udid": d["udid"]} for d in all_sims() if d["state"] == "Booted"]
+    if len(booted) > 1 or any(d["name"] != FIXED_SIM_NAME for d in booted):
+        return booted
+    return []
 
 
 def ocr(binary: Path, image: Path) -> list[str]:
@@ -617,30 +659,18 @@ def ocr(binary: Path, image: Path) -> list[str]:
 PREFLIGHT_CTX: dict = {}
 
 
-def booted_round_sims(exclude: str = "") -> list[dict]:
-    """处于 Booted 的 pl-r* 模拟器（别的轮次留下的）；pr-tl-* 等不在匹配范围内。"""
-    data = json.loads(sh_out(["xcrun", "simctl", "list", "-j", "devices"], check=False) or "{}")
-    found = []
-    for devices in data.get("devices", {}).values():
-        for d in devices:
-            if d.get("state") == "Booted" and d.get("name", "").startswith("pl-r") and d["udid"] != exclude:
-                found.append({"name": d["name"], "udid": d["udid"]})
-    return found
-
-
-def delete_sim(udid: str) -> bool:
+def shutdown_sim(udid: str) -> bool:
+    sh(["xcrun", "simctl", "terminate", udid, BUNDLE], check=False)
     sh(["xcrun", "simctl", "shutdown", udid], check=False)
-    return sh(["xcrun", "simctl", "delete", udid], check=False).returncode == 0
+    return not sim_booted(udid)
 
 
-def preflight_cleanup(run_id: str, udid: str, keep: bool) -> dict:
-    """keep 为真（--keep-sim 且预检通过）才留下本轮模拟器给 up/drive；其余一律关闭并删除。"""
+def preflight_cleanup(run_id: str, udid: str) -> dict:
+    """预检结束（通过、失败、中断都一样）：固定模拟器保留、只关机；up 会再把它开起来。"""
     if not udid:
         return {"action": "none"}
-    if keep:
-        return {"action": "kept", "udid": udid}
-    ok = delete_sim(udid)
-    return {"action": "deleted" if ok else "delete-failed", "udid": udid}
+    return {"action": "shutdown" if shutdown_sim(udid) else "shutdown-failed", "udid": udid,
+            "name": FIXED_SIM_NAME}
 
 
 def command_preflight(args) -> int:
@@ -663,8 +693,7 @@ def command_preflight(args) -> int:
     finally:
         run_id = PREFLIGHT_CTX.get("run_id")
         udid = PREFLIGHT_CTX.get("udid", "")
-        keep = bool(getattr(args, "keep_sim", False)) and code == 0
-        cleanup = preflight_cleanup(run_id or "", udid, keep)
+        cleanup = preflight_cleanup(run_id or "", udid)
         print(f"simCleanup: {cleanup}")
         if run_id:
             path = run_dir(run_id) / "preflight.json"
@@ -676,7 +705,7 @@ def command_preflight(args) -> int:
                 path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
             if state_file(run_id).exists():
                 st = json.loads(state_file(run_id).read_text())
-                st["simDeleted"] = cleanup.get("action") == "deleted"
+                st["simShutdown"] = cleanup.get("action") == "shutdown"
                 write_state(run_id, st)
 
 
@@ -706,7 +735,7 @@ def _preflight(args) -> int:
             "runId": run_id, "target": "sim", "bundleId": BUNDLE, "startedAt": now(), "checks": {}}
         state.update({k: v for k, v in result["frozen"].items() if k in (
             "gitSha", "udid", "deviceId", "appPath", "snapshotSha256", "binarySha256",
-            "version", "build", "bootedByUs", "simCreatedByPreflight", "crashBaseline")})
+            "version", "build", "bootedByUs", "simName", "crashBaseline", "xctestrun", "buildDir")})
         state["target"] = "sim"
         state["bundleId"] = BUNDLE
         state["preflight"] = {"ok": result["ok"], "file": "preflight.json"}
@@ -754,26 +783,27 @@ def _preflight(args) -> int:
     result["frozen"]["buildDir"] = str(base)
     record("snapshot", (src / "PostureLab.xcodeproj").exists(), f"{tarball} -> {src}")
 
-    # 0. 别的轮次留下、仍在 Booted 的 pl-r* 模拟器：ENV-BLOCKED，只列出，不自动删。
-    others = booted_round_sims()
-    result["frozen"]["otherBootedRoundSims"] = others
-    if not record("noOtherBootedRoundSims", not others,
-                  {"booted": others} if others else "没有其他轮次的 pl-r* 模拟器在 Booted"):
+    # 0. 开着的模拟器：超过一台，或有不是 pl-verify 的，ENV-BLOCKED，列出名称和 UDID，不动它们。
+    blockers = booted_blockers()
+    result["frozen"]["bootedBlockers"] = blockers
+    if not record("onlyFixedSimBooted", not blockers,
+                  {"booted": blockers} if blockers else f"没有 {FIXED_SIM_NAME} 以外的模拟器在 Booted"):
         result["envBlocked"] = True
-        return abort("ENV-BLOCKED：还有其他轮次的 pl-r* 模拟器处于 Booted（不自动删，请人工处理）")
+        return abort("ENV-BLOCKED：有多台或非 pl-verify 的模拟器处于 Booted（不自动处理，请人工关机）："
+                     + "，".join(f"{d['name']} {d['udid']}" for d in blockers))
 
-    # 4. 本轮专属模拟器。
-    udid = create_sim(run_id)
+    # 4. 固定模拟器 pl-verify：复用，不新建、不删除。
+    udid = fixed_sim()
     PREFLIGHT_CTX["udid"] = udid
     if udid:
-        # 先落盘 UDID，Python 被强杀时 shell 的 trap 也能找到并删掉它。
+        # 先落盘 UDID，Python 被强杀时 shell 的 trap 也能找到并把它关机。
         st = json.loads(state_file(run_id).read_text()) if state_file(run_id).exists() else {
             "runId": run_id, "target": "sim", "bundleId": BUNDLE, "checks": {}}
-        st.update({"udid": udid, "deviceId": udid, "simCreatedByPreflight": True})
+        st.update({"udid": udid, "deviceId": udid, "simName": FIXED_SIM_NAME})
         write_state(run_id, st)
-    if not record("simulatorCreated", bool(udid), udid or "simctl create 失败"):
-        return abort("建模拟器失败")
-    result["frozen"].update({"udid": udid, "deviceId": udid, "simCreatedByPreflight": True,
+    if not record("fixedSim", bool(udid), f"{FIXED_SIM_NAME} {udid}" if udid else "找不到也建不出 pl-verify"):
+        return abort("固定模拟器不可用")
+    result["frozen"].update({"udid": udid, "deviceId": udid, "simName": FIXED_SIM_NAME,
                              "bootedByUs": True})
     sh(["xcrun", "simctl", "boot", udid], check=False)
     bs = sh(["xcrun", "simctl", "bootstatus", udid, "-b"], check=False, timeout=600)
@@ -784,7 +814,7 @@ def _preflight(args) -> int:
     dd = base / "dd"
     b = subprocess.run(["xcodebuild", "-project", str(src / "PostureLab.xcodeproj"),
                         "-scheme", "PostureLab", "-destination", f"platform=iOS Simulator,id={udid}",
-                        "-derivedDataPath", str(dd), "build"],
+                        "-derivedDataPath", str(dd), "build-for-testing"],
                        cwd=src, env=env(), text=True, capture_output=True, timeout=3600)
     build_log.parent.mkdir(parents=True, exist_ok=True)
     build_log.write_text(b.stdout + b.stderr + f"\n[exit {b.returncode}]\n")
@@ -793,6 +823,9 @@ def _preflight(args) -> int:
         return abort("构建失败")
     binary = app / "PostureLab"
     result["frozen"]["appPath"] = str(app)
+    xctestrun = sorted((dd / "Build" / "Products").glob("*.xctestrun"))
+    result["frozen"]["xctestrun"] = str(xctestrun[0]) if xctestrun else ""
+    record("xctestrun", bool(xctestrun), result["frozen"]["xctestrun"] or "build-for-testing 没产出 .xctestrun")
     result["frozen"]["binarySha256"] = sha256_file(binary)
 
     # 3. 版本号：构建产物一次，装进模拟器后再读一次。
@@ -801,6 +834,8 @@ def _preflight(args) -> int:
     if not record("versionBuilt", built_v == args.version and built_b == args.build,
                   f"产物 {built_v} ({built_b})，预期 {args.version} ({args.build})"):
         return abort("产物版本号不符")
+    # 固定模拟器是复用的：先卸载，保证本轮沙盒是干净的。
+    sh(["xcrun", "simctl", "uninstall", udid, BUNDLE], check=False)
     sh(["xcrun", "simctl", "install", udid, str(app)])
     installed = Path(sh_out(["xcrun", "simctl", "get_app_container", udid, BUNDLE, "app"]))
     inst_v, inst_b = plist_value(installed / "Info.plist", "CFBundleShortVersionString"), \
@@ -875,20 +910,571 @@ def _preflight(args) -> int:
 
 
 def command_preflight_cleanup(args) -> int:
-    """shell trap 的兜底：本轮模拟器没被明确保留（simCleanup.action != kept）就关闭并删除。幂等。"""
+    """shell trap 的兜底：把本轮用的固定模拟器关机（不删除）。幂等。"""
     if not state_file(args.run).exists():
         return 0
     st = json.loads(state_file(args.run).read_text())
     udid = st.get("udid", "")
-    pf = run_dir(args.run) / "preflight.json"
-    action = json.loads(pf.read_text()).get("simCleanup", {}).get("action") if pf.exists() else None
-    if not udid or not st.get("simCreatedByPreflight") or action == "kept":
-        return 0
-    exists = udid in sh_out(["xcrun", "simctl", "list", "devices"], check=False)
-    if exists:
-        print(f"trap: 删除本轮模拟器 {udid}：{'ok' if delete_sim(udid) else 'failed'}")
-    st["simDeleted"] = True
-    write_state(args.run, st)
+    if udid and sim_booted(udid):
+        print(f"trap: 关机 {FIXED_SIM_NAME} {udid}：{'ok' if shutdown_sim(udid) else 'failed'}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# 扩展驱动（v0.6.7 起）：XCUITest 入口、升级路径、休息计数，以及 r16 临时脚本沉淀下来的
+# 正式用例。omp 不得自己写驱动脚本——缺什么用例，先登记到 features/*.md，再加到这里。
+# ---------------------------------------------------------------------------
+
+LEGACY_063_SHA = "c9d5f42"   # 0.6.3 (9) 最后一个提交，r16 升级路径用的同一个
+UI_TEST_CLASS = "PostureLabUITests/VerifyDriveUITests"
+
+
+def frozen_ocr(run_id: str) -> Path | None:
+    pf = load_preflight(run_id)
+    if not pf:
+        return None
+    binary = Path(pf["frozen"].get("buildDir", "")) / "ocr"
+    return binary if binary.exists() else None
+
+
+def scenario_dir(run_id: str, name: str) -> Path:
+    out = run_dir(run_id) / "scenarios" / name
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def write_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+
+def read_defaults(sim: str) -> dict:
+    """读回 App 的 UserDefaults 真值：App 数据容器里的 Library/Preferences/<bundle>.plist
+    （`simctl spawn defaults` 读的是模拟器全局域，读不到沙盒 App 的偏好）。"""
+    import plistlib
+    c = sh(["xcrun", "simctl", "get_app_container", sim, BUNDLE, "data"], check=False)
+    if c.returncode != 0:
+        return {}
+    f = Path(c.stdout.strip()) / "Library" / "Preferences" / f"{BUNDLE}.plist"
+    for _ in range(10):  # cfprefsd 落盘有延迟
+        if f.is_file():
+            try:
+                return plistlib.loads(f.read_bytes())
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return {}
+
+
+def settings_blob(defaults: dict) -> dict:
+    raw = defaults.get("pomodoro.settings")
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+    try:
+        return json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except json.JSONDecodeError:
+        return {}
+
+
+def installed_version(sim: str) -> tuple[str, str]:
+    app = sh(["xcrun", "simctl", "get_app_container", sim, BUNDLE, "app"], check=False)
+    if app.returncode != 0:
+        return "", ""
+    plist = Path(app.stdout.strip()) / "Info.plist"
+    return plist_value(plist, "CFBundleShortVersionString"), plist_value(plist, "CFBundleVersion")
+
+
+def run_xcuitest(run_id: str, sim: str, test: str, out: Path, *,
+                 legacy_bundle: str | None = None, legacy_app: Path | None = None) -> dict:
+    """用 preflight 的 build-for-testing 产物跑一个 VerifyDriveUITests 用例，导出附件。
+    legacy_bundle 时把 xctestrun 里的被测 App 指向 legacy_app，xcodebuild 装的仍是旧版。"""
+    import plistlib
+    pf = load_preflight(run_id)
+    xctestrun = Path((pf or {}).get("frozen", {}).get("xctestrun", ""))
+    if not xctestrun.is_file():
+        return {"ok": False, "detail": "preflight 没有 .xctestrun（需 build-for-testing）"}
+    if legacy_bundle:
+        data = plistlib.loads(xctestrun.read_bytes())
+
+        def point(node):
+            # xcodebuild 要求 UITargetAppPath，所以不能删：把被测 App 换成旧版，装的仍是 0.6.3。
+            if isinstance(node, dict):
+                if "UITargetAppPath" in node:
+                    node["UITargetAppPath"] = str(legacy_app)
+                if "DependentProductPaths" in node:
+                    node["DependentProductPaths"] = [str(legacy_app) if q.endswith("/PostureLab.app") else q
+                                                     for q in node["DependentProductPaths"]]
+                for value in node.values():
+                    point(value)
+            elif isinstance(node, list):
+                for value in node:
+                    point(value)
+        point(data)
+        patched = xctestrun.with_name(f"legacy-{os.getpid()}.xctestrun")
+        patched.write_bytes(plistlib.dumps(data))
+        xctestrun = patched
+    result_bundle = out / f"{test}.xcresult"
+    if result_bundle.exists():
+        shutil.rmtree(result_bundle)
+    e = env()
+    if legacy_bundle:
+        e["TEST_RUNNER_PL_DRIVE_LEGACY_BUNDLE"] = legacy_bundle
+    cmd = ["xcodebuild", "test-without-building", "-xctestrun", str(xctestrun),
+           "-destination", f"platform=iOS Simulator,id={sim}",
+           f"-only-testing:{UI_TEST_CLASS}/{test}", "-resultBundlePath", str(result_bundle)]
+    r = subprocess.run(cmd, cwd=ROOT, env=e, text=True, capture_output=True, timeout=1800)
+    (out / f"{test}.log").write_text("$ " + " ".join(cmd) + "\n\n" + r.stdout + r.stderr
+                                      + f"\n[exit {r.returncode}]\n")
+    attachments = out / "attachments"
+    if attachments.exists():
+        shutil.rmtree(attachments)
+    attachments.mkdir(parents=True)
+    named: dict[str, str] = {}
+    if result_bundle.exists():
+        sh(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result_bundle),
+            "--output-path", str(attachments)], check=False)
+        manifest = attachments / "manifest.json"
+        if manifest.exists():
+            for test_entry in json.loads(manifest.read_text()):
+                for att in test_entry.get("attachments", []):
+                    src = attachments / att.get("exportedFileName", "")
+                    human = att.get("suggestedHumanReadableName", src.name)
+                    # 形如 drive-settings-bottom_0_<uuid>.png → drive-settings-bottom.png
+                    stem = human.split("_0_")[0]
+                    dest = out / (stem + src.suffix)
+                    if src.exists():
+                        shutil.copy2(src, dest)
+                        named[stem] = str(dest.relative_to(run_dir(run_id)))
+    import re
+    skipped = bool(re.search(r"Test Case .*" + re.escape(test) + r".* skipped", r.stdout))
+    return {"ok": r.returncode == 0 and not skipped, "exit": r.returncode, "skipped": skipped,
+            "test": test, "xcresult": str(result_bundle.relative_to(run_dir(run_id))),
+            "attachments": named}
+
+
+def kv_text(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+
+
+def drive_settings_scroll(run_id: str, state: dict, sim: str) -> int:
+    """XCUITest 滚到设置页下半屏截图，逐项数出番茄钟 10 项，并确认没有「屏幕常亮」行。"""
+    out = scenario_dir(run_id, "settings-scroll")
+    install_sim(sim)
+    test = run_xcuitest(run_id, sim, "testDriveSettingsScrollCountsTenSettings", out)
+    counted = kv_text(out / "drive-settings-count.txt")
+    texts = []
+    ocr_bin = frozen_ocr(run_id)
+    if ocr_bin and (out / "drive-settings-bottom.png").exists():
+        texts = ocr(ocr_bin, out / "drive-settings-bottom.png")
+        (out / "ocr-bottom.txt").write_text("\n".join(texts) + "\n")
+    ok = test["ok"] and counted.get("count") == "10" and counted.get("keepScreenAwakeRow") == "false" \
+        and (out / "drive-settings-bottom.png").exists()
+    result = {"ok": ok, "test": test, "count": counted.get("count"), "found": counted.get("found"),
+              "keepScreenAwakeRow": counted.get("keepScreenAwakeRow"), "ocrBottom": texts, "when": now()}
+    write_json(out / "settings-scroll.json", result)
+    check(state, "drive:settings-scroll", ok, f"count={counted.get('count')} test exit={test.get('exit')}")
+    write_state(run_id, state)
+    return 0 if ok else 1
+
+
+def drive_settings_toggle(run_id: str, state: dict, sim: str) -> int:
+    """XCUITest 真点一次「自动开始休息」，再从模拟器读回 UserDefaults，确认存储里的值变了。"""
+    out = scenario_dir(run_id, "settings-toggle")
+    install_sim(sim)
+    before_blob = settings_blob(read_defaults(sim))
+    test = run_xcuitest(run_id, sim, "testDriveSettingsToggleFlipsAutoStartBreak", out)
+    terminate_sim(sim)
+    time.sleep(1)
+    after_blob = settings_blob(read_defaults(sim))
+    ui = kv_text(out / "drive-toggle-values.txt")
+    stored = after_blob.get("autoStartBreak")
+    expected = ui.get("after") == "1"
+    ok = test["ok"] and ui.get("before") != ui.get("after") and isinstance(stored, bool) \
+        and stored == expected and before_blob.get("autoStartBreak") != stored
+    result = {"ok": ok, "test": test, "ui": ui,
+              "storedBefore": before_blob.get("autoStartBreak"), "storedAfter": stored,
+              "blobAfter": after_blob, "when": now()}
+    write_json(out / "settings-toggle.json", result)
+    check(state, "drive:settings-toggle", ok,
+          f"界面 {ui.get('before')}→{ui.get('after')}，存储 {before_blob.get('autoStartBreak')}→{stored}")
+    write_state(run_id, state)
+    return 0 if ok else 1
+
+
+def build_legacy_063(sim: str) -> Path | None:
+    base = BUILDS / "legacy-063"
+    app = base / "dd" / "Build" / "Products" / "Debug-iphonesimulator" / "PostureLab.app"
+    if app.exists() and plist_value(app / "Info.plist", "CFBundleShortVersionString") == "0.6.3":
+        return app
+    if base.exists():
+        shutil.rmtree(base)
+    (base / "src").mkdir(parents=True)
+    sh(["git", "archive", "--format=tar", "-o", str(base / "snapshot.tar"), LEGACY_063_SHA])
+    sh(["tar", "-xf", str(base / "snapshot.tar"), "-C", str(base / "src")])
+    r = subprocess.run(["xcodebuild", "-project", str(base / "src" / "PostureLab.xcodeproj"),
+                        "-scheme", "PostureLab", "-destination", f"platform=iOS Simulator,id={sim}",
+                        "-derivedDataPath", str(base / "dd"), "build"],
+                       cwd=base / "src", env=env(), text=True, capture_output=True, timeout=3600)
+    (base / "build.log").write_text(r.stdout + r.stderr + f"\n[exit {r.returncode}]\n")
+    return app if r.returncode == 0 and app.exists() else None
+
+
+def drive_upgrade_063(run_id: str, state: dict, sim: str) -> int:
+    """升级路径：0.6.3 界面上真点「屏幕常亮」关掉 → 读回存储 → 覆盖安装冻结的新版 → 设置读回、
+    无常亮行、专注时 idle focus_start=true。"""
+    out = scenario_dir(run_id, "upgrade-063")
+    steps: dict = {}
+    legacy = build_legacy_063(sim)
+    steps["legacyBuild"] = {"ok": legacy is not None, "app": str(legacy), "sha": LEGACY_063_SHA}
+    if legacy is None:
+        write_json(out / "upgrade.json", {"ok": False, "steps": steps})
+        check(state, "drive:upgrade-063", False, "0.6.3 构建失败")
+        write_state(run_id, state)
+        return 1
+    terminate_sim(sim)
+    sh(["xcrun", "simctl", "uninstall", sim, BUNDLE], check=False)
+    sh(["xcrun", "simctl", "install", sim, str(legacy)])
+    sh(["xcrun", "simctl", "privacy", sim, "grant", "camera", BUNDLE], check=False)
+    steps["legacyInstalled"] = dict(zip(("version", "build"), installed_version(sim)))
+    test = run_xcuitest(run_id, sim, "testDriveLegacyKeepScreenAwakeOff", out, legacy_bundle=BUNDLE,
+                        legacy_app=legacy)
+    steps["legacyTap"] = {**test, "ui": kv_text(out / "drive-legacy-values.txt")}
+    terminate_sim(sim)
+    time.sleep(1)
+    steps["stillLegacyAfterTest"] = dict(zip(("version", "build"), installed_version(sim)))
+    blob = settings_blob(read_defaults(sim))
+    steps["legacyStored"] = {"keepScreenAwake": blob.get("keepScreenAwake"), "blob": blob}
+    # 覆盖安装（不卸载）冻结的新版。
+    sh(["xcrun", "simctl", "install", sim, str(FROZEN_APP)])
+    sh(["xcrun", "simctl", "privacy", sim, "grant", "camera", BUNDLE], check=False)
+    steps["upgradedInstalled"] = dict(zip(("version", "build"), installed_version(sim)))
+    blob_after = settings_blob(read_defaults(sim))
+    steps["blobSurvives"] = {"keepScreenAwake": blob_after.get("keepScreenAwake"), "blob": blob_after}
+    launch_sim(sim, ["-settings", "1"])
+    time.sleep(6)
+    screenshot(sim, out / "settings-after-upgrade.png")
+    texts = ocr(frozen_ocr(run_id), out / "settings-after-upgrade.png") if frozen_ocr(run_id) else []
+    (out / "ocr-settings-after-upgrade.txt").write_text("\n".join(texts) + "\n")
+    terminate_sim(sim)
+    steps["noKeepAwakeRow"] = {"ok": bool(texts) and not any("常亮" in t for t in texts), "ocrLines": len(texts)}
+    launch_sim(sim, ["-scenario", "pomodoroDay", "-focusMinutes", "1", "-debug", "0", "-voice", "0",
+                     "-endSound", "none"])
+    time.sleep(12)
+    screenshot(sim, out / "focus-after-upgrade.png")
+    copy_documents(container_sim(sim), out / "Documents")
+    terminate_sim(sim)
+    rows = [json.loads(l) for p in sorted((out / "Documents").glob("debug/idle-*.jsonl"))
+            for l in p.read_text().splitlines() if l.strip()]
+    focus = [r for r in rows if r.get("trigger") == "focus_start"]
+    steps["focusKeepsAwake"] = {"ok": bool(focus) and all(r.get("idle_timer_disabled") is True for r in focus),
+                                "focusStart": focus}
+    expected_v = (load_preflight(run_id) or {}).get("expected", {})
+    ok = (steps["legacyInstalled"].get("version") == "0.6.3"
+          and test["ok"] and steps["legacyTap"]["ui"].get("after") == "0"
+          and steps["stillLegacyAfterTest"].get("version") == "0.6.3"
+          and blob.get("keepScreenAwake") is False
+          and steps["upgradedInstalled"].get("version") == expected_v.get("version")
+          and steps["upgradedInstalled"].get("build") == expected_v.get("build")
+          and blob_after.get("keepScreenAwake") is False
+          and steps["noKeepAwakeRow"]["ok"] and steps["focusKeepsAwake"]["ok"])
+    write_json(out / "upgrade.json", {"ok": ok, "steps": steps, "when": now()})
+    check(state, "drive:upgrade-063", ok, {k: v.get("ok", v) if isinstance(v, dict) else v
+                                           for k, v in steps.items() if k in ("legacyTap", "noKeepAwakeRow", "focusKeepsAwake")})
+    write_state(run_id, state)
+    return 0 if ok else 1
+
+
+def today_count(texts: list[str]) -> tuple[int, int] | None:
+    import re
+    for t in texts:
+        m = re.search(r"今天\s*(\d+)\s*/\s*(\d+)", t.replace(" ", ""))
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def drive_break_count(run_id: str, state: dict, sim: str) -> int:
+    """0.6.7：倒计时归零那一刻「今天 x/目标」就加一——休息中截图必须已是 1；下一段专注开始后
+    仍是 1（不重复加）。"""
+    out = scenario_dir(run_id, "break-count")
+    args = ["-scenario", "pomodoroDay", "-focusMinutes", "1", "-shortBreakMinutes", "1",
+            "-endSound", "none", "-debug", "0", "-voice", "0"]
+    (out / "launch-args.txt").write_text(" ".join(args) + "\n")
+    install_sim(sim)
+    t0 = time.time()
+    launch_sim(sim, args)
+    shots = [(20, "focus.png"), (75, "break.png"), (135, "next-focus.png")]
+    ocr_bin = frozen_ocr(run_id)
+    counts: dict = {}
+    for delay, name in shots:
+        wait = delay - (time.time() - t0)
+        if wait > 0:
+            time.sleep(wait)
+        screenshot(sim, out / name)
+        texts = ocr(ocr_bin, out / name) if ocr_bin else []
+        (out / f"ocr-{Path(name).stem}.txt").write_text("\n".join(texts) + "\n")
+        counts[Path(name).stem] = {"today": today_count(texts), "break": any("休息" in t for t in texts)}
+    copy_documents(container_sim(sim), out / "Documents")
+    terminate_sim(sim)
+    c = {k: (v["today"] or (None, None))[0] for k, v in counts.items()}
+    ok = c.get("focus") == 0 and c.get("break") == 1 and counts["break"]["break"] and c.get("next-focus") == 1
+    write_json(out / "break-count.json", {"ok": ok, "counts": counts, "when": now()})
+    check(state, "drive:break-count", ok, f"专注中 {c.get('focus')} → 休息中 {c.get('break')} → 下一专注 {c.get('next-focus')}")
+    write_state(run_id, state)
+    return 0 if ok else 1
+
+
+DRIVE_EXTRA = {
+    "break-count": drive_break_count,
+    "settings-scroll": drive_settings_scroll,
+    "settings-toggle": drive_settings_toggle,
+    "upgrade-063": drive_upgrade_063,
+}
+
+# r16 由 omp 临时写的 r16.py / run_cases.sh 覆盖的用例，沉淀为正式用例（对应 features/*.md）。
+# keep=True 沿用上一个用例的沙盒（不重装）；时间都是相对启动的秒数。
+CASES: dict[str, dict] = {
+    "ac12-manual-pause": {"args": "-scenario longRun -focusMinutes 1 -shortBreakMinutes 1 -autopause 10:10 "
+                          "-presetSettings autoStartBreak=1,autoStartFocus=1 -debug 0 -voice 0 -endSound none",
+                          "shots": [(15, "manual-pause.png")], "wait": 145, "end": "after-resume.png"},
+    "ac12-manual-report": {"args": "-report day", "keep": True, "wait": 6, "end": "report-manual-pause.png",
+                           "after": "ac12-manual-pause"},
+    "no-person-occlusion": {"args": "-scenario occlusion -focusMinutes 1 -debug 1 -voice 0",
+                            "wait": 25, "end": "occlusion.png"},
+    "no-person-occlusion-report": {"args": "-report day", "keep": True, "wait": 6,
+                                   "end": "report-no-person.png", "after": "no-person-occlusion"},
+    "pause-clean": {"args": "-scenario pauseWhileBreach -focusMinutes 1 -debug 1 -voice 0",
+                    "shots": [(30, "absence-pause.png")], "wait": 35},
+    "ac14-end-chime": {"args": "-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound chime "
+                       "-debug 0 -voice 0", "wait": 130, "end": "after-chime.png"},
+    "ac14-end-none": {"args": "-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound none "
+                      "-debug 0 -voice 0", "wait": 130, "end": "after-none.png"},
+    "ac14-goal": {"args": "-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -presetSettings dailyGoal=6 "
+                  "-debug 0 -voice 0 -endSound none", "wait": 70, "end": "home-goal6.png"},
+    "ac14-goal-report": {"args": "-seedHistory 30 -presetSettings dailyGoal=6 -report day", "wait": 8,
+                         "end": "report-day-goal6.png"},
+    "ac10-debug-on": {"args": "-scenario debugOffMonitoring -debug 1", "bg": [8], "fg": [12], "wait": 20,
+                      "end": "debug-on.png"},
+    "ac10-debug-off": {"args": "-scenario debugOffMonitoring -debug 0", "wait": 20, "end": "debug-off.png"},
+    "ac9-parked": {"args": "-scenario headDown -holdStart 1 -focusMinutes 5 -debug 0", "bg": [5], "fg": [8],
+                   "wait": 10, "end": "parked.png", "png": "parked.png"},
+    "idle-focus": {"args": "-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -debug 0 -voice 0 "
+                   "-endSound none", "shots": [(40, "focus-running.png")], "bg": [20, 70], "fg": [24, 74],
+                   "wait": 88, "end": "break-running.png"},
+    "ac6-week": {"args": "-seedHistory 30 -report week", "wait": 8, "end": "report-week.png"},
+    "ac6-month": {"args": "-seedHistory 30 -report month", "wait": 8, "end": "report-month.png"},
+    "full-day-detecting": {"args": "-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 "
+                           "-firstSampleDelay 1.4 -debug 1 -voice 0 -endSound none",
+                           "shots": [(20, "focus1-breach.png"), (75, "break1.png"), (140, "focus2.png"),
+                                     (250, "focus3.png")], "wait": 375, "end": "break3.png"},
+}
+
+
+def run_case(run_id: str, sim: str, name: str, spec: dict) -> dict:
+    out = scenario_dir(run_id, name)
+    launch_args = spec["args"].split()
+    (out / "launch-args.txt").write_text(" ".join(launch_args) + "\n")
+    if not spec.get("keep"):
+        install_sim(sim)
+    t0 = time.time()
+    pid = launch_sim(sim, launch_args)
+    timeline = [(float(d), "shot", n) for d, n in spec.get("shots", [])]
+    timeline += [(float(d), "bg", "") for d in spec.get("bg", [])]
+    timeline += [(float(d), "fg", "") for d in spec.get("fg", [])]
+    events = []
+    for delay, kind, payload in sorted(timeline):
+        wait = delay - (time.time() - t0)
+        if wait > 0:
+            time.sleep(wait)
+        if kind == "shot":
+            ok = screenshot(sim, out / payload)
+        elif kind == "bg":
+            ok = sh(["xcrun", "simctl", "launch", sim, "com.apple.Preferences"], check=False).returncode == 0
+        else:
+            ok = launch_sim(sim, []) >= 0
+        events.append({"at": round(time.time() - t0, 1), "kind": kind, "payload": payload, "ok": ok})
+        print(f"{'PASS' if ok else 'FAIL'} {name} {kind} {payload} at {time.time() - t0:.1f}s")
+    if spec.get("wait") is not None:
+        wait = spec["wait"] - (time.time() - t0)
+        if wait > 0:
+            time.sleep(wait)
+    if spec.get("end"):
+        events.append({"at": round(time.time() - t0, 1), "kind": "shot", "payload": spec["end"],
+                       "ok": screenshot(sim, out / spec["end"])})
+    container = container_sim(sim)
+    (out / "container.txt").write_text(container + "\n")
+    copy_documents(container, out / "Documents")
+    audit = audit_sandbox(container, out / "sandbox-audit.json")
+    (out / "sandbox-audit.txt").write_text(audit.stdout + audit.stderr + f"\n[exit {audit.returncode}]\n")
+    terminate_sim(sim)
+    ocr_bin = frozen_ocr(run_id)
+    if ocr_bin:
+        for png in sorted(out.glob("*.png")):
+            (out / f"ocr-{png.stem}.txt").write_text("\n".join(ocr(ocr_bin, png)) + "\n")
+    if spec.get("png") and (out / spec["png"]).exists():
+        write_json(out / "cloud-geometry.json", png_stats(out / spec["png"]))
+        (out / "cloud-ascii.txt").write_text(ascii_art(out / spec["png"]) + "\n")
+    provenance = {"case": name, "launchArgs": launch_args, "keptSandbox": bool(spec.get("keep")),
+                  "pid": pid, "gitSha": FROZEN_SHA, "container": container, "events": events,
+                  "sandboxAuditExit": audit.returncode, "when": now(),
+                  "elapsedSeconds": round(time.time() - t0, 1)}
+    write_json(out / "provenance.json", provenance)
+    return provenance
+
+
+def command_case(args) -> int:
+    run_id = resolve_run(args.run)
+    state = read_state(run_id)
+    if load_preflight(run_id) is None:
+        sys.exit("没有通过的 preflight，不开跑（ENV-BLOCKED）")
+    names = list(CASES) if args.names == ["all"] else args.names
+    unknown = [n for n in names if n not in CASES]
+    if unknown:
+        sys.exit(f"未登记的用例：{unknown}。先在 features/*.md 登记、再加进 verify.py 的 CASES；"
+                 "omp 不得自己写脚本。")
+    sim = state["udid"]
+    code = 0
+    for name in names:
+        after = CASES[name].get("after")
+        if after and after not in names and not (run_dir(run_id) / "scenarios" / after).exists():
+            print(f"FAIL {name}: 要先跑 {after}（沿用它的沙盒）")
+            code = 1
+            continue
+        provenance = run_case(run_id, sim, name, CASES[name])
+        state.setdefault("cases", {})[name] = provenance
+        audit_ok = provenance["sandboxAuditExit"] == 0
+        check(state, f"case:{name}", audit_ok, f"elapsed={provenance['elapsedSeconds']}s "
+              f"sandboxAudit exit={provenance['sandboxAuditExit']}")
+        code |= 0 if audit_ok else 1
+        write_state(run_id, state)
+    return code
+
+
+def command_list_cases(args) -> int:
+    for name, spec in CASES.items():
+        print(f"{name:28s} {spec['args']}  wait={spec.get('wait')}s"
+              + (f"  keep(after {spec.get('after')})" if spec.get("keep") else ""))
+    for name in DRIVE_EXTRA:
+        print(f"drive {name}")
+    return 0
+
+
+# --- PNG 像素统计（点云占屏比例、叠加层区域；r16.py 沉淀） --------------------
+
+def decode_png(path: Path):
+    import zlib
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    pos = 8
+    width = height = depth = color = None
+    idat = bytearray()
+    while pos < len(data):
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        kind = data[pos + 4:pos + 8]
+        body = data[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if kind == b"IHDR":
+            width = int.from_bytes(body[0:4], "big")
+            height = int.from_bytes(body[4:8], "big")
+            depth, color = body[8], body[9]
+            assert body[12] == 0, "interlaced PNG unsupported"
+        elif kind == b"IDAT":
+            idat += body
+        elif kind == b"IEND":
+            break
+    assert depth == 8 and color in (2, 6), f"unsupported PNG depth={depth} color={color}"
+    channels = 3 if color == 2 else 4
+    raw = zlib.decompress(bytes(idat))
+    stride = width * channels
+    rows, previous, index = [], bytearray(stride), 0
+    for _ in range(height):
+        filter_type = raw[index]
+        index += 1
+        line = bytearray(raw[index:index + stride])
+        index += stride
+        if filter_type == 1:
+            for i in range(channels, stride):
+                line[i] = (line[i] + line[i - channels]) & 0xFF
+        elif filter_type == 2:
+            for i in range(stride):
+                line[i] = (line[i] + previous[i]) & 0xFF
+        elif filter_type == 3:
+            for i in range(stride):
+                left = line[i - channels] if i >= channels else 0
+                line[i] = (line[i] + ((left + previous[i]) >> 1)) & 0xFF
+        elif filter_type == 4:
+            for i in range(stride):
+                a = line[i - channels] if i >= channels else 0
+                b = previous[i]
+                c = previous[i - channels] if i >= channels else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if (pa <= pb and pa <= pc) else (b if pb <= pc else c))) & 0xFF
+        rows.append(line)
+        previous = line
+    return width, height, channels, rows
+
+
+def png_stats(path: Path) -> dict:
+    width, height, channels, rows = decode_png(path)
+
+    def pixel(x, y):
+        base = x * channels
+        return tuple(rows[y][base:base + 3])
+
+    background = pixel(2, 2)
+    count = 0
+    min_x, min_y, max_x, max_y = width, height, -1, -1
+    for y in range(0, height, 2):
+        for x in range(0, width, 2):
+            rgb = pixel(x, y)
+            if all(abs(rgb[i] - background[i]) <= 6 for i in range(3)):
+                continue
+            count += 1
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+    total = (width // 2) * (height // 2)
+    return {"file": str(path), "width": width, "height": height, "background": list(background),
+            "foregroundRatio": round(count / total, 4),
+            "bbox": None if max_x < 0 else [min_x, min_y, max_x, max_y],
+            "bboxAreaRatio": 0 if max_x < 0 else round(((max_x - min_x) * (max_y - min_y)) / (width * height), 4)}
+
+
+def ascii_art(path: Path, cols: int = 60, rows_n: int = 60) -> str:
+    width, height, channels, data = decode_png(path)
+    ramp = " .:-=+*#%@"
+    out = []
+    for row in range(rows_n):
+        line = []
+        for col in range(cols):
+            x0, x1 = col * width // cols, max(col * width // cols + 1, (col + 1) * width // cols)
+            y0, y1 = row * height // rows_n, max(row * height // rows_n + 1, (row + 1) * height // rows_n)
+            total = n = 0
+            for y in range(y0, y1, max(1, (y1 - y0) // 6)):
+                for x in range(x0, x1, max(1, (x1 - x0) // 6)):
+                    base = x * channels
+                    total += (data[y][base] * 299 + data[y][base + 1] * 587 + data[y][base + 2] * 114) // 1000
+                    n += 1
+            line.append(ramp[min(len(ramp) - 1, (total // max(1, n)) * len(ramp) // 256)])
+        out.append("".join(line))
+    return "\n".join(out)
+
+
+def command_png(args) -> int:
+    stats = [png_stats(Path(p)) for p in args.files]
+    text = json.dumps(stats, ensure_ascii=False, indent=2)
+    if args.json:
+        Path(args.json).write_text(text + "\n")
+    print(text)
+    return 0
+
+
+def command_ascii(args) -> int:
+    for path in args.files:
+        print(f"--- {path} ---")
+        print(ascii_art(Path(path), args.cols, args.rows))
     return 0
 
 
@@ -905,8 +1491,11 @@ def main() -> int:
         if name == "doctor":
             p.add_argument("--version", default=None, help="预期 CFBundleShortVersionString；默认取 preflight.json")
             p.add_argument("--build", default=None, help="预期 CFBundleVersion；默认取 preflight.json")
+        if name == "drive":
+            p.add_argument("scenario", nargs="?", default="all",
+                           choices=["all", "pomodoro-focus", "posture-voice", "pause", "settings",
+                                    *DRIVE_EXTRA.keys()])
         if name == "down":
-            p.add_argument("--delete-sim", action="store_true", help="删掉 preflight 建的本轮模拟器")
             p.add_argument("--preflight-only", action="store_true", help="只跑过 preflight，不检查场景证据")
     pf = sub.add_parser("preflight", help="开跑前环境预检；不过就非零退出")
     pf.add_argument("--sha", required=True)
@@ -915,10 +1504,19 @@ def main() -> int:
     pf.add_argument("--slug", required=True)
     pf.add_argument("--run", default=None, help="默认 r<下一个N>-<slug>；slug 本身是 r<N>-xxx 或 tl-xxx 时直接用")
     pf.add_argument("--min-free-gb", type=int, default=20)
-    pf.add_argument("--keep-sim", action="store_true",
-                    help="预检通过时保留本轮模拟器给 up/drive；默认（只跑预检/dry-run）跑完即关闭并删除")
-    pc = sub.add_parser("preflight-cleanup", help="shell trap 兜底：删除本轮未保留的模拟器")
+    pc = sub.add_parser("preflight-cleanup", help="shell trap 兜底：把固定模拟器关机（不删除）")
     pc.add_argument("--run", required=True)
+    cs = sub.add_parser("case", help="跑 features/*.md 里登记的扩展用例（list-cases 列出全部）")
+    cs.add_argument("--run", default=None)
+    cs.add_argument("names", nargs="+", help="用例名，或 all")
+    sub.add_parser("list-cases", help="列出 case 子命令可跑的用例")
+    pn = sub.add_parser("png", help="截图像素统计（点云包围盒、占屏比例）")
+    pn.add_argument("files", nargs="+")
+    pn.add_argument("--json")
+    asc = sub.add_parser("ascii", help="截图的 ASCII 密度图")
+    asc.add_argument("files", nargs="+")
+    asc.add_argument("--cols", type=int, default=60)
+    asc.add_argument("--rows", type=int, default=60)
     args = parser.parse_args()
     if args.command == "up" and args.run is None:
         parser.error("up 需要 --run <run-id>")
@@ -930,6 +1528,10 @@ def main() -> int:
         "drive": command_drive,
         "evidence": command_evidence,
         "down": command_down,
+        "case": command_case,
+        "list-cases": command_list_cases,
+        "png": command_png,
+        "ascii": command_ascii,
     }[args.command](args)
 
 
