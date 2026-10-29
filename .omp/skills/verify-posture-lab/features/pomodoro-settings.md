@@ -46,7 +46,7 @@ Preconditions：
 - **提示音试听。** 同一测试的 `testPreviewIsAudibleWithoutStartingTheTimer`：点「试听提示音」后仍停留在设置页，返回主页后倒计时仍停驻（「开始专注」在、「暂停」不在）。试听不启动番茄钟、不写 `cue_played`。
 - **提示音选择。** 设置页 `结束提示音` Picker 选择 `柔和铃声` / `铃声` / `静音`；对应 `EndSound.soft` / `.chime` / `.none`。阶段结束时是否真的播放由 `cue_played` 验证。
 - **滚到下半屏、数满 10 项（v0.6.7）。** `verify.py drive --run <run-id> settings-scroll`：XCUITest 逐项滚到并数出番茄钟 10 项，截 `drive-settings-bottom.png`；判据 `settings-scroll.json`（`count=10`、无「屏幕常亮」行）。
-- **真点开关并读回存储（v0.6.7）。** `verify.py drive --run <run-id> settings-toggle`：XCUITest 点一次「自动开始休息」，再用 `simctl spawn <sim> defaults export me.xieal.posturelab.depth -` 读回 `pomodoro.settings`，存储值必须变且与界面一致（`settings-toggle.json`）。
+- **真点开关并读回存储（v0.6.7）。** `verify.py drive --run <run-id> settings-toggle`：XCUITest 点一次「自动开始休息」，再读 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist`（`simctl spawn defaults` 读不到沙盒偏好）取回 `pomodoro.settings`，存储值必须变且与界面一致（`settings-toggle.json`）。
 - **升级路径 0.6.3 → 新版（v0.6.7）。** `verify.py drive --run <run-id> upgrade-063`：在 0.6.3 的界面上真点「屏幕常亮」关掉（不再直接写 plist），读回 `keepScreenAwake=false`，覆盖安装冻结新版后旧 key 存活、设置页无常亮行、专注 `focus_start=true`（`upgrade.json`）。
 - **证据。** 保留设置页截图、XCUITest 的 `AC2-*` / `AC-input-*` 附件与重启后的截图；`verify.py evidence` 会确认 `settings.png` 存在。
 

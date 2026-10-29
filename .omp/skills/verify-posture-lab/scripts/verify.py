@@ -949,15 +949,21 @@ def write_json(path: Path, data) -> None:
 
 
 def read_defaults(sim: str) -> dict:
-    """从模拟器里读回 App 的 UserDefaults（cfprefsd 的真值，不是界面）。"""
+    """读回 App 的 UserDefaults 真值：App 数据容器里的 Library/Preferences/<bundle>.plist
+    （`simctl spawn defaults` 读的是模拟器全局域，读不到沙盒 App 的偏好）。"""
     import plistlib
-    r = sh(["xcrun", "simctl", "spawn", sim, "defaults", "export", BUNDLE, "-"], check=False)
-    if r.returncode != 0 or not r.stdout.strip():
+    c = sh(["xcrun", "simctl", "get_app_container", sim, BUNDLE, "data"], check=False)
+    if c.returncode != 0:
         return {}
-    try:
-        return plistlib.loads(r.stdout.encode())
-    except Exception:
-        return {}
+    f = Path(c.stdout.strip()) / "Library" / "Preferences" / f"{BUNDLE}.plist"
+    for _ in range(10):  # cfprefsd 落盘有延迟
+        if f.is_file():
+            try:
+                return plistlib.loads(f.read_bytes())
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return {}
 
 
 def settings_blob(defaults: dict) -> dict:
@@ -979,9 +985,9 @@ def installed_version(sim: str) -> tuple[str, str]:
 
 
 def run_xcuitest(run_id: str, sim: str, test: str, out: Path, *,
-                 legacy_bundle: str | None = None) -> dict:
+                 legacy_bundle: str | None = None, legacy_app: Path | None = None) -> dict:
     """用 preflight 的 build-for-testing 产物跑一个 VerifyDriveUITests 用例，导出附件。
-    legacy_bundle 时把 xctestrun 里的被测 App 去掉，xcodebuild 就不会覆盖已装的旧版。"""
+    legacy_bundle 时把 xctestrun 里的被测 App 指向 legacy_app，xcodebuild 装的仍是旧版。"""
     import plistlib
     pf = load_preflight(run_id)
     xctestrun = Path((pf or {}).get("frozen", {}).get("xctestrun", ""))
@@ -990,16 +996,20 @@ def run_xcuitest(run_id: str, sim: str, test: str, out: Path, *,
     if legacy_bundle:
         data = plistlib.loads(xctestrun.read_bytes())
 
-        def strip(node):
+        def point(node):
+            # xcodebuild 要求 UITargetAppPath，所以不能删：把被测 App 换成旧版，装的仍是 0.6.3。
             if isinstance(node, dict):
-                for key in ("UITargetAppPath", "DependentProductPaths"):
-                    node.pop(key, None)
+                if "UITargetAppPath" in node:
+                    node["UITargetAppPath"] = str(legacy_app)
+                if "DependentProductPaths" in node:
+                    node["DependentProductPaths"] = [str(legacy_app) if q.endswith("/PostureLab.app") else q
+                                                     for q in node["DependentProductPaths"]]
                 for value in node.values():
-                    strip(value)
+                    point(value)
             elif isinstance(node, list):
                 for value in node:
-                    strip(value)
-        strip(data)
+                    point(value)
+        point(data)
         patched = xctestrun.with_name(f"legacy-{os.getpid()}.xctestrun")
         patched.write_bytes(plistlib.dumps(data))
         xctestrun = patched
@@ -1128,7 +1138,8 @@ def drive_upgrade_063(run_id: str, state: dict, sim: str) -> int:
     sh(["xcrun", "simctl", "install", sim, str(legacy)])
     sh(["xcrun", "simctl", "privacy", sim, "grant", "camera", BUNDLE], check=False)
     steps["legacyInstalled"] = dict(zip(("version", "build"), installed_version(sim)))
-    test = run_xcuitest(run_id, sim, "testDriveLegacyKeepScreenAwakeOff", out, legacy_bundle=BUNDLE)
+    test = run_xcuitest(run_id, sim, "testDriveLegacyKeepScreenAwakeOff", out, legacy_bundle=BUNDLE,
+                        legacy_app=legacy)
     steps["legacyTap"] = {**test, "ui": kv_text(out / "drive-legacy-values.txt")}
     terminate_sim(sim)
     time.sleep(1)

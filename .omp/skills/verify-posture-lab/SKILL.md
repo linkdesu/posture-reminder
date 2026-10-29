@@ -121,7 +121,7 @@ Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环�
 |---|---|---|
 | `break-count` | `pomodoroDay` 1 分钟专注，在 20 s（专注中）、75 s（休息中）、135 s（下一段专注）截图并 OCR | 「今天 x/目标」依次为 0 → **1**（休息中已加一）→ 1（不重复加） |
 | `settings-scroll` | XCUITest `VerifyDriveUITests/testDriveSettingsScrollCountsTenSettings`：逐项滚到并数出番茄钟 10 项，滚到下半屏截图 | `count=10`、无「屏幕常亮」行，`drive-settings-bottom.png` 存在 |
-| `settings-toggle` | XCUITest 真点一次「自动开始休息」，再用 `simctl spawn … defaults export` 从模拟器读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
+| `settings-toggle` | XCUITest 真点一次「自动开始休息」，再从 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist` 读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
 | `upgrade-063` | 构建 0.6.3（`c9d5f42`，缓存在 `verify-builds/posture-lab/legacy-063`）→ 装上 → XCUITest 在 **0.6.3 的界面上真点**「屏幕常亮」关掉 → 读回存储 `keepScreenAwake=false` → 覆盖安装冻结新版 → 设置页无常亮行、旧 key 存活、专注 `focus_start` 为 true | `upgrade.json.ok` |
 
 XCUITest 入口用 preflight 的 `build-for-testing` 产物跑 `xcodebuild test-without-building -xctestrun …`，截图与文本是 `.keepAlways` 附件，`verify.py` 用 `xcresulttool export attachments` 导出到场景目录。升级场景会从 `.xctestrun` 里去掉被测 App，免得 xcodebuild 用新版覆盖已装的 0.6.3。不再直接写 plist 伪造旧版设置。
