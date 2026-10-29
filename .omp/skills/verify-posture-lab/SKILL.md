@@ -168,6 +168,8 @@ tmp/verify/<run-id>/
     └── verification/*.txt
 ```
 
+**分批运行**：`evidence` 只判本批真跑过的核心场景（`pomodoro-focus`、`posture-voice`、`pause`、`report`、`settings`，以 `state.json` 的记录或场景目录里的 `provenance.json` 为准），没跑的列在 `verification.json.skipped`，不算失败；本批跑过的 `drive:*` / `case:*` 判定一并汇总进 `results`。一个场景都没跑时 `ok=false`。
+
 证据标准：
 
 - 驱动真实用户路径（启动参数、真实控件、真实杀进程重启），不用内部 setter 或测试后门。
@@ -182,7 +184,7 @@ tmp/verify/<run-id>/
 .omp/skills/verify-posture-lab/scripts/verify.py down --run r9-skill-smoke
 ```
 
-`down` 只终止本次验证启动的 App，并把 `pl-verify` 关机（不删除）。它不删除 `tmp/verify/<run-id>/`，并在退出前确认 `state.json`、截图、JSONL、审计输出仍然存在。
+`down` 只终止本次验证启动的 App，并把 `pl-verify` 关机（不删除）。它不删除 `tmp/verify/<run-id>/`，并在退出前确认证据仍然存在：总是要求 `state.json`、`verification.json`、`audits/offline.txt`；本批跑过 `up` 才要求 `launch/pomodoro_main.png`，跑过 `pomodoro-focus` 才要求它的截图与 `provenance.json`。分批没跑的场景不会让 `down` 以 1 退出。
 
 清理后再次确认：
 
@@ -197,6 +199,8 @@ ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 
 - `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`preflight-cleanup`、`up`、`doctor`、`drive [场景]`、`case`、`list-cases`、`png`、`ascii`、`evidence`、`down`。
 - 仓库 `scripts/test_audit_sandbox.py`：`audit-sandbox.py` 的自测（系统文件白名单不误报、真违规 exit 1）。
+- `scripts/test_verify.py`：`verify.py` 的自测（不碰模拟器）：分批 `evidence` / `down` 只判本批场景、`abandon-count` 的判定。
+- 仓库 `scripts/test_verify_session.py`：`verify-session.py` AC6 的自测：多番茄日志按 `session_started` 分段、每个 `session_ended` 只和本段样本比对；没有 `session_ended` 的短日志记 SKIP（`--expect-summary` 时 FAIL）；数字真错仍 FAIL。
 - `scripts/ocr.swift`：Vision OCR，preflight 用 `swiftc` 编译到本轮构建目录后使用。
 - 仓库 `scripts/verify-preflight.sh`：preflight 的包装，参数依次是目标 SHA、预期版本号、预期 build 号、轮次 slug。
 - `scripts/audit-offline.py`、`scripts/audit-sandbox.py`、`scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py`、`scripts/check-overlay.py`：仓库既有验收脚本，由 `verify.py` 以显式路径调用。
