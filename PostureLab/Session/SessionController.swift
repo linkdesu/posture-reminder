@@ -1,3 +1,4 @@
+import ARKit
 import Combine
 import Foundation
 import UIKit
@@ -98,6 +99,10 @@ final class SessionController: ObservableObject {
   let settings: Settings
   let logger: DebugLogging
 
+  /// The camera the preview and the face source share. It runs on the child's screen from launch,
+  /// so the preview and the point cloud are already alive before 开始专注; the report stops it.
+  let cameraSession = ARSession()
+
   /// The pomodoro history the parent report reads and every closed pomodoro is written to.
   private let pomodoroStore: PomodoroStore
   /// The eleven pomodoro settings; the settings screen edits this very instance.
@@ -153,6 +158,9 @@ final class SessionController: ObservableObject {
   var debugAutoPause: DebugAutoPause?
   private var debugAutoPausePaused = false
   private var debugAutoPauseFinished = false
+  /// `-holdStart 1`: a scripted run that keeps its first focus parked, for the evidence that the
+  /// preview and the point cloud are on screen before 开始专注. Debug builds only.
+  var debugHoldStart = false
   #endif
 
   init(settings: Settings,
@@ -200,6 +208,9 @@ final class SessionController: ObservableObject {
     applyPomodoroAudio(pomodoroSettings.settings)
     startPomodoroTimer()
     refreshPomodoroSnapshot()
+    // The child's screen is the root, so the camera starts with it: the preview and the point cloud
+    // are the screen's ground, not something a focus has to turn on.
+    startPomodoroInput()
   }
 
   var isSimulating: Bool { !scenarios.isEmpty }
@@ -275,6 +286,11 @@ final class SessionController: ObservableObject {
   /// The replay presses the button instead. A real run is left alone: there the setting governs and
   /// the child taps.
   private func autoStartParkedFocusIfSimulating() {
+    #if DEBUG
+    // The preview-evidence run keeps the first focus parked on purpose, so 开始专注 and the absence
+    // of 休息 can both be photographed.
+    guard !debugHoldStart else { return }
+    #endif
     guard isSimulating, !pomodoroRunFinished, let pomodoro else { return }
     // Parked means a focus whose countdown is stopped and whose record was not opened: where
     // `enterNextFocus` leaves it at the end of every break, and where a run sits before its first
@@ -368,7 +384,13 @@ final class SessionController: ObservableObject {
     // while posture is monitored and the focus is actually being counted. Decided before the timer
     // ticks, because this sample belongs to the focus that is open when it arrives.
     let monitoring = monitorsPomodoroPosture
-    if monitoring, !pomodoroFocusPaused { feedPosture(sample) }
+    if monitoring, !pomodoroFocusPaused {
+      feedPosture(sample)
+    } else {
+      // No engine in flight — a parked focus, a break, a pause — so this sample feeds only the
+      // mirror. The point cloud is the child's screen from launch, not something 开始专注 turns on.
+      latestGeometry = PoseGeometry(joints: sample.joints, depth: sample.depth)
+    }
 
     let events = pomodoro.ingest(sample)
     self.pomodoro = pomodoro
@@ -663,7 +685,10 @@ final class SessionController: ObservableObject {
   }
 
   private func startPomodoroInput() {
-    guard pomodoroRunLive, inputSource == nil else { return }
+    // The camera is the child's screen, not the focus's: it runs before the first 开始 so the
+    // preview and the cloud are already there, and it is only the parent-facing report that gives
+    // the camera up.
+    guard phase != .report, !pomodoroRunFinished, inputSource == nil else { return }
     let source = makeSource()
     source.onSample = { [weak self] sample in self?.handlePomodoro(sample) }
     inputSource = source
@@ -741,7 +766,7 @@ final class SessionController: ObservableObject {
     if let scenario = simulatedScenario {
       return SimulatedSampleSource(scenario: scenario)
     }
-    return ARFaceSampleSource()
+    return ARFaceSampleSource(session: cameraSession)
   }
 
   private func stopInput() {

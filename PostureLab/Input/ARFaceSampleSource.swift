@@ -12,10 +12,13 @@ private func degrees(_ radians: Double) -> Double { radians * 180 / .pi }
 final class ARFaceSampleSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
 
-  private let session = ARSession()
+  private let session: ARSession
   private var startedAt: TimeInterval?
 
-  override init() {
+  /// `session` is shared with the child's screen, which previews it: one camera, one preview and
+  /// one sample stream, so what the child sees is what the classifier reads.
+  init(session: ARSession = ARSession()) {
+    self.session = session
     super.init()
     session.delegate = self
   }

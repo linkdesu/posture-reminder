@@ -84,6 +84,9 @@ struct PostureLabApp: App {
     // `-autopause 30:20`: a debug-only plan the controller carries out on the shared sample clock,
     // so a scripted run can photograph the paused screen and the grey band a manual pause draws.
     controller.debugAutoPause = DebugAutoPause(defaults.string(forKey: "autopause"))
+    // `-holdStart 1`: a debug-only way to keep a scripted run parked, so the screenshot before
+    // 开始专注 shows the point cloud and offers no end button.
+    controller.debugHoldStart = PostureLabApp.boolOverride("holdStart", from: defaults) ?? false
     #endif
 
     // The child's screen is the app's only root. The two parent pages are reached by launch argument

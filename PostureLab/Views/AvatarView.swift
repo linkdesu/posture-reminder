@@ -38,15 +38,21 @@ enum PoseProjection {
 struct AvatarView: View {
   private let geometry: PoseGeometry?
   private let assessment: PostureAssessment?
+  /// Whether the canvas paints the black ground itself. Off when the camera preview is behind it, so
+  /// the cloud and its dim empty ring sit on the live picture instead of hiding it.
+  private let drawsGround: Bool
 
-  init(geometry: PoseGeometry?, assessment: PostureAssessment?) {
+  init(geometry: PoseGeometry?, assessment: PostureAssessment?, drawsGround: Bool = true) {
     self.geometry = geometry
     self.assessment = assessment
+    self.drawsGround = drawsGround
   }
 
   var body: some View {
-    Canvas(opaque: true, rendersAsynchronously: false) { context, size in
-      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+    Canvas(opaque: drawsGround, rendersAsynchronously: false) { context, size in
+      if drawsGround {
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+      }
 
       guard let geometry, !geometry.joints.isEmpty else {
         drawEmptyState(in: &context, size: size)
