@@ -40,7 +40,7 @@ enum Scenario: String, CaseIterable, Equatable {
     switch self {
     case .approach: return "靠近视距循环"
     case .headDown: return "持续低头"
-    case .left: return "离开画面"
+    case .left: return "无人画面"
     case .shortApproach: return "短暂靠近"
     case .occlusion: return "人脸丢失"
     case .cooldown: return "冷却期内再次靠近"
