@@ -31,7 +31,7 @@ DEFAULT_SIM = "C12DA589-2444-4F2E-A943-4D6BAFB02BF1"
 DEFAULT_DEVICE = "00008110-001271181AD3801E"
 DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
 
-# 与 docs/qa-log-schema.md 的 38 键契约一致；顺序无关，集合必须完全相等。
+# 与 docs/qa-log-schema.md 的 42 键契约一致；顺序无关，集合必须完全相等。
 LOG_KEYS = {
     "ts", "t", "wall_clock", "event", "state", "screen", "distance_cm",
     "pitch_deg", "alert_type", "level", "breach_seconds", "sensitivity",
@@ -42,6 +42,8 @@ LOG_KEYS = {
     "scenario", "message", "battery_level", "thermal_state",
     "highlighted_feature", "feature_values", "view_mode", "overlay_on",
     "avatar_on", "posture_stats", "remaining_seconds", "phase",
+    # v0.6 事件 `segment`（识别中段）专用；只有 `segment` 行这四键非 null。
+    "segment_kind", "segment_start", "segment_end", "segment_seconds",
 }
 
 
@@ -412,7 +414,7 @@ def check_contract(log: Path, out: Path) -> bool:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         f"log={log}\nrows={rows}\nkeys={len(LOG_KEYS)}\n"
-        + ("PASS: every line carries exactly the 38-key contract\n" if ok
+        + ("PASS: every line carries exactly the 42-key contract\n" if ok
            else "FAIL:\n" + "\n".join(bad) + "\n")
     )
     return ok

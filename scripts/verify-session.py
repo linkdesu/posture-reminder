@@ -112,6 +112,11 @@ def timeline(rows):
         for key in ("distance_cm", "pitch_deg"):
             if row.get(key) is not None:
                 bits.append(f"{key}={fmt(row[key])}")
+        # v0.6 `segment` line: the detecting stretch closed at the first posture sample.
+        # Only these four keys are set; they are what the timeline is cross-checked against.
+        for key in ("segment_kind", "segment_start", "segment_end", "segment_seconds"):
+            if row.get(key) is not None:
+                bits.append(f"{key}={fmt(row[key])}")
         print(f"  {'  '.join(bits)}   [{event}]")
 
 

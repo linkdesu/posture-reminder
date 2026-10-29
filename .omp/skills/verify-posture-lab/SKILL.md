@@ -1,6 +1,6 @@
 ---
 name: verify-posture-lab
-description: 驱动 PostureLab iOS 模拟器或 iPhone 13 真机，端到端验证番茄钟、8 种体态监测、预录 WAV 语音提醒、设置页、统计页、离线与沙盒隐私边界及 38-key JSONL 日志契约，并采集可复查证据。
+description: 驱动 PostureLab iOS 模拟器或 iPhone 13 真机，端到端验证番茄钟、8 种体态监测、预录 WAV 语音提醒、设置页、统计页、离线与沙盒隐私边界及 42-key JSONL 日志契约，并采集可复查证据。
 ---
 
 # PostureLab 验证技能
@@ -122,7 +122,7 @@ tmp/verify/<run-id>/
 
 - 驱动真实用户路径（启动参数、真实控件、真实杀进程重启），不用内部 setter 或测试后门。
 - 同时保留动作与结果：截图、JSONL、历史文件、审计 JSON，而不是只看最终屏幕。
-- 逐行校验 38-key JSONL 契约；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
+- 逐行校验 42-key JSONL 契约（v0.6 起含事件 `segment`：识别中段关闭时一行，该行只有 `segment_*` 四个键非 `null`）；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
 - 隐私用 `scripts/audit-offline.py`（源码）与 `scripts/audit-sandbox.py`（运行时容器）双重审计。
 - 如果当前实现与 `GLOSSARY.md` / ADR-0001..0005 的已确认规则不一致（Q1 默认启动页、Q2 `pausedSeconds` 对账、Q3 静默校准、Q4 点云/实验级提醒），如实报失败并写入对应特性的 `Gotchas`；不要弱化断言来换取通过。
 

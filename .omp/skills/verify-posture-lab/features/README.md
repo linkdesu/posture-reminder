@@ -24,7 +24,7 @@
 ## 取证与失败报告准则
 
 - 同时保留动作和结果：截图、`session-*.jsonl`、`pomodoro-history.json`、`sandbox-audit.json`、校验器输出。
-- 逐行检查 JSONL 的 38-key 契约；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
+- 逐行检查 JSONL 的 42-key 契约；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
 - 隐私同时做源码审计（`scripts/audit-offline.py`）与运行时容器审计（`scripts/audit-sandbox.py`）。
 - 当前实现与 `GLOSSARY.md` / ADR-0001..0005 的已确认规则存在已知偏差时，按用户可见行为如实报失败，并在对应特性的 `Gotchas` 中写明；不得弱化断言或改走另一条路径来掩盖。
 - 未到达的入口报告为失败，并附上尝试的命令与未满足的前置条件；不要把“跳过”写成“通过”。
@@ -35,4 +35,4 @@
 - [体态监测与语音提醒](./posture-monitoring-and-voice.md)：3D 人形点云（冷启动即显示）、静默基线、8 种体态、15 秒预录语音、无人暂停、调试叠加层（随时显示、中文关节名、算法来源行）。
 - [番茄钟设置](./pomodoro-settings.md)：11 项参数（含手动输入、点按全选与夹取）、「监测」与「调试」分区（灵敏度/形象模式/调试模式/实验性体态）、提示音试听、真实控件交互与重启持久化。
 - [统计页与历史](./posture-report-and-history.md)：日/周/月视图、姿态时间轴、`focusedSeconds`/`pausedSeconds` 对账、历史持久化与清空。
-- [离线与沙盒隐私](./offline-and-sandbox-privacy.md)：零网络、无 RGB 落盘、38-key JSONL 契约。
+- [离线与沙盒隐私](./offline-and-sandbox-privacy.md)：零网络、无 RGB 落盘、42-key JSONL 契约。

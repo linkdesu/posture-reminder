@@ -16,7 +16,7 @@ PostureLab——iOS 17、仅 iPhone 的阅读坐姿伴侣应用（Swift/SwiftUI�
 ## 规范与约定
 
 - **文档语言（硬性规则）**：仓库内所有文档（包括 AGENTS.md、GLOSSARY.md、docs/adr/、docs/agents/、docs/qa-log-schema.md、模块 README 以及通过 to-spec / to-tickets / pr 发布的 GitHub Issue、Spec、Ticket 和 PR 描述）必须统一使用中文编写与维护；仅代码标识符、日志 JSON 键名、Git 标签与 CLI 命令保留英文原名。
-- JSONL 日志 schema 是与 QA 的契约——snake_case 键名、`ts` 为 epoch 毫秒、每行都带完整的 **38 个键**。v0.3 增加了 `features` 与 `view_mode`；v0.4/v0.5 增加了 `pomodoro_tick`（`remaining_seconds`、`phase`）、`speech_played`、`cue_played`、`posture_stats`，以及每个专注阶段一对 `session_started`/`session_ended`。共有八种体态（含 `shoulder_tilt`），实验级体态永不发声。修改 schema 必须先让 QA 知情（ADR-0002）；阅读 `docs/qa-log-schema.md` 以解释一次会话日志。
+- JSONL 日志 schema 是与 QA 的契约——snake_case 键名、`ts` 为 epoch 毫秒、每行都带完整的 **42 个键**。v0.3 增加了 `features` 与 `view_mode`；v0.4/v0.5 增加了 `pomodoro_tick`（`remaining_seconds`、`phase`）、`speech_played`、`cue_played`、`posture_stats`，以及每个专注阶段一对 `session_started`/`session_ended`；v0.6 增加了事件 `segment` 与四个键 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`（识别中段关闭时写一行，该行只有这四个键非 `null`），并把倒计时与专注起点改为墙钟口径。共有八种体态（含 `shoulder_tilt`），实验级体态永不发声。修改 schema 必须先让 QA 知情（ADR-0002）；阅读 `docs/qa-log-schema.md` 以解释一次会话日志。
 - 领域词汇见 `GLOSSARY.md`。难以逆转的决策存放在 `docs/adr/`：请阅读 ADR-0001（测试缝）、ADR-0002（日志契约）、ADR-0003（双层状态机与暂停硬门控）、ADR-0004（非侵入式预录提醒）、ADR-0005（纯离线与 3D 人形点云隐私边界）、ADR-0006（番茄钟主页是唯一入口）与 ADR-0007（纯深度几何与关节来源协议；任何构建都不显示摄像头画面）。
 
 ## 代理技能与工作流
