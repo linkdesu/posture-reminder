@@ -19,10 +19,10 @@ Checks:
        several kinds queued on one tick follow `PostureKind.priority`
   AC5  a pause is not focus time: `focusedSeconds + pausedSeconds` equals the record's
        elapsed wall time within a second, and at least one record reports a pause
-  AC7  every focus's timeline accounts for the time that focus counted: the non-paused
-       `postureSegments` runs add up to its `focusedSeconds` within a second, every run is a
-       legal kind, and the day still holds the `pomodoroDay` scenario's three one-minute
-       focuses
+  AC7  every focus's timeline accounts for the time that focus counted: the runs inside the
+       countdown (everything but `paused` and `no_person`) add up to its `focusedSeconds`
+       within a second, every run is a legal kind, and the day still holds the
+       `pomodoroDay` scenario's three one-minute focuses
 
 Every check fails when its subject is missing: fewer than two ticks, no playback, no
 simultaneous queue, no history, no paused record, or no segment is a failure, never a
@@ -68,6 +68,11 @@ FOCUS_COUNT = 3
 # `PostureSegment.kind`: the eight postures (`PostureKind.priority` names all of them), the two
 # states, the pause band (B2), and the two non-posture bands v0.6/v0.6.1 added.
 SEGMENT_KINDS = set(POSTURE_PRIORITY) | {"good", "no_person", "paused", "detecting", "no_data"}
+
+# The two bands that run the wall clock past the countdown, so they are not part of what
+# `focusedSeconds` accounts for: the child's own `paused` and, since v0.6.3, the `no_person`
+# absence suspension.
+SUSPENDED_KINDS = {"paused", "no_person"}
 
 
 def fmt(value):
@@ -497,9 +502,10 @@ def check_ac7(records, quiet):
     A focus used to be exactly three runs, which is why the script's fifteen/thirty/fifteen used to
     be read position by position. v0.6 opens a `detecting` band at the 开始 tap and v0.6.1 a
     `no_data` band when the stream stalls, so a real focus is however many runs the session needed.
-    What the timeline still owes the parent is the whole 专注时长: the non-paused runs add up to
-    `focusedSeconds` within a second — a pause is wall time outside the countdown and has a band of
-    its own — and every run is a legal kind. The day itself is still the scenario's three
+    What the timeline still owes the parent is the whole 专注时长: the runs inside the countdown
+    add up to `focusedSeconds` within a second — the two pause bands (`paused` for the child's own
+    暂停, `no_person` for an absence suspension) are wall time outside it — and every run is a
+    legal kind. The day itself is still the scenario's three
     one-minute focuses.
     """
     if len(records) != FOCUS_COUNT:
@@ -549,18 +555,18 @@ def check_ac7(records, quiet):
         for position, (kind, start, end) in enumerate(runs, 1):
             show(quiet, f"  {position}. {kind} {end - start:.2f}s ({fmt(start)}..{fmt(end)})")
 
-        counted = sum(end - start for kind, start, end in runs if kind != "paused")
+        counted = sum(end - start for kind, start, end in runs if kind not in SUSPENDED_KINDS)
         delta = counted - focused
         if abs(delta) > SECOND_TOLERANCE:
             print(
-                f"AC7 FAIL: record {index}'s non-paused segments cover {counted:.2f}s of its "
+                f"AC7 FAIL: record {index}'s countdown segments cover {counted:.2f}s of its "
                 f"{focused:.2f}s focus (delta {delta:+.2f}s)"
             )
             ok = False
         else:
             show(
                 quiet,
-                f"  record {index}: non-paused segments cover {counted:.2f}s of "
+                f"  record {index}: countdown segments cover {counted:.2f}s of "
                 f"{focused:.2f}s (delta {delta:+.2f}s)",
             )
 

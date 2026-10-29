@@ -6,6 +6,8 @@
 
 **v0.6.1 不改变键数，也不新增事件：** 只给 `segment_kind` 增加取值 `no_data`（「无数据」段——首样本之后样本流中断的那段墙钟时间）。已经按 42 键读取日志的读者无需改动；按取值穷举 `segment_kind` 的读者需要接受这个新值。详见「样本中断与「无数据」段」。
 
+**v0.6.3 同样不改变键数，也不新增事件：** 时间轴段种类（`segment_kind` 词表，以及记录里 `postureSegments[].kind`）增加取值 `no_person`——**无人自动暂停**的那段墙钟时间，图例与统计页写「不在画面」。只有孩子自己点的「暂停」仍写 `paused`。停表行为、`pausedSeconds` 累计与「单次无人超过 300 秒记 `interrupted`」的口径一律不变；`no_person` 段与 `paused` 段一样不产生 `reminder`、不进坏姿势统计、不进良好占比分母，也**不写 `segment` 行**（`segment` 事件仍只由 `detecting` 与 `no_data` 关闭时产生）。按取值穷举的读者需要接受这个取值。
+
 ## `ts` 与 `t` 不是一回事
 
 请仔细读一遍，因为这是最容易弄错的一点：
@@ -89,7 +91,7 @@ xcrun devicectl device copy from \
 | `posture_stats` | Object? | 在 `session_ended` 行：每个 `PostureKind` rawValue 一个条目，值为 `{"episodes": …, "reminders": …, "seconds": …}`（见下文）。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
 | `remaining_seconds` | Double? | 在 `pomodoro_tick` 行：计时器当前阶段剩余秒数。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
 | `phase` | String? | 在 `pomodoro_tick` 行：当前阶段的 `PomodoroPhase` rawValue，`focus` / `shortBreak` / `longBreak`。其他行为 `null`——但与其他键一样，键本身在每行都存在。 |
-| `segment_kind` | String? | 在 `segment` 行：被关闭的那段时间轴段的种类，取值 `detecting`（「识别中」段，从点击「开始」到该专注第一个姿态样本）或 `no_data`（「无数据」段，v0.6.1：首样本之后样本流中断、下一个样本或专注结束才闭合）。其他行为 `null`。 |
+| `segment_kind` | String? | 在 `segment` 行：被关闭的那段时间轴段的种类，取值 `detecting`（「识别中」段，从点击「开始」到该专注第一个姿态样本）或 `no_data`（「无数据」段，v0.6.1：首样本之后样本流中断、下一个样本或专注结束才闭合）。其他行为 `null`。**v0.6.3 起时间轴段种类还有 `no_person`（无人自动暂停）与 `paused`（孩子手动暂停）**，但这两者只写在记录的 `postureSegments[].kind` 里，不会出现在 `segment` 行。 |
 | `segment_start` | Int64? | 在 `segment` 行：该段起点的 Unix 纪元**毫秒**。`detecting` 是孩子点「开始」的墙钟时刻；`no_data` 是中断前**最后一个样本**到达的墙钟时刻。其他行为 `null`。 |
 | `segment_end` | Int64? | 在 `segment` 行：该段终点的 Unix 纪元**毫秒**。`detecting` 是该专注第一个姿态样本到达的墙钟时刻；`no_data` 是让样本流恢复的那个样本（或专注结束）的墙钟时刻。其他行为 `null`。 |
 | `segment_seconds` | Double? | 在 `segment` 行：该段时长，秒，等于 `(segment_end − segment_start) / 1000`。其他行为 `null`。 |
@@ -157,13 +159,13 @@ xcrun devicectl device copy from \
 
 ## 识别中段、无数据段与时间轴不变量
 
-v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「识别中」，随后是姿态段（`good`、八种体态、`no_person`），暂停时插入 `paused` 段，样本流中断时插入 `no_data` 段。段的 kind 常量是 `detecting`、`no_data` 与 `paused`（引擎、时间轴与图例共用这些标识），界面与图例的中文分别写「识别中」「无数据」「暂停」；与 `paused` 一样，前两者只是时间轴取值，**永远不是 `state` 取值**——`state` 仍然是最近一次判定（初始为 `good`）。
+v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「识别中」，随后是姿态段（`good`、八种体态、`no_person`），样本流中断时插入 `no_data` 段；两种暂停各有一段自 0.6.3 起分开：孩子手动暂停写 `paused`（「暂停」），无人自动暂停写 `no_person`（「不在画面」）。段的 kind 常量是 `detecting`、`no_data`、`paused` 与 `no_person`（引擎、时间轴与图例共用这些标识），界面与图例的中文分别写「识别中」「无数据」「暂停」「不在画面」；与 `paused` 一样，前两者只是时间轴取值，**永远不是 `state` 取值**——`state` 仍然是最近一次判定（初始为 `good`）。
 
 - **独立成段，不并入第一段，也不丢弃。** 孩子点「开始」时深度流刚启动、人脸往往还没被测量到；这段墙钟时间单独记成一个 `detecting` 段，从点击「开始」到该专注第一个姿态样本到达。它不会为了好看被合并进第一个 `good` 段，也不会被当作启动噪声丢掉。
 - **不计入坏姿势统计。** 这段时间没有任何体态判定，所以不产生 `reminder`，也不增加任何 `posture_stats[kind]` 的 `episodes` / `reminders` / `seconds`，更不会把 `state` 推到某种体态。
 - **不计入良好占比的分母。** 良好占比只在姿态段上计算：「识别中」的秒数既不计入 `good_seconds`，也不计入 `total_seconds`。把它算成良好，等于给一段没测量过的相机启动时间记功；算成坏姿势则更没依据。
 - **与「不在画面」（`no_person`）是两件事。** `no_person` 是相机**量过**并回答“没有人”；`detecting` 是相机**还没回答**。两者在时间轴与图例上各有独立条目、各自颜色（见 `GLOSSARY.md` 的「识别中」与「不在画面」），日志里前者走 `state`，后者走 `segment_kind`。
-- **时间轴不变量**：一个专注的 `detecting` 段、`no_data` 段与各姿态段（`good`、八种体态、`no_person`）的时长之和 = `plannedSeconds`（±1 秒）。`paused` 段不在这个总和里：暂停是倒计时之外的墙钟时间，暂停期间倒计时冻结，暂停时长也不占用计划时长，只单独累计在 `pausedSeconds` 与灰色 `paused` 段里。
+- **时间轴不变量**：一个专注的 `detecting` 段、`no_data` 段与各姿态段（`good`、八种体态）的时长之和 = `plannedSeconds`（±1 秒）。`paused` 与 `no_person`（v0.6.3 的无人暂停）段都不在这个总和里：两者都是倒计时之外的墙钟时间，期间倒计时冻结，这段时长不占用计划时长，只单独累计在 `pausedSeconds` 与对应的时间轴段里（手动暂停 `paused`，无人暂停 `no_person`）。
 - **只有 `detecting` 与 `no_data` 段写 `segment` 行。** 段关闭时写一行，携带 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`；`good`、各体态、`no_person` 与 `paused` 段不写这个事件（后三者由 `sample` / `status_changed` 行与 `state`、`paused` / `resumed` 行重建）。`segment_seconds` 应等于 `(segment_end − segment_start) / 1000`，可以据此交叉核对。若第一个姿态样本与点击「开始」落在同一瞬间，这段长度为 0、没有可画的等待，于是不作为独立段，也不写 `segment` 行——时间轴直接从该样本起算，不变量照旧成立。
 
 ### 样本中断与「无数据」段

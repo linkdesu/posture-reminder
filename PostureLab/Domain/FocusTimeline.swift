@@ -8,7 +8,10 @@ import Foundation
 /// posture sample is a segment of its own (`detecting`,「识别中」) rather than part of whichever
 /// posture happens to come first and rather than a hole. That is what makes the timeline add up:
 ///
-///     detecting + good/posture/no_person + no_data  =  plannedSeconds  (±1 s)
+///     detecting + good/posture + no_data  =  plannedSeconds  (±1 s)
+///
+/// The bands outside that sum are the two the wall clock runs past the countdown in: `paused` (the
+/// child's own pause) and, since v0.6.3, `no_person` (an absence suspension, drawn as 不在画面).
 ///
 /// v0.6.1: the same rule covers silence after the first sample. A sample band is only evidence up
 /// to its last sample; if the stream then stops (the parent opened the report, the sensor gave up),
@@ -17,8 +20,11 @@ import Foundation
 /// whole gap, and the parent's good-posture ratio was inflated by time nobody measured.
 ///
 /// A `paused` band is the one segment outside that sum, because a pause runs the wall clock past
-/// the countdown instead of inside it (B1, B2). The type is clock-agnostic: every instant is passed
-/// in, which is what lets a test pin a late first sample, a missing one, and a stalled stream.
+/// the countdown instead of inside it (B1, B2). v0.6.3 splits the two pauses: the child's own 暂停
+/// still draws `paused`, while an absence suspension draws `no_person` — a measured "nobody here",
+/// shown as 不在画面 — and it is outside the sum for the same reason, since the countdown is frozen
+/// while it lasts. The type is clock-agnostic: every instant is passed in, which is what lets a
+/// test pin a late first sample, a missing one, and a stalled stream.
 struct FocusTimeline: Equatable {
   /// How quiet the sample stream must be before the timeline stops trusting it: one full second.
   /// Samples arrive at 10 Hz, so a whole second with none means the stream stopped rather than that
@@ -98,11 +104,23 @@ struct FocusTimeline: Equatable {
     return detecting
   }
 
-  /// The time the timeline accounts for inside the countdown: every segment except a `paused` band,
-  /// which is wall time the focus did not spend. This is the number the sum invariant is read on.
+  /// The time the timeline accounts for inside the countdown: every segment except the two bands
+  /// that run the wall clock past it — the child's `paused` and the absence `no_person` suspension.
+  /// This is the number the sum invariant is read on.
   var countedSeconds: Double {
-    segments.filter { $0.kind != PostureSegment.pausedKind }
+    segments.filter { $0.kind != PostureSegment.pausedKind && $0.kind != PostureStatus.noPerson.rawValue }
       .reduce(0) { $0 + $1.seconds }
+  }
+
+  /// The kind the band of the moment draws, so the controller and its tests read one rule.
+  ///
+  /// A running focus draws whatever the engine last classified. Of the two pauses, only the child's
+  /// own 暂停 is `paused`; an absence suspension is `no_person`, because the camera measured the
+  /// absence rather than the child stopping, and the report names that band 不在画面. Both still
+  /// freeze the countdown and both still count into `pausedSeconds` — only the drawing differs.
+  static func bandKind(isPaused: Bool, isPausedByAbsence: Bool, status: String?) -> String? {
+    guard isPaused else { return status }
+    return isPausedByAbsence ? PostureStatus.noPerson.rawValue : PostureSegment.pausedKind
   }
 
   private struct OpenBand: Equatable {

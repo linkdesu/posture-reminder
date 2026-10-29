@@ -729,10 +729,14 @@ final class SessionController: ObservableObject {
   /// the timer was counting but nothing had been classified, and that stretch is a segment of its
   /// own rather than part of whichever posture happens to come first.
   ///
-  /// A paused focus writes `PosturePalette.pausedKind` instead: the time is not the child sitting in
-  /// some posture, it is time the pomodoro did not count, and the band has to say so (B1 and B2).
+  /// A paused focus does not write a posture. Of the two pauses, the child's own 暂停 draws
+  /// `paused` and an absence suspension draws `no_person` (「不在画面」): the camera measured the
+  /// absence, so the band has to say so, while both still freeze the countdown and both still count
+  /// into `pausedSeconds` (B1, B2). `FocusTimeline.bandKind` is that one rule, shared with the tests.
   private func accumulatePomodoroSegment(at t: TimeInterval) {
-    let kind: String? = pomodoroFocusPaused ? PosturePalette.pausedKind : engine?.status.rawValue
+    let kind = FocusTimeline.bandKind(isPaused: pomodoroFocusPaused,
+                                      isPausedByAbsence: pomodoro?.isPausedByAbsence ?? false,
+                                      status: engine?.status.rawValue)
     guard let kind else { return }
     logBandSegment(pomodoroTimeline.observe(kind, at: t))
   }

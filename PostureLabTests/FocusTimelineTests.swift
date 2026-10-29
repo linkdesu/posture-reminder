@@ -187,6 +187,50 @@ final class FocusTimelineTests: XCTestCase {
     XCTAssertEqual(timeline.countedSeconds, planned, accuracy: 0.001)
   }
 
+  /// v0.6.3: an absence suspension is drawn as `no_person` (「不在画面」) rather than `paused`.
+  /// Like a pause it runs the wall clock past the countdown, so it is drawn but not counted.
+  func testAnAbsenceSuspensionDrawsNoPersonAndStaysOutsideTheCountedSum() {
+    var timeline = FocusTimeline()
+    timeline.started(at: 1_000)
+    timeline.observe(PostureStatus.good.rawValue, at: 1_000.2)
+    timeline.observe(PostureStatus.noPerson.rawValue, at: 1_010)
+    timeline.observe(PostureStatus.good.rawValue, at: 1_020)
+    // The absence held the countdown, so the focus closes ten seconds past `planned`.
+    timeline.finished(at: 1_070)
+
+    XCTAssertEqual(timeline.segments.map(\.kind), [
+      PostureSegment.detectingKind,
+      PostureStatus.good.rawValue,
+      PostureStatus.noPerson.rawValue,
+      PostureStatus.good.rawValue,
+    ])
+    // 0.2 detecting + 9.8 good + 10 absent + 50 good: the absent band is drawn and stays out, so
+    // the counted sum is still the plan.
+    XCTAssertEqual(timeline.countedSeconds, planned, accuracy: 0.001)
+  }
+
+  /// The one rule the controller reads: a running focus draws the engine's status, the child's own
+  /// pause draws `paused`, and an absence suspension draws `no_person`. Both pauses freeze the
+  /// countdown and count into `pausedSeconds`; only the drawing differs.
+  func testBandKindSplitsTheTwoPauses() {
+    let good = PostureStatus.good.rawValue
+    XCTAssertEqual(FocusTimeline.bandKind(isPaused: false, isPausedByAbsence: false, status: good), good)
+    XCTAssertEqual(FocusTimeline.bandKind(isPaused: false, isPausedByAbsence: true, status: good), good)
+    XCTAssertEqual(FocusTimeline.bandKind(isPaused: true, isPausedByAbsence: true, status: good),
+                   PostureStatus.noPerson.rawValue)
+    XCTAssertEqual(FocusTimeline.bandKind(isPaused: true, isPausedByAbsence: false, status: good),
+                   PostureSegment.pausedKind)
+    // A focus with no status yet (before its first sample) still has nothing to draw.
+    XCTAssertNil(FocusTimeline.bandKind(isPaused: false, isPausedByAbsence: false, status: nil))
+  }
+
+  /// The absence band is a real `PostureStatus` — that is why the report names it 「不在画面」 — but
+  /// the aggregation skips it, so it is never scored and never enters the good ratio.
+  func testNoPersonIsAStatusTheReportDrawsButDoesNotScore() {
+    XCTAssertEqual(PostureStatus(rawValue: PostureStatus.noPerson.rawValue), .noPerson)
+    XCTAssertEqual(PostureStatus.noPerson.displayName, "不在画面")
+  }
+
   /// The detecting kind is a timeline band, never a `state`: the aggregation's `PostureStatus` gate
   /// is what keeps it out of the posture statistics and the good-posture ratio.
   func testDetectingIsNotAPostureStatus() {
