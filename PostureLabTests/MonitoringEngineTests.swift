@@ -452,7 +452,8 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertFalse(try reading(line.readings, .headRoll).isOverThreshold)
   }
 
-  /// 肩部不可用时，依赖肩线的三种体态一律不发声、不进时间轴、不计统计（pr-PM，0.6.2）：
+  /// 肩部不可用时，依赖肩线的两种体态（高低肩、驼背）一律不发声、不进时间轴、不计统计
+  /// （pr-PM；0.6.3 起歪头不再受这条门控——见 `testHeadTiltStillFiresWhenTheShoulderLineIsMissing`）：
   /// 同一段 20 秒的高低肩姿态，肩线缺失时一条提醒都没有、状态仍是良好、统计秒数为 0；
   /// 肩线在时照常触发两级提醒——证明这条门控是门控，不是姿态本身不越线。
   func testShoulderDependentPosturesStaySilentWhenTheShoulderLineIsMissing() {
@@ -492,6 +493,45 @@ final class MonitoringEngineTests: XCTestCase {
     }
     // 21 秒的流全算良好，没有一秒落进不良体态。
     XCTAssertEqual(gated.engine.summary.goodSeconds, 21, accuracy: 0.5)
+  }
+
+  /// v0.6.3（pr-PM）：歪头只看头部横滚，不受肩部可用门控。同一段 20 秒歪头，肩线缺失时照样两级
+  /// 提醒、状态是歪头、统计记到时间轴上；对照实验里高低肩与驼背在同样的缺失肩线下仍然闭嘴。
+  func testHeadTiltStillFiresWhenTheShoulderLineIsMissing() {
+    func strip(_ sample: PostureSample) -> PostureSample {
+      var next = sample
+      next.joints.removeValue(forKey: .leftShoulder)
+      next.joints.removeValue(forKey: .rightShoulder)
+      next.unavailableJoints = [.leftShoulder, .rightShoulder]
+      return next
+    }
+
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var events: [MonitoringEvent] = []
+    let upright = sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)])
+    // `rollDeg` is what the depth source measures off the head band, so it does not depend on the
+    // shoulder joints: only the two shoulder-dependent kinds lose their evidence here.
+    let tilted = posing([Segment(duration: 20, distanceCM: 40, pitchDeg: 0)],
+                        as: .headTilt,
+                        from: 1.0)
+      .map { sample -> PostureSample in
+        var rolled = sample
+        rolled.rollDeg = 22.5
+        return rolled
+      }
+    for sample in upright + tilted {
+      let next = strip(sample)
+      XCTAssertFalse(next.hasShoulderLine)
+      events += engine.ingest(next)
+    }
+
+    XCTAssertEqual(reminders(in: events).map(\.kind), [.headTilt, .headTilt])
+    XCTAssertEqual(reminders(in: events).map(\.level), [.gentle, .voice])
+    XCTAssertEqual(engine.status, .posture(.headTilt))
+    XCTAssertEqual(engine.reminderCount(for: .headTilt), 2)
+    XCTAssertGreaterThan(engine.summary.postureStats[PostureKind.headTilt.rawValue]?.seconds ?? 0, 0)
   }
 
   /// An experimental kind still runs its episode, still moves the status and still writes feature

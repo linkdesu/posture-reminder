@@ -43,12 +43,12 @@ enum PostureKind: String, CaseIterable, Equatable {
 
   /// 肩部不可用时必须闭嘴的体态。
   ///
-  /// 高低肩直接读两肩连线，驼背的一个代理读两肩的归一化宽度；歪头本身只读头部横滚、不读肩线，
-  /// 但产品口径（pr-PM，0.6.2）要求肩线不可用时一并闭嘴：拿不到可信的肩线时，上半身几何整体
-  /// 不值得提醒，宁可漏报不可误报。这三项既不发声，也不进时间轴与统计。
+  /// 高低肩直接读两肩连线，驼背的一个代理读两肩的归一化宽度，所以肩线缺失时这两个都不判——不发
+  /// 声、不进时间轴、不计统计。歪头本身只读头部横滚、不读肩线，v0.6.3 起不再受这条门控限制：
+  /// 肩线不可用时它照常判定（pr-PM 定：肩部不可用时只屏蔽高低肩与驼背）。
   var requiresShoulderLine: Bool {
     switch self {
-    case .shoulderTilt, .slouch, .headTilt: return true
+    case .shoulderTilt, .slouch: return true
     default: return false
     }
   }

@@ -172,7 +172,9 @@ final class PostureClassifierTests: XCTestCase {
 
   /// 肩线不可用时，依赖肩线的三种体态一律不判：高低肩、歪头、驼背都不越线，`dominant` 为空。
   /// 宁可漏报，也不能拿一条不存在的肩线去提醒孩子。
-  func testAnUnavailableShoulderLineSilencesEveryShoulderDependentPosture() {
+  /// v0.6.3（pr-PM）：肩线不可用时只屏蔽真正读肩线的两种体态（高低肩、驼背）；歪头只读头部
+  /// 横滚，照常越线并成为主导体态。
+  func testAnUnavailableShoulderLineSilencesOnlyThePosturesThatReadIt() {
     let withoutShoulders: (PostureSample) -> PostureSample = { sample in
       var stripped = sample
       stripped.joints.removeValue(forKey: .leftShoulder)
@@ -186,9 +188,13 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertEqual(tilted.breached[.shoulderTilt], false)
     XCTAssertFalse(reading(tilted, .shoulderTilt).isOverThreshold)
 
+    // 歪头不读肩线：同一帧在肩线缺失时仍然越线，并且就是主导体态。
     let headTilt = assess(withoutShoulders(rigged(.headTilt, rollDeg: 22.5)))
-    XCTAssertEqual(headTilt.breached[.headTilt], false)
-    XCTAssertNil(headTilt.dominant)
+    XCTAssertEqual(headTilt.breached[.headTilt], true)
+    XCTAssertEqual(headTilt.dominant, .headTilt)
+    XCTAssertEqual(PostureKind.headTilt.requiresShoulderLine, false)
+    XCTAssertEqual(PostureKind.shoulderTilt.requiresShoulderLine, true)
+    XCTAssertEqual(PostureKind.slouch.requiresShoulderLine, true)
 
     let slouch = assess(withoutShoulders(rigged(.slouch)))
     XCTAssertEqual(slouch.breached[.slouch], false)
