@@ -19,8 +19,10 @@ Checks:
        several kinds queued on one tick follow `PostureKind.priority`
   AC5  a pause is not focus time: `focusedSeconds + pausedSeconds` equals the record's
        elapsed wall time within a second, and at least one record reports a pause
-  AC7  each `postureSegments` run matches the `pomodoroDay` scenario: fifteen seconds
-       upright, thirty of the focus's posture, then upright again, per focus
+  AC7  every focus's timeline accounts for the time that focus counted: the non-paused
+       `postureSegments` runs add up to its `focusedSeconds` within a second, every run is a
+       legal kind, and the day still holds the `pomodoroDay` scenario's three one-minute
+       focuses
 
 Every check fails when its subject is missing: fewer than two ticks, no playback, no
 simultaneous queue, no history, no paused record, or no segment is a failure, never a
@@ -57,13 +59,15 @@ TICK_TOLERANCE = 0.5
 # AC5 and AC7 are stated to a second.
 SECOND_TOLERANCE = 1.0
 
-# The `pomodoroDay` scenario: a one-minute focus that sits upright for fifteen seconds,
-# holds the focus's posture for thirty, then sits upright again (Scenarios.swift).
+# The `pomodoroDay` scenario: three one-minute focuses. Their timelines are no longer three runs
+# each — v0.6 opens a `detecting` band at the 开始 tap and v0.6.1 a `no_data` band when the stream
+# stalls — so AC7 checks each timeline's total against the focus, not its shape.
 FOCUS_SECONDS = 60.0
-GOOD_SECONDS = 15.0
-BREACH_SECONDS = 30.0
-FOCUS_POSTURES = {1: "near", 2: "head_down", 3: "chin_rest"}
 FOCUS_COUNT = 3
+
+# `PostureSegment.kind`: the eight postures (`PostureKind.priority` names all of them), the two
+# states, the pause band (B2), and the two non-posture bands v0.6/v0.6.1 added.
+SEGMENT_KINDS = set(POSTURE_PRIORITY) | {"good", "no_person", "paused", "detecting", "no_data"}
 
 
 def fmt(value):
@@ -468,16 +472,12 @@ def check_ac5(records, quiet):
     return ok
 
 
-def canonical_segments(record):
-    """The record's posture runs, in time order, with adjacent same-kind runs merged.
-
-    The timeline is written from status changes, so a kind that is logged twice in a row is
-    one run; the scenario has exactly three runs per focus.
-    """
-    windows = []
+def record_segments(record):
+    """The record's timeline as (kind, start, end) runs, in time order; None when unreadable."""
     stored = record.get("postureSegments")
     if not isinstance(stored, list):
         return None
+    windows = []
     for segment in stored:
         if not isinstance(segment, dict):
             return None
@@ -488,17 +488,20 @@ def canonical_segments(record):
             return None
         windows.append((kind, start, end))
     windows.sort(key=lambda window: window[1])
-    runs = []
-    for kind, start, end in windows:
-        if runs and runs[-1][0] == kind and start <= runs[-1][2] + 0.5:
-            runs[-1] = (kind, runs[-1][1], max(runs[-1][2], end))
-        else:
-            runs.append((kind, start, end))
-    return runs
+    return windows
 
 
 def check_ac7(records, quiet):
-    """AC7: every segment of the parent's timeline matches the scripted day."""
+    """AC7: every focus's timeline accounts for the time that focus counted.
+
+    A focus used to be exactly three runs, which is why the script's fifteen/thirty/fifteen used to
+    be read position by position. v0.6 opens a `detecting` band at the 开始 tap and v0.6.1 a
+    `no_data` band when the stream stalls, so a real focus is however many runs the session needed.
+    What the timeline still owes the parent is the whole 专注时长: the non-paused runs add up to
+    `focusedSeconds` within a second — a pause is wall time outside the countdown and has a band of
+    its own — and every run is a legal kind. The day itself is still the scenario's three
+    one-minute focuses.
+    """
     if len(records) != FOCUS_COUNT:
         print(
             f"AC7 FAIL: the history holds {len(records)} record(s); the pomodoroDay scenario "
@@ -521,65 +524,51 @@ def check_ac7(records, quiet):
             print(f"AC7 FAIL: record {index} has no readable focusIndex")
             ok = False
             continue
-        # Scenarios.swift clamps the focus number at the third cycle, so a fourth focus
-        # would still be handed the third posture rather than wrapping around.
-        cycle = min(FOCUS_COUNT, int(focus_index))
-        posture = FOCUS_POSTURES[cycle]
-        expected = [
-            ("good", GOOD_SECONDS),
-            (posture, BREACH_SECONDS),
-            ("good", GOOD_SECONDS),
-        ]
 
-        runs = canonical_segments(record)
+        runs = record_segments(record)
         if runs is None or not runs:
             print(f"AC7 FAIL: record {index} carries no readable postureSegments")
             ok = False
             continue
 
-        show(
-            quiet,
-            f"\n--- record {index}: focus {int(focus_index)} expects "
-            f"good {GOOD_SECONDS:.0f}s, {posture} {BREACH_SECONDS:.0f}s, good {GOOD_SECONDS:.0f}s ---",
-        )
-        for position, (wanted_kind, wanted_seconds) in enumerate(expected, 1):
-            if position > len(runs):
-                print(
-                    f"AC7 FAIL: record {index} segment {position}: missing; "
-                    f"expected {wanted_kind} for {wanted_seconds:.2f}s"
-                )
-                ok = False
-                continue
-            kind, start, end = runs[position - 1]
-            duration = end - start
-            delta = duration - wanted_seconds
-            verdict = (
-                "PASS"
-                if kind == wanted_kind and abs(delta) <= SECOND_TOLERANCE
-                else "FAIL"
-            )
-            if verdict == "FAIL":
-                ok = False
-            line = (
-                f"AC7 {verdict}: record {index} segment {position}: {kind} "
-                f"{duration:.2f}s, expected {wanted_kind} {wanted_seconds:.2f}s "
-                f"(delta {delta:+.2f}s)"
-            )
-            if verdict == "FAIL":
-                print(line)
-            else:
-                show(quiet, line)
+        focused = number(record.get("focusedSeconds"))
+        if focused is None:
+            print(f"AC7 FAIL: record {index} has no readable focusedSeconds to add up to")
+            ok = False
+            continue
 
-        for position in range(len(expected) + 1, len(runs) + 1):
-            kind, start, end = runs[position - 1]
+        unknown = sorted({kind for kind, _start, _end in runs if kind not in SEGMENT_KINDS})
+        if unknown:
             print(
-                f"AC7 FAIL: record {index} segment {position}: unexpected {kind} "
-                f"{end - start:.2f}s, the script has no fourth run"
+                f"AC7 FAIL: record {index} segment kind(s) {', '.join(unknown)} "
+                f"outside the vocabulary"
             )
             ok = False
 
+        show(quiet, f"\n--- record {index}: focus {int(focus_index)}, {len(runs)} run(s) ---")
+        for position, (kind, start, end) in enumerate(runs, 1):
+            show(quiet, f"  {position}. {kind} {end - start:.2f}s ({fmt(start)}..{fmt(end)})")
+
+        counted = sum(end - start for kind, start, end in runs if kind != "paused")
+        delta = counted - focused
+        if abs(delta) > SECOND_TOLERANCE:
+            print(
+                f"AC7 FAIL: record {index}'s non-paused segments cover {counted:.2f}s of its "
+                f"{focused:.2f}s focus (delta {delta:+.2f}s)"
+            )
+            ok = False
+        else:
+            show(
+                quiet,
+                f"  record {index}: non-paused segments cover {counted:.2f}s of "
+                f"{focused:.2f}s (delta {delta:+.2f}s)",
+            )
+
     if ok:
-        print(f"AC7 PASS: {len(records)} focus(es), every segment matches the pomodoroDay script")
+        print(
+            f"AC7 PASS: {len(records)} focus(es), every timeline sums to its 专注时长 within a "
+            f"second and every segment kind is legal"
+        )
     return ok
 
 

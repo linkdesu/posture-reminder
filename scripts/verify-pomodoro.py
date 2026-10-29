@@ -42,8 +42,10 @@ POSTURE_KINDS = [
     "shoulder_tilt",
     "chin_rest",
 ]
-# `PostureSegment.kind`: the eight postures, the two states, and the pause band (B2).
-SEGMENT_KINDS = POSTURE_KINDS + ["good", "no_person", "paused"]
+# `PostureSegment.kind`: the eight postures, the two states, the pause band (B2), and the two
+# non-posture bands v0.6/v0.6.1 added — `detecting` (before the focus's first sample) and `no_data`
+# (the stream stalled after it). A record that carries either is not a broken timeline.
+SEGMENT_KINDS = POSTURE_KINDS + ["good", "no_person", "paused", "detecting", "no_data"]
 
 # A completed focus credits the whole plan by definition, so `focusedSeconds` is expected to land
 # on `plannedSeconds`; the slack only covers float arithmetic.
