@@ -553,10 +553,13 @@ def command_evidence(args) -> int:
         if name.startswith(("drive:", "case:")):
             results[name] = bool(entry.get("ok"))
     batch = [name for name in results if name != "offline"]
+    # ran 列出本批真跑过的全部场景：核心场景名 + drive:<场景> + case:<用例>。
+    ran_all = sorted(ran) + sorted(name for name in state.get("checks", {})
+                                   if name.startswith(("drive:", "case:")))
     if not batch:
         results["batch:nonEmpty"] = False  # 一个场景都没跑，不能算通过
     summary = {"when": now(), "runId": run_id, "results": results,
-               "ran": sorted(ran), "skipped": skipped,
+               "ran": ran_all, "skipped": skipped,
                "ok": all(results.values())}
     (rd / "verification.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     state.setdefault("checks", {})["evidence"] = {
@@ -1078,9 +1081,43 @@ def run_xcuitest(run_id: str, sim: str, test: str, out: Path, *,
                         named[stem] = str(dest.relative_to(run_dir(run_id)))
     import re
     skipped = bool(re.search(r"Test Case .*" + re.escape(test) + r".* skipped", r.stdout))
-    return {"ok": r.returncode == 0 and not skipped, "exit": r.returncode, "skipped": skipped,
-            "test": test, "xcresult": str(result_bundle.relative_to(run_dir(run_id))),
-            "attachments": named}
+    result = {"ok": r.returncode == 0 and not skipped, "exit": r.returncode, "skipped": skipped,
+              "test": test, "xcresult": str(result_bundle.relative_to(run_dir(run_id))),
+              "attachments": named}
+    xcuitest_provenance(run_id, sim, out, test, result, legacy_bundle=legacy_bundle)
+    return result
+
+
+# XCUITest 用例在 app.launch() 前设置的启动参数（与 PostureLabUITests/VerifyDriveUITests.swift 一致）。
+XCUITEST_LAUNCH_ARGS = {
+    "testDriveSettingsScrollCountsTenSettings": ["-settings", "1"],
+    "testDriveSettingsToggleFlipsAutoStartBreak": ["-settings", "1"],
+    "testDriveLegacyKeepScreenAwakeOff": ["-settings", "1"],
+    "testDriveAbandonDoesNotCountToday": ["-scenario", "pomodoroDay", "-holdStart", "1",
+                                          "-focusMinutes", "1", "-debug", "0"],
+}
+
+
+def xcuitest_provenance(run_id: str, sim: str, out: Path, test: str, result: dict, *,
+                        legacy_bundle: str | None = None) -> None:
+    """XCUITest 驱动的场景也留下 launch-args.txt、provenance.json、sandbox-audit.json，
+    给运行时沙盒审计（AC14/AC19）留证据；和 launch_and_capture 的产物同名同格式。"""
+    args = XCUITEST_LAUNCH_ARGS.get(test, [])
+    (out / "launch-args.txt").write_text(" ".join(args) + "\n")
+    c = sh(["xcrun", "simctl", "get_app_container", sim, BUNDLE, "data"], check=False)
+    container = c.stdout.strip() if c.returncode == 0 else ""
+    audit_exit = None
+    if container:
+        audit = audit_sandbox(container, out / "sandbox-audit.json")
+        (out / "sandbox-audit.txt").write_text(audit.stdout + audit.stderr + f"\n[exit {audit.returncode}]\n")
+        audit_exit = audit.returncode
+    version, build = installed_version(sim)
+    write_json(out / "provenance.json", {
+        "scenario": out.name, "driver": "xcuitest", "test": f"{UI_TEST_CLASS}/{test}",
+        "launchArgs": args, "testExit": result.get("exit"), "testSkipped": result.get("skipped"),
+        "legacyBundle": legacy_bundle, "installed": f"{version} ({build})",
+        "gitSha": FROZEN_SHA, "container": container, "sandboxAuditExit": audit_exit,
+        "xcresult": result.get("xcresult"), "when": now()})
 
 
 def kv_text(path: Path) -> dict:
@@ -1257,9 +1294,10 @@ def drive_break_count(run_id: str, state: dict, sim: str) -> int:
     return 0 if ok else 1
 
 
-def judge_abandon_count(ui: dict, ocr_before, ocr_after) -> tuple[bool, str]:
-    """离开计数的判定：真点了「离开」、界面读到的前后计数相等，截图 OCR 读到的也相等且与界面一致。"""
-    before, after = ui.get("before"), ui.get("after")
+def judge_abandon_count(ui: dict, ocr_before, ocr_after, expected_goal: int | None = None) -> tuple[bool, str]:
+    """离开计数的判定：真点了「离开」；界面与截图 OCR 读到的分子前后相等且一致；
+    分母 goal 在界面、离开前后两张截图里一致，并等于设置里的每日目标 expected_goal。"""
+    before, after, goal = ui.get("before"), ui.get("after"), ui.get("goal")
     reasons = []
     if ui.get("endTapped") != "true":
         reasons.append("没有真点到「离开」")
@@ -1271,8 +1309,18 @@ def judge_abandon_count(ui: dict, ocr_before, ocr_after) -> tuple[bool, str]:
         reasons.append(f"截图 OCR 计数 {ob}→{oa}")
     elif str(oa) != str(after):
         reasons.append(f"OCR {oa} 与界面 {after} 不一致")
+    gb = ocr_before[1] if ocr_before else None
+    ga = ocr_after[1] if ocr_after else None
+    if goal in (None, "nil") or str(gb) != str(goal) or str(ga) != str(goal):
+        reasons.append(f"分母不一致：界面 {goal}，OCR {gb}→{ga}")
+    elif expected_goal is not None and str(goal) != str(expected_goal):
+        reasons.append(f"分母 {goal} 不等于设置的每日目标 {expected_goal}")
     ok = not reasons
-    return ok, (f"离开前 {before} → 离开后 {after}（OCR {ob}→{oa}）" if ok else "；".join(reasons))
+    return ok, (f"离开前 {before}/{goal} → 离开后 {after}/{goal}（OCR {ob}/{gb}→{oa}/{ga}）" if ok
+                else "；".join(reasons))
+
+
+DEFAULT_DAILY_GOAL = 4  # PomodoroSettings.dailyGoal 的默认值
 
 
 def drive_abandon_count(run_id: str, state: dict, sim: str) -> int:
@@ -1291,14 +1339,18 @@ def drive_abandon_count(run_id: str, state: dict, sim: str) -> int:
         counts[stem] = today_count(texts)
     copy_documents(container_sim(sim), out / "Documents")
     terminate_sim(sim)
+    # 每日目标：App 偏好里存过就用存的，没存过就是默认值。
+    expected_goal = settings_blob(read_defaults(sim)).get("dailyGoal", DEFAULT_DAILY_GOAL)
     history = history_file(out)
     records = json.loads(history.read_text()) if history.exists() else []
     outcomes = [r.get("outcome") for r in records]
-    ok, detail = judge_abandon_count(ui, counts["drive-abandon-before"], counts["drive-abandon-after"])
+    ok, detail = judge_abandon_count(ui, counts["drive-abandon-before"], counts["drive-abandon-after"],
+                                     expected_goal)
     history_ok = outcomes.count("abandoned") >= 1 and "completed" not in outcomes
     ok = ok and history_ok and test["ok"]
     write_json(out / "abandon-count.json", {"ok": ok, "test": test, "ui": ui, "ocr": counts,
-                                            "historyOutcomes": outcomes, "when": now()})
+                                            "historyOutcomes": outcomes, "expectedGoal": expected_goal,
+                                            "when": now()})
     check(state, "drive:abandon-count", ok, f"{detail}；历史 {outcomes}；XCUITest exit={test.get('exit')}")
     write_state(run_id, state)
     return 0 if ok else 1
