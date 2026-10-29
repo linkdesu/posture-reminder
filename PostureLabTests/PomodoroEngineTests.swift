@@ -338,6 +338,13 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertNil(PomodoroSettings.value(fromManualEntry: "5.5", for: "focusMinutes"))
     XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "-5", for: "focusMinutes"), 5)
     XCTAssertNil(PomodoroSettings.value(fromManualEntry: "10", for: "endSound"))
+
+    // More digits than `Int` holds is still digits, not a discarded entry: the magnitude is past
+    // every range, so the typed number clamps to the end its sign points at instead of being kept.
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "999999999999999999999", for: "focusMinutes"), 60)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "-999999999999999999999", for: "focusMinutes"), 5)
+    XCTAssertEqual(PomodoroSettings.value(fromManualEntry: "999999999999999999999", for: "dailyGoal"), 12)
+    XCTAssertNil(PomodoroSettings.value(fromManualEntry: "-", for: "focusMinutes"))
   }
 
   /// Every integer setting refuses to hold zero, whichever way the value arrived.

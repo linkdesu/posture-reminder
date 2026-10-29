@@ -81,12 +81,23 @@ struct PomodoroSettings: Equatable, Codable {
   ///
   /// Nil means "not a number this row can use", and every caller answers that the same way: the
   /// value the row already held is kept, so unparsable text can neither crash nor be stored.
+  ///
+  /// Digits that overflow `Int` are still a number. Their magnitude is past every range this table
+  /// holds, so they clamp to the end their sign points at — a typed 21-digit value becomes the
+  /// setting's maximum, never the old value. Discarding it would silently keep a number the parent
+  /// did not type.
   static func value(fromManualEntry text: String, for key: String) -> Int? {
     guard ranges[key] != nil else { return nil }
-    let digits = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let characters = text.trimmingCharacters(in: .whitespacesAndNewlines)
       .map(Self.asciiDigit)
-    guard !digits.isEmpty, let number = Int(String(digits)) else { return nil }
-    return clamp(number, for: key)
+    guard !characters.isEmpty else { return nil }
+    if let number = Int(String(characters)) { return clamp(number, for: key) }
+
+    var magnitude = characters[...]
+    let negative = magnitude.first == "-"
+    if negative { magnitude = magnitude.dropFirst() }
+    guard !magnitude.isEmpty, magnitude.allSatisfy({ $0.isNumber }) else { return nil }
+    return clamp(negative ? Int.min : Int.max, for: key)
   }
 
   /// A full-width digit as its ASCII counterpart; anything else unchanged.
