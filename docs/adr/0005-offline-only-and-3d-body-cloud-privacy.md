@@ -40,3 +40,9 @@ PostureLab **从构造上就是离线的**：没有网络权限、没有 HTTP �
 - 本轮及以后任何“回到预览”的改动都必须新开 ADR，而不是再次修订本节。
 
 详见 ADR-0007。
+
+## 修订（0.5）
+
+**修订后**：应用容器内不再出现任何图像文件。`FileDebugLogger` 的页面截图改为只渲染到内存（最近一帧保留在 `latestScreenshot`），不再写 `Documents/debug/screenshots/*.png`；验收留档截图由设备侧命令（`simctl io screenshot` / `devicectl`）拍摄，存在于证据目录而不是应用沙盒。
+
+**为什么改**：QA 的隐私口径已经从「不落盘原始 RGB/深度」收紧为「App 容器内不能有 png/jpg/heic/mov/mp4 等文件」。自绘调试图虽然不是相机帧，但按字面口径仍属图像文件，而且没有任何功能读取它。`scripts/audit-sandbox.py` 现在把 `.png` 列为禁止后缀，`scripts/verify-session.py` 的 P2 直接检查 `Documents/` 下没有图像文件。

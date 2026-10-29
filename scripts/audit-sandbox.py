@@ -14,10 +14,11 @@ leave no raw frames or depth data on disk after a monitoring round. This script 
 how that is checked: it classifies every file, fails on anything that could hold
 imagery or raw sensor data, and prints a manifest as the evidence.
 
-Allowed: the JSONL session logs, the debug screenshots (PNG, written from the
-artistic canvas), the session summary file, and the app's own preferences. Anything
-else is a finding, apart from the system-owned paths described below. Exit code 0 only
-when there are no findings.
+Allowed: the JSONL session logs, the pomodoro history, and the app's own
+preferences. Anything else is a finding, apart from the system-owned paths described
+below. Images are never allowed: the debug screenshots live in memory only (ADR-0005),
+so a PNG in the container is a finding like any other. Exit code 0 only when there are
+no findings.
 
 AC19 also asks whether *anything* was left behind, so the runner points this at the
 whole container rather than only at the Documents subtree it collects as evidence. A
@@ -37,7 +38,7 @@ import json
 import os
 import sys
 
-ALLOWED_SUFFIXES = {".jsonl", ".json", ".plist", ".png", ".txt"}
+ALLOWED_SUFFIXES = {".jsonl", ".json", ".plist", ".txt"}
 ALLOWED_NAMES = {"sessions.json"}
 # Suffixes iOS itself creates under Library/: .ktx is the SplashBoard snapshot, .data and
 # .list are the Metal cache, .db/.sqlite/.strings are caches and localised strings. Some
@@ -53,7 +54,7 @@ SYSTEM_DIRS = (
 SYSTEM_BASENAME_PREFIX = ".com.apple."
 # Anything here means a real frame or raw sensor data reached the disk.
 FORBIDDEN_SUFFIXES = {
-    ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".bmp", ".gif", ".webp",
+    ".png", ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".bmp", ".gif", ".webp",
     ".mp4", ".mov", ".m4v", ".avi", ".h264", ".hevc",
     ".dng", ".raw", ".bin", ".exr", ".pfm", ".npy", ".npz", ".tflite", ".mlmodel",
 }
@@ -66,15 +67,6 @@ def digest(path: str, limit: int = 1 << 20) -> str:
         chunk = handle.read(limit)
         h.update(chunk)
     return h.hexdigest()[:16]
-
-
-def png_size(path: str):
-    """Read width and height from a PNG's IHDR, without decoding the image."""
-    with open(path, "rb") as handle:
-        header = handle.read(24)
-    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
-        return None
-    return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
 
 
 def walk(root: str):
@@ -108,7 +100,7 @@ def main():
 
     findings = []
     manifest = []
-    counts = {"jsonl": 0, "png": 0, "other": 0, "system": 0}
+    counts = {"jsonl": 0, "other": 0, "system": 0}
     splashboard = []
 
     for path in walk(args.root):
@@ -140,15 +132,7 @@ def main():
         if any(hint in lowered for hint in FORBIDDEN_HINTS):
             findings.append(f"{rel}: name suggests raw imagery or sensor data")
 
-        if suffix == ".png":
-            counts["png"] += 1
-            size_px = png_size(path)
-            entry["png"] = list(size_px) if size_px else None
-            if size_px is None:
-                findings.append(f"{rel}: not a readable PNG")
-            elif size_px[0] < 100 or size_px[1] < 100:
-                findings.append(f"{rel}: {size_px[0]}x{size_px[1]} is far too small to be a debug screenshot")
-        elif suffix == ".jsonl":
+        if suffix == ".jsonl":
             counts["jsonl"] += 1
             with open(path, encoding="utf-8", errors="replace") as handle:
                 first = handle.readline()
@@ -166,7 +150,7 @@ def main():
         manifest.append(entry)
 
     print(f"audited {len(manifest)} file(s) under {args.root}")
-    print(f"  jsonl {counts['jsonl']}, png {counts['png']}, other {counts['other']}")
+    print(f"  jsonl {counts['jsonl']}, other {counts['other']}")
     print(f"  system-owned {counts['system']} (iOS-written; classified per file, not reported as a finding)")
     if splashboard:
         print(f"    {len(splashboard)} of them under Library/SplashBoard: UIKit's own snapshot of this app's")
@@ -184,9 +168,7 @@ def main():
             print(f"  {finding}")
         return 1
 
-    print("AC14/AC19 PASS: no frame, image or raw sensor file, and every screenshot is a PNG")
-    print("  note: whether a screenshot is recognisably artistic rather than a real face is a")
-    print("  human judgement; open the PNGs in the evidence directory to check that part")
+    print("AC14/AC19 PASS: no frame, image or raw sensor file; the container holds no image at all")
     return 0
 
 

@@ -178,7 +178,7 @@ run_case() {
       --expect-features --expect-posture-stats "${extra_verify[@]}" "$@" || FAILED=1
   fi
 
-  # AC13 also says the highlight is visible in a screenshot, which no log can show.
+  # AC13's highlight is checked against the log's own `over` flags; v0.5 writes no screenshot.
   local overlay overlay_status
   overlay=$(python3 scripts/check-overlay.py "$log" --quiet 2>&1)
   overlay_status=$?
