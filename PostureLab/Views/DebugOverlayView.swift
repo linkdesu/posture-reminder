@@ -27,8 +27,11 @@ struct DebugOverlayView: View {
           guard let geometry else { return }
           drawSkeleton(geometry, in: &context, size: size)
         }
-        featureTable()
-          .padding(16)
+        VStack(alignment: .leading, spacing: 6) {
+          jointTable()
+          featureTable()
+        }
+        .padding(16)
       }
       .allowsHitTesting(false)
     }
@@ -37,8 +40,9 @@ struct DebugOverlayView: View {
   // MARK: - Skeleton
 
   /// Nose-eye-ear down each side, neck to both shoulders, arms to the wrists, neck to root and root
-  /// to both hips. The rig and the Vision vocabulary stop at the hips; there are no knees or ankles
-  /// to draw, so the label table names exactly the joints that exist.
+  /// to both hips. The depth source never estimates eyes, ears, elbows or wrists, so those chains
+  /// appear only when the joints behind them exist; the joint table below names all fifteen and marks
+  /// the missing ones 不可用.
   private static let chains: [(JointID, JointID)] = [
     (.nose, .leftEye), (.leftEye, .leftEar),
     (.nose, .rightEye), (.rightEye, .rightEar),
@@ -97,6 +101,31 @@ struct DebugOverlayView: View {
                                       y: centre.y - 9),
                    anchor: .leading)
     }
+  }
+
+  // MARK: - Joint table
+
+  /// All fifteen joint names, five to a row, each carrying its own availability: a filled name is a
+  /// joint this frame measured, a struck-through dim one is a joint the depth source could not
+  /// measure. Nothing on the screen ever shows a joint that is not in the list.
+  private func jointTable() -> some View {
+    let columns = Array(repeating: GridItem(.fixed(58), spacing: 4, alignment: .leading),
+                        count: 5)
+    let joints = geometry?.joints ?? [:]
+    return LazyVGrid(columns: columns, alignment: .leading, spacing: 2) {
+      ForEach(JointID.allCases, id: \.self) { id in
+        let available = joints[id] != nil
+        Text(id.debugName)
+          .font(.system(size: 9, weight: available ? .semibold : .regular))
+          .foregroundStyle(available ? Color.white.opacity(0.8) : Color.white.opacity(0.28))
+          .strikethrough(!available, color: Color.white.opacity(0.28))
+          .accessibilityLabel("\(id.debugName) \(available ? "可用" : "不可用")")
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 7)
+    .frame(maxWidth: 320, alignment: .leading)
+    .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
   }
 
   // MARK: - Feature table
@@ -187,17 +216,17 @@ enum PostureFeatureSource {
   static func formula(_ feature: PostureFeature) -> String {
     switch feature {
     case .distance:
-      return "距离 = 脸到相机的距离（ARKit 脸位姿）"
+      return "距离 = 头部区域深度中位数到相机（深度图）"
     case .headPitch:
-      return "低头角度 = 基线俯仰 − 当前脸俯仰"
+      return "低头角度 = 基线俯仰 − 头部深度平面俯仰"
     case .headRoll:
-      return "歪头 = |当前脸滚转 − 基线滚转|"
+      return "歪头 = |头部深度平面滚转 − 基线滚转|"
     case .shoulderTilt:
       return "肩线 = 左肩-右肩连线与水平夹角 − 基线"
     case .headHeightDrop:
-      return "头高 = 鼻尖 y − 基线头高"
+      return "头高 = 头中心 y − 基线头高"
     case .handToFace:
-      return "手到脸 = min(左腕、右腕 到 鼻尖 的距离)"
+      return "手到脸 = min(左腕、右腕 到 鼻尖的距离)；深度版无腕关节"
     case .headForward:
       return "头前伸 = 基线鼻深 − 当前鼻深"
     case .slouch:

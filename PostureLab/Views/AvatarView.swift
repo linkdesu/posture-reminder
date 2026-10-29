@@ -24,38 +24,33 @@ enum PoseProjection {
   }
 }
 
-/// The child as a 3D point cloud. `BodyCloud` samples a head, a torso and two arms from the joints,
-/// and this view projects those points through a camera fixed in front of the body: a point nearer
-/// than the body's mean depth is magnified and brightened, a farther one shrunk and dimmed, and each
-/// point's radius follows its own perspective. Nothing else is drawn, so the figure — not a
-/// wallpaper of dots — is all that appears on the black ground.
+/// The child as a 3D point cloud. When the depth source has a mask, the points are that mask's own
+/// cells — `DepthCloud` samples them straight from the depth frame — projected through a camera fixed
+/// in front of the body: a point nearer than the body's mean depth is magnified and brightened, a
+/// farther one shrunk and dimmed, and each point's radius follows its own perspective. A geometry
+/// without a cloud (a scripted rig) falls back to `BodyCloud`, which derives volumes from the joints.
 ///
 /// The parts the dominant posture blames take that posture's colour from `PosturePalette`, exactly as
-/// they do in the report. With no joints the view draws a quiet ring of dim dots and nothing else.
+/// they do in the report. With no body at all the view draws a vector silhouette — a head, shoulders
+/// and a torso in outline — so the ground is never a blank warning and never a camera picture.
 ///
 /// It never renders an image, never touches a camera and never writes to disk; RGB is not an input it
 /// can even express. Pure, so the same geometry draws the same cloud twice.
 struct AvatarView: View {
   private let geometry: PoseGeometry?
   private let assessment: PostureAssessment?
-  /// Whether the canvas paints the black ground itself. Off when the camera preview is behind it, so
-  /// the cloud and its dim empty ring sit on the live picture instead of hiding it.
-  private let drawsGround: Bool
 
-  init(geometry: PoseGeometry?, assessment: PostureAssessment?, drawsGround: Bool = true) {
+  init(geometry: PoseGeometry?, assessment: PostureAssessment?) {
     self.geometry = geometry
     self.assessment = assessment
-    self.drawsGround = drawsGround
   }
 
   var body: some View {
-    Canvas(opaque: drawsGround, rendersAsynchronously: false) { context, size in
-      if drawsGround {
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
-      }
+    Canvas(opaque: true, rendersAsynchronously: false) { context, size in
+      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
 
       guard let geometry, !geometry.joints.isEmpty else {
-        drawEmptyState(in: &context, size: size)
+        drawSilhouette(in: &context, size: size)
         return
       }
       draw(geometry, in: &context, size: size)
@@ -69,9 +64,9 @@ struct AvatarView: View {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
 
-    let points = BodyCloud.points(for: geometry.joints)
+    let points = geometry.cloud.isEmpty ? BodyCloud.points(for: geometry.joints) : geometry.cloud
     guard !points.isEmpty else {
-      drawEmptyState(in: &context, size: size)
+      drawSilhouette(in: &context, size: size)
       return
     }
 
@@ -194,20 +189,51 @@ struct AvatarView: View {
 
   // MARK: - Empty state
 
-  /// A quiet ring of dim dots: honest about having nothing to show without looking broken, and
-  /// deliberately without a face, since there is no one to draw one for. This is the only time the
-  /// view draws anything but the body cloud.
-  private func drawEmptyState(in context: inout GraphicsContext, size: CGSize) {
-    let centre = CGPoint(x: size.width / 2, y: size.height / 2)
-    let ink = Color.white.opacity(0.10)
+  /// A vector silhouette of a seated upper body — head, neck, shoulders and torso in outline — for
+  /// the moment before the depth sensor has a body to show. It is drawn with paths, not a picture: it
+  /// is a place, not a person, and it deliberately has no face. This is the only thing the view draws
+  /// besides the cloud.
+  private func drawSilhouette(in context: inout GraphicsContext, size: CGSize) {
+    let rect = PoseProjection.rect(in: size)
+    guard rect.width > 0, rect.height > 0 else { return }
 
-    for index in 0..<12 {
-      let angle = Double(index) / 12 * 2 * Double.pi
-      let point = CGPoint(x: centre.x + CGFloat(cos(angle)) * 26,
-                          y: centre.y + CGFloat(sin(angle)) * 26)
-      let dot = CGRect(x: point.x - 1.2, y: point.y - 1.2, width: 2.4, height: 2.4)
-      context.fill(Path(ellipseIn: dot), with: .color(ink))
-    }
+    let ink = Color.white.opacity(0.14)
+    let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round, dash: [5, 5])
+
+    // Head: a circle sitting where the head band of a real mask lands.
+    let headRadius = rect.width * 0.075
+    let headCentre = PoseProjection.point(CGPoint(x: 0.5, y: 0.30), in: rect)
+    let head = Path(ellipseIn: CGRect(x: headCentre.x - headRadius,
+                                      y: headCentre.y - headRadius * 1.1,
+                                      width: headRadius * 2,
+                                      height: headRadius * 2.2))
+    context.stroke(head, with: .color(ink), style: stroke)
+
+    // Shoulders and torso: one continuous outline, narrower at the neck and flaring at the shoulder
+    // line, so the shape reads as a seated child rather than a rectangle.
+    var body = Path()
+    body.move(to: CGPoint(x: headCentre.x, y: headCentre.y + headRadius * 1.25))
+    body.addLine(to: CGPoint(x: headCentre.x, y: headCentre.y + headRadius * 1.7))
+    body.addCurve(to: PoseProjection.point(CGPoint(x: 0.24, y: 0.52), in: rect),
+                  control1: PoseProjection.point(CGPoint(x: 0.41, y: 0.40), in: rect),
+                  control2: PoseProjection.point(CGPoint(x: 0.27, y: 0.44), in: rect))
+    body.addCurve(to: PoseProjection.point(CGPoint(x: 0.32, y: 0.78), in: rect),
+                  control1: PoseProjection.point(CGPoint(x: 0.21, y: 0.62), in: rect),
+                  control2: PoseProjection.point(CGPoint(x: 0.28, y: 0.72), in: rect))
+    body.move(to: PoseProjection.point(CGPoint(x: 0.68, y: 0.78), in: rect))
+    body.addCurve(to: PoseProjection.point(CGPoint(x: 0.76, y: 0.52), in: rect),
+                  control1: PoseProjection.point(CGPoint(x: 0.72, y: 0.72), in: rect),
+                  control2: PoseProjection.point(CGPoint(x: 0.79, y: 0.62), in: rect))
+    body.addCurve(to: CGPoint(x: headCentre.x, y: headCentre.y + headRadius * 1.7),
+                  control1: PoseProjection.point(CGPoint(x: 0.73, y: 0.44), in: rect),
+                  control2: PoseProjection.point(CGPoint(x: 0.59, y: 0.40), in: rect))
+    context.stroke(body, with: .color(ink), style: stroke)
+
+    // The base of the silhouette, closed so the outline reads as one figure.
+    var base = Path()
+    base.move(to: PoseProjection.point(CGPoint(x: 0.32, y: 0.78), in: rect))
+    base.addLine(to: PoseProjection.point(CGPoint(x: 0.68, y: 0.78), in: rect))
+    context.stroke(base, with: .color(ink), style: stroke)
   }
 }
 
