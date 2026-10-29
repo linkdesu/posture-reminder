@@ -19,16 +19,30 @@ private func absentSamples(_ count: Int, from start: TimeInterval = 0) -> [Postu
   }
 }
 
-@discardableResult
-private func feed(_ engine: inout PomodoroEngine, _ stream: [PostureSample]) -> [PomodoroEvent] {
-  stream.flatMap { engine.ingest($0) }
+/// The engine's clock, driven by the test: every sample sets it to that sample's `t`, so the runs
+/// below read exactly as they did when the sample stream was the only clock.
+private final class TestClock {
+  var now: TimeInterval = 0
 }
 
 final class PomodoroEngineTests: XCTestCase {
   /// Epoch zero, so a record's epoch seconds are the same numbers as the sample clock and every
   /// expectation below can be a literal.
+  private let clock = TestClock()
+
   private func makeEngine(_ settings: PomodoroSettings = PomodoroSettings()) -> PomodoroEngine {
-    PomodoroEngine(settings: settings, startedAt: Date(timeIntervalSince1970: 0))
+    clock.now = 0
+    return PomodoroEngine(settings: settings, now: { [clock] in clock.now })
+  }
+
+  /// Feeds a run of samples, moving the engine's wall clock to each sample's `t` first, which is
+  /// what a camera tick does.
+  @discardableResult
+  private func feed(_ engine: inout PomodoroEngine, _ stream: [PostureSample]) -> [PomodoroEvent] {
+    stream.flatMap { sample in
+      clock.now = sample.t
+      return engine.ingest(sample)
+    }
   }
 
   // MARK: - Settings
@@ -481,7 +495,8 @@ final class PomodoroEngineTests: XCTestCase {
     _ = engine.command(.start)
     feed(&engine, samples(1_000))
 
-    let events = engine.finish(at: 100)
+    clock.now = 100
+    let events = engine.finish()
     XCTAssertEqual(events.count, 2)
     guard case .abandoned(let record) = events[0] else {
       return XCTFail("expected an abandoned pomodoro")
@@ -491,5 +506,68 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(record.focusedSeconds, 100)
     XCTAssertEqual(events[1], .finishedAll)
     XCTAssertEqual(engine.isRunning, false)
+  }
+  // MARK: - Wall clock (v0.6)
+
+  /// The countdown is the wall clock's, not the sample stream's: with the clock moved and no sample
+  /// at all, the timer still counts down and still completes. This is what lets a focus keep time
+  /// during the「识别中」gap, when the camera has not produced its first frame yet.
+  func testTheCountdownAdvancesWithoutAnySample() {
+    var settings = PomodoroSettings()
+    settings.focusMinutes = 1
+    var engine = makeEngine(settings)
+    _ = engine.command(.start)
+
+    clock.now = 0.5
+    XCTAssertEqual(engine.tick(), [])
+    XCTAssertEqual(engine.remainingSeconds, 59.5, accuracy: 1e-9)
+
+    clock.now = 59.9
+    XCTAssertEqual(engine.tick(), [])
+    XCTAssertEqual(engine.remainingSeconds, 0.1, accuracy: 1e-9)
+
+    clock.now = 60
+    let events = engine.tick()
+    XCTAssertEqual(events.count, 2)
+    guard case .completed(let record) = events[0] else {
+      return XCTFail("expected a completed pomodoro")
+    }
+    XCTAssertEqual(record.focusedSeconds, 60)
+    XCTAssertEqual(record.endedAt, 60)
+  }
+
+  /// The focus is stamped with the instant of the tap: the record's `startedAt` is the clock the
+  /// start command read, not the last sample the camera delivered before it.
+  func testTheStartCommandStampsTheFocusWithTheWallClock() {
+    var engine = makeEngine()
+    feed(&engine, samples(10))          // the camera ran a second before the tap
+    clock.now = 1_000
+    _ = engine.command(.start)
+
+    XCTAssertEqual(engine.record.startedAt, 1_000)
+
+    // The first sample arrives 1.4 s later, and the countdown is already 1.4 s into the plan.
+    clock.now = 1_001.4
+    _ = engine.ingest(PostureSample(t: 11.4, distanceCM: 40, pitchDeg: 15))
+    XCTAssertEqual(engine.remainingSeconds, 1498.6, accuracy: 1e-9)
+    XCTAssertEqual(engine.record.focusedSeconds, 1.4, accuracy: 1e-9)
+  }
+
+  /// A focus that closes with no sample ever arrives still reports against its plan: the record is
+  /// abandoned with the focus time the wall clock gave it.
+  func testFinishWithNoSampleEverKeepsTheElapsedWallClock() {
+    var engine = makeEngine()
+    clock.now = 500
+    _ = engine.command(.start)
+    clock.now = 530
+    let events = engine.finish()
+
+    guard case .abandoned(let record) = events[0] else {
+      return XCTFail("expected an abandoned pomodoro")
+    }
+    XCTAssertEqual(record.startedAt, 500)
+    XCTAssertEqual(record.endedAt, 530)
+    XCTAssertEqual(record.focusedSeconds, 30, accuracy: 1e-9)
+    XCTAssertEqual(events[1], .finishedAll)
   }
 }

@@ -215,4 +215,28 @@ final class PomodoroHistoryTests: XCTestCase {
     XCTAssertTrue(store.records.isEmpty)
     XCTAssertTrue(PomodoroStore(fileURL: url).records.isEmpty)
   }
+
+  /// v0.6: the「识别中」band is on the timeline but is not a posture. It adds no bad-posture seconds,
+  /// no good seconds and no denominator, so a focus whose camera answered late is scored on what was
+  /// actually measured rather than on the wait.
+  func testDetectingBandIsDrawnButNotScoredAsPosture() {
+    let base = date(2026, 10, 20, hour: 9)
+    let near = PostureKind.near.rawValue
+    let segments = [
+      segment(PostureSegment.detectingKind, from: base, start: 0, end: 1.4),
+      segment(near, from: base, start: 1.4, end: 11.4),
+      segment(PostureStatus.good.rawValue, from: base, start: 11.4, end: 60),
+    ]
+    let entry = record(startedAt: base, focusedSeconds: 60, segments: segments)
+
+    let day = PomodoroHistory.day([entry], on: base, calendar: calendar)
+
+    XCTAssertEqual(day.segments, segments)
+    XCTAssertEqual(seconds(day, near), 10, accuracy: 1e-9)
+    XCTAssertNil(day.postureSeconds[PostureSegment.detectingKind])
+    XCTAssertEqual(day.postureSeconds.values.reduce(0, +), 10, accuracy: 1e-9,
+                   "detecting must not add seconds to any posture")
+    XCTAssertEqual(day.goodRatio, 48.6 / 58.6, accuracy: 1e-9,
+                   "the wait is not in the ratio's denominator")
+  }
 }
