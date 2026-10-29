@@ -118,23 +118,26 @@ final class PerfMonitor {
   }
 
   /// 纯函数，便于在测试里核对字段与换算。
-  private static func line(window: Double,
-                           frames: Int,
-                           gap: TimeInterval,
-                           jointTotal: TimeInterval,
-                           jointMax: TimeInterval,
-                           jointCalls: Int,
-                           assessments: Int) -> String {
+  static func line(window: Double,
+                   frames: Int,
+                   gap: TimeInterval,
+                   jointTotal: TimeInterval,
+                   jointMax: TimeInterval,
+                   jointCalls: Int,
+                   assessments: Int) -> String {
     let fps = Double(frames) / window
     let jointAverage = jointCalls > 0 ? jointTotal / Double(jointCalls) : 0
     let epochMilliseconds = Int((Date().timeIntervalSince1970 * 1000).rounded())
-    return String(
-      format: "{\"t\":%d,\"frames\":%d,\"fps\":%.1f,\"frame_gap_ms\":%.1f,"
-        + "\"joint_ms_avg\":%.2f,\"joint_ms_max\":%.2f,\"joint_calls\":%d,"
-        + "\"assess_count\":%d,\"window_s\":%.2f}",
-      epochMilliseconds, frames, fps, gap * 1000,
-      jointAverage * 1000, jointMax * 1000, jointCalls,
-      assessments, window)
+    // 整数用插值而不是 %d：epoch 毫秒是 64 位，`%d` 会把它截成 32 位，QA 会读到负数。
+    return "{\"t\":\(epochMilliseconds)"
+      + ",\"frames\":\(frames)"
+      + ",\"fps\":\(String(format: "%.1f", fps))"
+      + ",\"frame_gap_ms\":\(String(format: "%.1f", gap * 1000))"
+      + ",\"joint_ms_avg\":\(String(format: "%.2f", jointAverage * 1000))"
+      + ",\"joint_ms_max\":\(String(format: "%.2f", jointMax * 1000))"
+      + ",\"joint_calls\":\(jointCalls)"
+      + ",\"assess_count\":\(assessments)"
+      + ",\"window_s\":\(String(format: "%.2f", window))}"
   }
 }
 #endif
