@@ -6,6 +6,9 @@ import SwiftUI
 /// other screens, and both are reached from the two icons on it.
 struct RootView: View {
   @EnvironmentObject private var controller: SessionController
+  /// The scene's own visibility. Reported from here rather than from `PostureLabApp.init` because a
+  /// view only exists after `UIApplicationMain`, which is when `UIApplication.shared` exists too.
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     Group {
@@ -21,7 +24,14 @@ struct RootView: View {
           .onAppear { controller.didShow(reportScreenName) }
       }
     }
-    .task { controller.autoStartIfSimulating() }
+    .task {
+      // The first report arms the screen rule (and tells it the app is on screen right now).
+      controller.scenePhaseChanged(isActive: scenePhase == .active)
+      controller.autoStartIfSimulating()
+    }
+    .onChange(of: scenePhase) { _, phase in
+      controller.scenePhaseChanged(isActive: phase == .active)
+    }
   }
 
   /// The capture script can only identify a screen by the screenshot file its `didShow` writes, and the

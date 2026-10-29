@@ -112,6 +112,15 @@ final class SessionController: ObservableObject {
 
   private let player: ReminderPlayer
 
+  /// Holds the screen awake for a counting focus and for nothing else (`IdleTimerPolicy`). Injected
+  /// so a test can pass a fake application instead of `UIApplication.shared`.
+  private let idleTimer: IdleTimerController
+  /// Whether the scene is on screen. A backgrounded app releases the idle timer until it returns.
+  private var sceneActive = true
+  /// Whether the scene has reported its phase. The launch path runs before `UIApplicationMain`, so it
+  /// must not touch the idle timer: the first write waits for the scene to say it is on screen.
+  private var idleTimerArmed = false
+
   private var engine: MonitoringEngine?
   private var inputSource: SampleSource?
   /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
@@ -175,12 +184,14 @@ final class SessionController: ObservableObject {
        scenarios: [Scenario] = [],
        pomodoroStore: PomodoroStore = PomodoroStore(),
        pomodoroSettings: PomodoroSettingsStore = PomodoroSettingsStore(),
+       idleTimer: IdleTimerController? = nil,
        now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
     self.settings = settings
     self.logger = logger
     self.scenarios = scenarios
     self.pomodoroStore = pomodoroStore
     self.pomodoroSettings = pomodoroSettings
+    self.idleTimer = idleTimer ?? IdleTimerController()
     self.now = now
     player = ReminderPlayer(settings: settings, logger: logger)
 
@@ -205,6 +216,8 @@ final class SessionController: ObservableObject {
           guard let self else { return }
           self.pomodoro?.update(settings: values)
           self.applyPomodoroAudio(values)
+          // The 保持屏幕常亮 switch is part of the policy, so it takes effect on the focus in flight.
+          self.syncIdleTimer()
         }
       }
       .store(in: &pomodoroObservers)
@@ -225,6 +238,15 @@ final class SessionController: ObservableObject {
   var isSimulating: Bool { !scenarios.isEmpty }
 
   private var simulatedScenario: Scenario? { scenarios.first }
+
+  /// The scene's activity, reported by `RootView`'s `scenePhase`. The first report is what arms the
+  /// idle timer: a backgrounded app never holds the screen awake, and coming back while a focus still
+  /// counts holds it again.
+  func scenePhaseChanged(isActive: Bool) {
+    idleTimerArmed = true
+    sceneActive = isActive
+    syncIdleTimer()
+  }
 
   // MARK: - Navigation
 
@@ -765,7 +787,7 @@ final class SessionController: ObservableObject {
   private func finishPomodoroRun() {
     endPomodoroRun()
     stopInput()
-    restoreScreen()
+    // The run is over, so nothing counts: the refresh releases the screen like any other state.
     refreshPomodoroSnapshot()
   }
 
@@ -779,17 +801,34 @@ final class SessionController: ObservableObject {
     // A source counts from zero; the shared clock carries on where the last one stopped. Without this
     // a second source would rewind the countdown and the posture clock with it.
     pomodoroClockOffset = pomodoroLastT
-    if pomodoroSettings.settings.keepScreenAwake {
-      UIApplication.shared.isIdleTimerDisabled = true
-    }
     source.start()
+    // Nothing is counting at a source start: a parked focus waits for 开始, so the screen is free to
+    // sleep, and the policy says so wherever 开始 is pressed.
+    syncIdleTimer()
   }
 
   private var pomodoroRunLive: Bool { pomodoroStarted && !pomodoroRunFinished }
 
+  /// The screen's one rule: a counting focus holds it awake, and every other state - a break, a
+  /// pause the child pressed, an absence suspension, a finished run, a backgrounded app - releases
+  /// it. The counting part is read through `IdleTimerPolicy`, which is the same definition the tests
+  /// drive.
+  private func syncIdleTimer() {
+    // The launch path runs before `UIApplicationMain`; the idle timer waits for the scene to report
+    // itself once (`scenePhaseChanged`).
+    guard idleTimerArmed else { return }
+    idleTimer.update(IdleTimerPolicy(keepScreenAwake: pomodoroSettings.settings.keepScreenAwake,
+                                     pomodoro: pomodoro,
+                                     focusOpen: pomodoroFocusOpen,
+                                     isSceneActive: sceneActive))
+  }
+
   /// The whole child-facing state, as one value, refreshed per sample so the countdown moves with the
   /// shared clock instead of a timer of its own.
   private func refreshPomodoroSnapshot() {
+    // Every state change that can change the answer passes through here, so the policy is evaluated
+    // once per refresh rather than at each of the sites that change a phase or a pause.
+    syncIdleTimer()
     guard let pomodoro else {
       pomodoroSnapshot = nil
       return
@@ -860,9 +899,5 @@ final class SessionController: ObservableObject {
     // No source means no fresh geometry; drop the last frame so a stale avatar cannot linger.
     latestGeometry = nil
     latestAssessment = nil
-  }
-
-  private func restoreScreen() {
-    UIApplication.shared.isIdleTimerDisabled = false
   }
 }

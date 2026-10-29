@@ -68,6 +68,10 @@ _避免_：强制校准页, 初始标定
 每日计划完成的专注番茄数，默认 4 个，范围 1–12 个；主页显示「今天 x/目标」，统计页日视图标明是否达成。
 _避免_：任务配额, 打卡目标
 
+**屏幕常亮**（`isIdleTimerDisabled`）：
+0.6.3 起的唯一规则：只有「专注正在计时、App 在前台、且设置项 `keepScreenAwake` 为开」三条同时成立时占用系统常亮（`UIApplication.shared.isIdleTimerDisabled = true`）；其余一切状态——停驻待开始的专注、休息、手动暂停、无人暂停、专注结束或放弃、整轮结束、App 进后台——都立即释放，回到前台且专注仍在计时则重新占用。判定是纯逻辑 `IdleTimerPolicy`，写入经 `IdleTimerController`（`isIdleTimerDisabled` 属性藏在 `IdleTimerControlling` 协议后，便于单测注入假实现）。它只管屏幕，不改倒计时口径。
+_避免_：防息屏, 保持前台, 后台计时
+
 ## 体态与特征
 
 **姿态样本**（`PostureSample`）：
