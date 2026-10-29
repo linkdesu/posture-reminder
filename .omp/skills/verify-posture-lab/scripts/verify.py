@@ -481,6 +481,20 @@ def check_contract(log: Path, out: Path) -> bool:
     return ok
 
 
+CORE_SCENARIOS = ("pomodoro-focus", "posture-voice", "pause", "report", "settings")
+
+
+def ran_scenarios(rd: Path, state: dict) -> set[str]:
+    """本批真跑过的核心场景：state.json 里有记录，或场景目录里有 provenance / 持久化结果。
+    分批跑（例如只跑 drive pause）时，没跑的场景不在这里，evidence / down 都不判它。"""
+    ran = set(state.get("scenarios", {}))
+    for name in CORE_SCENARIOS:
+        sdir = rd / "scenarios" / name
+        if (sdir / "provenance.json").exists() or (sdir / "report-persistence.json").exists():
+            ran.add(name)
+    return ran & set(CORE_SCENARIOS)
+
+
 def command_evidence(args) -> int:
     run_id = resolve_run(args.run)
     state = read_state(run_id)
@@ -493,7 +507,11 @@ def command_evidence(args) -> int:
     offline.write_text(r.stdout + r.stderr + f"\n[exit {r.returncode}]\n")
     results["offline"] = r.returncode == 0
 
-    for scenario in ("pomodoro-focus", "posture-voice", "pause", "report", "settings"):
+    ran = ran_scenarios(rd, state)
+    skipped = [name for name in CORE_SCENARIOS if name not in ran]
+    for scenario in CORE_SCENARIOS:
+        if scenario not in ran:
+            continue  # 本批没跑：不判，记进 skipped，不再算失败
         sdir = rd / "scenarios" / scenario
         ver = sdir / "verification"
         log = newest_log(sdir)
@@ -530,13 +548,23 @@ def command_evidence(args) -> int:
         audit = sdir / "sandbox-audit.json"
         results[f"{scenario}:sandbox"] = audit.exists()
 
+    # drive 扩展场景与 case 用例由各自子命令判过，这里只汇总本批真跑过的那些。
+    for name, entry in sorted(state.get("checks", {}).items()):
+        if name.startswith(("drive:", "case:")):
+            results[name] = bool(entry.get("ok"))
+    batch = [name for name in results if name != "offline"]
+    if not batch:
+        results["batch:nonEmpty"] = False  # 一个场景都没跑，不能算通过
     summary = {"when": now(), "runId": run_id, "results": results,
+               "ran": sorted(ran), "skipped": skipped,
                "ok": all(results.values())}
     (rd / "verification.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     state.setdefault("checks", {})["evidence"] = {
         "ok": summary["ok"], "detail": results, "at": now()}
     write_state(run_id, state)
     print(json.dumps(results, ensure_ascii=False, indent=2))
+    if skipped:
+        print("本批未跑、不判：" + "，".join(skipped))
     return 0 if summary["ok"] else 1
 
 
@@ -556,10 +584,13 @@ def command_down(args) -> int:
     if getattr(args, "preflight_only", False):
         print("cleanup: preflight-only run, evidence kept at", rd)
         return 0
-    expected = ["state.json", "launch/pomodoro_main.png", "verification.json",
-                "scenarios/pomodoro-focus/mid-focus.png",
-                "scenarios/pomodoro-focus/provenance.json",
-                "audits/offline.txt"]
+    # 只要求本批真跑过的东西留下证据：没跑 up 就不要 launch 截图，没跑 pomodoro-focus 就不要它的文件。
+    expected = ["state.json", "verification.json", "audits/offline.txt"]
+    if "launch" in state.get("checks", {}):
+        expected.append("launch/pomodoro_main.png")
+    if "pomodoro-focus" in ran_scenarios(rd, state):
+        expected += ["scenarios/pomodoro-focus/mid-focus.png",
+                     "scenarios/pomodoro-focus/provenance.json"]
     missing = [item for item in expected if not (rd / item).exists()]
     print("cleanup: evidence kept at", rd)
     if missing:
