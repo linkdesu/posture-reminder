@@ -9,12 +9,12 @@
 - Bundle id：`me.xieal.posturelab`。
 - 每次运行从一个干净沙盒开始：`verify.py up` 会卸载/安装应用；`drive` 的每个场景都会重装。
 - 证据目录：`tmp/verify/<run-id>/`；运行器自动维护 `tmp/verify/latest`。不要在 `artifacts/` 下写新证据。
-- 应用启动后先跑 `verify.py doctor --run <run-id>`，全绿再驱动。
+- 开跑前先跑 `scripts/verify-preflight.sh <SHA> <版本号> <build号> <slug>`，不过就标 ENV-BLOCKED，不开跑；应用启动后再跑 `verify.py doctor --run <run-id>`，全绿再驱动；环境异常一律标 ENV-BLOCKED 或 BLOCKED，禁止临场修环境。
 
 ## 驱动约定
 
 - 所有命令都在仓库根目录执行，路径写绝对或仓库相对路径。
-- 用 `verify.py up|doctor|drive|evidence|down --run <run-id>` 完成生命周期；不要手工拼接另一套状态目录。
+- 用 `verify.py preflight` 与 `verify.py up|doctor|drive|evidence|down --run <run-id>` 完成生命周期；不要手工拼接另一套状态目录。
 - 应用无参启动即进入 `pomodoro_main`；`-pomodoro` 参数已删除，不要传入。
 - 模拟器没有可脚本化点击，能用启动参数表达的状态用启动参数；必须真实点击的设置页修改、手动输入数字、提示音试听与手动暂停用 XCUITest。
 - 优先使用稳定标识：`pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`、accessibility label、日志事件名。

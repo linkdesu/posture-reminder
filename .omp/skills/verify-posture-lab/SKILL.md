@@ -7,6 +7,32 @@ description: 驱动 PostureLab iOS 模拟器或 iPhone 13 真机，端到端验�
 
 PostureLab 是纯离线的儿童专注与阅读坐姿应用。本技能用于真实启动构建产物、按用户路径驱动它、采集证据并清理现场。先读 `features/README.md` 选择特性，再按对应文件执行；不要用内部 setter 或测试专用入口代替用户路径。
 
+## Preflight（开跑前必做）
+
+**开跑前必须先跑 preflight；preflight 不过就不开跑。** 由 QA 在启动 omp 之前运行，omp 只在 preflight 通过的这一轮目录里取证：
+
+```sh
+cd /Volumes/Data/worktrees/posture-lab/depth-pose
+scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug>
+# 例：scripts/verify-preflight.sh 1a2b3c4 0.6.5 11 r16-v065-sim
+```
+
+等价于 `verify.py preflight --sha … --version … --build … --slug …`。slug 已经是 `r<N>-xxx` 时直接作为轮次目录；否则取 `tmp/verify/` 下最大的 N 加一。结果写入 `tmp/verify/<run-id>/preflight.json`，并把冻结值并入 `state.json`。任何一项不过都以非零码退出，`preflight.json.ok` 为 `false`。
+
+检查项（按执行顺序）：
+
+1. 记下 `~/Library/Logs/DiagnosticReports/PostureLab*.ips` 崩溃报告基线；
+2. 工具链是 Xcode 27（`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）、`simctl` 可用、`/Volumes/Data` 与用户目录剩余空间都不少于 20 GB（`--min-free-gb` 可调）；
+3. 用 `git archive <SHA>` 导出代码快照，解到本轮专属目录 `/Volumes/Data/verify-builds/posture-lab/<run-id>/src` 并在那里构建（DerivedData 在同目录 `dd/`）。不碰共享 worktree 的未提交改动，也不用 `/tmp/pl-verify-build`；
+4. 给本轮单独建一台模拟器（`pl-<run-id>`，iPhone 17），boot 完成后把 UDID 写进 `state.json`；
+5. 产物 `Info.plist` 的版本号与 build 号必须等于预期值；装进模拟器后再读一次已安装的 `Info.plist`，并核对已安装二进制的哈希；
+6. `simctl privacy grant camera` 预授权，无参启动后截图，OCR 确认没有系统权限弹窗；
+7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 42 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
+8. 预检期间不得新增崩溃报告；
+9. 把 SHA、快照哈希（`snapshot.tar` 的 sha256）、二进制哈希和 UDID 冻结进 `preflight.json.frozen`。
+
+之后的 `up`、`drive` 只安装 preflight 冻结的那份产物（`frozen.appPath`），每次重装后自动预授权相机；没有通过的 preflight 时 `up`、`drive` 直接拒绝运行。轮次结束用 `verify.py down --run <run-id> --delete-sim` 删掉本轮模拟器。
+
 ## Launch
 
 前置：
@@ -25,8 +51,8 @@ cd /Volumes/Data/worktrees/posture-lab/depth-pose
 `up` 会：
 
 1. 启动并等待模拟器；
-2. 用 `xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=<udid>" -derivedDataPath /tmp/pl-verify-build build` 构建；
-3. 卸载/安装 `PostureLab.app`，无参启动（应用直接进入番茄钟主页 `pomodoro_main`）；
+2. 不再构建：安装 preflight 冻结的 `frozen.appPath`（模拟器也用 preflight 建的那台）；
+3. 卸载/安装 `PostureLab.app` 并预授权相机，无参启动（应用直接进入番茄钟主页 `pomodoro_main`）；
 4. 把 pid、容器路径、gitSha、branch、target、时间戳和检查结果写入 `tmp/verify/<run-id>/state.json`；
 5. 更新 `tmp/verify/latest` 软链接，截图 `launch/pomodoro_main.png`。
 
@@ -59,12 +85,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device 
 只读健康检查。任何异常先跑它，不要盲目重启：
 
 ```sh
-.omp/skills/verify-posture-lab/scripts/verify.py doctor --run r9-skill-smoke
+.omp/skills/verify-posture-lab/scripts/verify.py doctor --run r9-skill-smoke [--version 0.6.5 --build 11]
 ```
 
-检查：模拟器已启动、App 进程在跑、数据容器可读、`CFBundleShortVersionString` 可读、当前 `git rev-parse HEAD` 与 `state.json` 的 `gitSha` 一致。结果写入 `tmp/verify/<run-id>/doctor.json`，并汇总进 `state.json.checks.doctor`。
+检查：preflight 已通过、模拟器已启动、App 进程在跑、数据容器可读；已安装的版本号与 build 号**等于预期值**（`--version`/`--build`，默认取 `preflight.json.expected`），不是「读得出来就算过」；`state.json` 的 `gitSha` 等于 preflight 冻结的**快照 SHA**（不看共享 worktree 的 HEAD）；已安装二进制哈希等于冻结的 `binarySha256`。结果写入 `tmp/verify/<run-id>/doctor.json`，并汇总进 `state.json.checks.doctor`。
 
-Doctor 失败时先修复环境（解锁真机、重新 boot、重新 install），不要在错误的实例上取证。
+Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环境（不重新 boot、不重新 install、不重建、不改代码），也不要在错误的实例上取证；把失败项和 `doctor.json` 写进报告，交回 QA 重新跑 preflight。
 
 ## Drive
 
@@ -145,6 +171,8 @@ ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 
 ## Helpers
 
-- `scripts/verify.py`：本技能的唯一编排器，子命令 `up`、`doctor`、`drive`、`evidence`、`down`；所有子命令接受 `--run <run-id>`。
+- `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`up`、`doctor`、`drive`、`evidence`、`down`；除 `preflight` 外都接受 `--run <run-id>`。
+- `scripts/ocr.swift`：Vision OCR，preflight 用 `swiftc` 编译到本轮构建目录后使用。
+- 仓库 `scripts/verify-preflight.sh`：preflight 的包装，参数依次是目标 SHA、预期版本号、预期 build 号、轮次 slug。
 - `scripts/audit-offline.py`、`scripts/audit-sandbox.py`、`scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py`、`scripts/check-overlay.py`：仓库既有验收脚本，由 `verify.py` 以显式路径调用。
 - `features/`：特性地图；先读 `features/README.md`，再按需打开对应文件。

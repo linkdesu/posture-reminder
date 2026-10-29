@@ -2,8 +2,9 @@
 """PostureLab 验证运行器：构建、启动、健康检查、场景驱动、取证与清理。
 
 用法：
+  .omp/skills/verify-posture-lab/scripts/verify.py preflight --sha <SHA> --version <x.y.z> --build <N> --slug <slug>
   .omp/skills/verify-posture-lab/scripts/verify.py up --run <run-id>
-  .omp/skills/verify-posture-lab/scripts/verify.py doctor --run <run-id>
+  .omp/skills/verify-posture-lab/scripts/verify.py doctor --run <run-id> [--version x.y.z --build N]
   .omp/skills/verify-posture-lab/scripts/verify.py drive --run <run-id>
   .omp/skills/verify-posture-lab/scripts/verify.py evidence --run <run-id>
   .omp/skills/verify-posture-lab/scripts/verify.py down --run <run-id>
@@ -25,7 +26,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 RUNS = ROOT / "tmp" / "verify"
-BUILD = Path("/tmp/pl-verify-build")
 BUNDLE = "me.xieal.posturelab.depth"
 DEFAULT_SIM = "C12DA589-2444-4F2E-A943-4D6BAFB02BF1"
 DEFAULT_DEVICE = "00008110-001271181AD3801E"
@@ -135,21 +135,33 @@ def boot(sim: str, state: dict) -> None:
     state["bootedByUs"] = True
 
 
-def build_sim(sim: str, run_id: str) -> None:
-    log = run_dir(run_id) / "logs" / "build.log"
-    sh(["xcodebuild", "-project", "PostureLab.xcodeproj", "-scheme", "PostureLab",
-        "-destination", f"platform=iOS Simulator,id={sim}",
-        "-derivedDataPath", str(BUILD), "build"], log=log)
+# preflight 冻结的产物路径；有它就只装它，绝不回落到共享 worktree 的构建。
+FROZEN_APP: Path | None = None
+FROZEN_SHA: str | None = None
 
 
-def app_path() -> Path:
-    return BUILD / "Build" / "Products" / "Debug-iphonesimulator" / "PostureLab.app"
+def load_preflight(run_id: str) -> dict | None:
+    """读本轮 preflight.json；只有 ok 的才算数。顺手设置冻结的产物与 SHA。"""
+    global FROZEN_APP, FROZEN_SHA
+    path = run_dir(run_id) / "preflight.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    if not data.get("ok"):
+        return None
+    FROZEN_APP = Path(data["frozen"]["appPath"])
+    FROZEN_SHA = data["frozen"]["gitSha"]
+    return data
 
 
 def install_sim(sim: str) -> None:
+    if FROZEN_APP is None:
+        sys.exit("没有 preflight 冻结的产物；先跑 scripts/verify-preflight.sh（ENV-BLOCKED）")
     sh(["xcrun", "simctl", "terminate", sim, BUNDLE], check=False)
     sh(["xcrun", "simctl", "uninstall", sim, BUNDLE], check=False)
-    sh(["xcrun", "simctl", "install", sim, str(app_path())])
+    sh(["xcrun", "simctl", "install", sim, str(FROZEN_APP)])
+    # 重装会清掉相机授权；预授权，免得权限弹窗盖住截图（r15 作废 33 张截图的原因）。
+    sh(["xcrun", "simctl", "privacy", sim, "grant", "camera", BUNDLE], check=False)
 
 
 def launch_sim(sim: str, args: list[str]) -> int:
@@ -230,7 +242,7 @@ def launch_and_capture(sim: str, scenario: str, args: list[str], shots: list[tup
         "scenario": scenario,
         "launchArgs": args,
         "pid": pid,
-        "gitSha": sh_out(["git", "rev-parse", "HEAD"]),
+        "gitSha": FROZEN_SHA or sh_out(["git", "rev-parse", "HEAD"]),
         "container": container,
         "log": str(log.relative_to(out)) if log else None,
         "history": str(history_file(out).relative_to(out)) if history_file(out).exists() else None,
@@ -245,7 +257,13 @@ def command_up(args) -> int:
     run_id = args.run
     rd = run_dir(run_id)
     rd.mkdir(parents=True, exist_ok=True)
+    preflight = load_preflight(run_id) if args.target == "sim" else None
+    if args.target == "sim" and preflight is None:
+        sys.exit(f"没有通过的 preflight：{rd / 'preflight.json'}。先跑 scripts/verify-preflight.sh，"
+                 "不过就标 ENV-BLOCKED，不开跑。")
+    old = read_state(run_id) if state_file(run_id).exists() else {}
     state = {
+        **old,
         "runId": run_id,
         "gitSha": sh_out(["git", "rev-parse", "HEAD"]),
         "branch": sh_out(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
@@ -265,10 +283,12 @@ def command_up(args) -> int:
         write_state(run_id, state)
         return 0
 
+    frozen = preflight["frozen"]
+    state.update({"gitSha": frozen["gitSha"], "udid": frozen["udid"], "deviceId": frozen["udid"],
+                  "appPath": frozen["appPath"], "binarySha256": frozen["binarySha256"]})
     sim = state["udid"]
     boot(sim, state)
-    if not args.skip_build:
-        build_sim(sim, run_id)
+    state["bootedByUs"] = True
     install_sim(sim)
     pid = launch_sim(sim, args.launch or [])
     time.sleep(4)
@@ -286,6 +306,11 @@ def command_doctor(args) -> int:
     state = read_state(run_id)
     rd = run_dir(run_id)
     checks: dict[str, dict] = {}
+    preflight = load_preflight(run_id)
+    checks["preflight"] = {"ok": preflight is not None, "detail": str(rd / "preflight.json")}
+    frozen = (preflight or {}).get("frozen", {})
+    expected_version = args.version or (preflight or {}).get("expected", {}).get("version")
+    expected_build = args.build or (preflight or {}).get("expected", {}).get("build")
     if state["target"] != "sim":
         checks["target"] = {"ok": False, "detail": "Doctor 目前只实现模拟器目标"}
     else:
@@ -309,14 +334,22 @@ def command_doctor(args) -> int:
         state["pid"] = pid
         app = sh(["xcrun", "simctl", "get_app_container", sim, BUNDLE, "app"],
                  check=False)
-        version = ""
+        version = build = binary = ""
         if app.returncode == 0:
-            v = sh(["plutil", "-extract", "CFBundleShortVersionString", "raw",
-                    str(Path(app.stdout.strip()) / "Info.plist")], check=False)
-            version = v.stdout.strip() if v.returncode == 0 else ""
-        checks["version"] = {"ok": bool(version), "detail": version}
-        checks["gitSha"] = {"ok": state["gitSha"] == sh_out(["git", "rev-parse", "HEAD"]),
-                            "detail": state["gitSha"]}
+            installed = Path(app.stdout.strip())
+            version = plist_value(installed / "Info.plist", "CFBundleShortVersionString")
+            build = plist_value(installed / "Info.plist", "CFBundleVersion")
+            if (installed / "PostureLab").exists():
+                binary = sha256_file(installed / "PostureLab")
+        # 和传入/冻结的预期值比对，而不是「读得出来就算过」。
+        checks["version"] = {"ok": bool(expected_version) and version == expected_version
+                             and bool(expected_build) and build == expected_build,
+                             "detail": f"已安装 {version} ({build})，预期 {expected_version} ({expected_build})"}
+        # 和 preflight 冻结的快照 SHA 比对，不看共享 worktree 的 HEAD。
+        checks["gitSha"] = {"ok": bool(frozen) and state.get("gitSha") == frozen.get("gitSha"),
+                            "detail": f"state={state.get('gitSha')} 快照={frozen.get('gitSha')}"}
+        checks["binary"] = {"ok": bool(frozen) and binary == frozen.get("binarySha256"),
+                            "detail": f"已安装={binary[:12]} 冻结={str(frozen.get('binarySha256'))[:12]}"}
     ok = all(entry["ok"] for entry in checks.values())
     (rd / "doctor.json").write_text(json.dumps({"when": now(), "ok": ok, "checks": checks},
                                                ensure_ascii=False, indent=2) + "\n")
@@ -331,6 +364,8 @@ def command_drive(args) -> int:
     state = read_state(run_id)
     if state["target"] != "sim":
         sys.exit("drive 目前只实现模拟器目标；真机步骤见 SKILL.md")
+    if load_preflight(run_id) is None:
+        sys.exit("没有通过的 preflight，不开跑（ENV-BLOCKED）")
     sim = state["udid"]
     scenarios = [
         ("pomodoro-focus",
@@ -488,9 +523,15 @@ def command_down(args) -> int:
         terminate_sim(sim)
         if state.get("bootedByUs"):
             sh(["xcrun", "simctl", "shutdown", sim], check=False)
+        if getattr(args, "delete_sim", False) and state.get("simCreatedByPreflight"):
+            sh(["xcrun", "simctl", "delete", sim], check=False)
+            state["simDeleted"] = True
     state["pid"] = 0
     state["checks"]["cleanup"] = {"ok": True, "detail": "app terminated; evidence kept", "at": now()}
     write_state(run_id, state)
+    if getattr(args, "preflight_only", False):
+        print("cleanup: preflight-only run, evidence kept at", rd)
+        return 0
     expected = ["state.json", "launch/pomodoro_main.png", "verification.json",
                 "scenarios/pomodoro-focus/mid-focus.png",
                 "scenarios/pomodoro-focus/provenance.json",
@@ -503,6 +544,246 @@ def command_down(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# preflight：QA 启动 omp 前的环境预检（v0.6.5）。任何一项不过就非零退出，不开跑。
+# ---------------------------------------------------------------------------
+
+BUILDS = Path("/Volumes/Data/verify-builds/posture-lab")
+SIM_DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
+CRASH_DIR = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+OCR_SOURCE = Path(__file__).resolve().parent / "ocr.swift"
+# 系统权限弹窗上才会出现的字样；App 自己的界面不会有这些词。
+ALERT_WORDS = ("想访问", "想要访问", "would like to access", "Would Like to Access",
+               "不允许", "Don’t Allow", "Don't Allow")
+
+
+def sha256_file(path: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def crash_reports() -> list[str]:
+    if not CRASH_DIR.exists():
+        return []
+    return sorted(p.name for p in CRASH_DIR.glob("PostureLab*.ips"))
+
+
+def plist_value(plist: Path, key: str) -> str:
+    r = sh(["plutil", "-extract", key, "raw", str(plist)], check=False)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def next_run_id(slug: str) -> str:
+    """slug 已经是 r<N>-xxx 就原样用；否则取 tmp/verify 下最大的 N 加一。"""
+    import re
+    if re.match(r"^r\d+-", slug):
+        return slug
+    numbers = [int(m.group(1)) for p in RUNS.iterdir() if (m := re.match(r"^r(\d+)-", p.name))] \
+        if RUNS.exists() else []
+    return f"r{max(numbers, default=0) + 1}-{slug}"
+
+
+def create_sim(run_id: str) -> str:
+    """给本轮单独建一台 iPhone 17；按运行时从新到旧尝试，第一个兼容的为准。"""
+    data = json.loads(sh_out(["xcrun", "simctl", "list", "-j", "runtimes"]))
+    runtimes = [r["identifier"] for r in data.get("runtimes", [])
+                if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS")]
+    for runtime in reversed(runtimes):
+        r = sh(["xcrun", "simctl", "create", f"pl-{run_id}", SIM_DEVICE_TYPE, runtime], check=False)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    return ""
+
+
+def ocr(binary: Path, image: Path) -> list[str]:
+    r = sh([str(binary), str(image)], check=False, timeout=120)
+    lines = []
+    for line in r.stdout.splitlines():
+        if line.startswith("[") and "]" in line:
+            text = line.split("]", 1)[1].strip()
+            # 形如 "0.98  文本"
+            parts = text.split(None, 1)
+            if len(parts) == 2:
+                lines.append(parts[1])
+    return lines
+
+
+def command_preflight(args) -> int:
+    run_id = args.run or next_run_id(args.slug)
+    rd = run_dir(run_id)
+    rd.mkdir(parents=True, exist_ok=True)
+    pf_dir = rd / "preflight"
+    pf_dir.mkdir(parents=True, exist_ok=True)
+    result: dict = {"runId": run_id, "startedAt": now(), "expected": {
+        "sha": args.sha, "version": args.version, "build": args.build}, "checks": {}, "frozen": {}}
+    checks = result["checks"]
+
+    def record(name: str, ok: bool, detail) -> bool:
+        checks[name] = {"ok": bool(ok), "detail": detail, "at": now()}
+        print(f"{'PASS' if ok else 'FAIL'} {name}: {detail}")
+        return bool(ok)
+
+    def finish() -> int:
+        result["finishedAt"] = now()
+        result["ok"] = bool(checks) and all(c["ok"] for c in checks.values()) and not result.get("aborted")
+        (rd / "preflight.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+        state = json.loads(state_file(run_id).read_text()) if state_file(run_id).exists() else {
+            "runId": run_id, "target": "sim", "bundleId": BUNDLE, "startedAt": now(), "checks": {}}
+        state.update({k: v for k, v in result["frozen"].items() if k in (
+            "gitSha", "udid", "deviceId", "appPath", "snapshotSha256", "binarySha256",
+            "version", "build", "bootedByUs", "simCreatedByPreflight", "crashBaseline")})
+        state["target"] = "sim"
+        state["bundleId"] = BUNDLE
+        state["preflight"] = {"ok": result["ok"], "file": "preflight.json"}
+        write_state(run_id, state)
+        print(f"preflight {'OK' if result['ok'] else 'FAILED'}: {rd / 'preflight.json'}")
+        return 0 if result["ok"] else 1
+
+    def abort(reason: str) -> int:
+        result["aborted"] = reason
+        print(f"ABORT {reason}")
+        return finish()
+
+    # 6. 崩溃报告基线（最先记，后面的启动都算在基线之后）。
+    baseline = crash_reports()
+    result["frozen"]["crashBaseline"] = {"count": len(baseline), "files": baseline}
+    record("crashBaseline", True, f"{len(baseline)} 份 PostureLab*.ips")
+
+    # 1. 工具链、simctl、磁盘。
+    xv = sh(["xcodebuild", "-version"], check=False)
+    first = xv.stdout.splitlines()[0] if xv.stdout else ""
+    record("toolchain", xv.returncode == 0 and first.startswith("Xcode 27")
+           and Path(DEVELOPER_DIR).exists(), f"DEVELOPER_DIR={DEVELOPER_DIR} {first}")
+    sc = sh(["xcrun", "simctl", "list", "runtimes"], check=False)
+    record("simctl", sc.returncode == 0 and "iOS" in sc.stdout, "xcrun simctl list runtimes")
+    free = {str(p): shutil.disk_usage(p).free // (1 << 30) for p in (Path("/Volumes/Data"), Path.home())}
+    record("diskFree", all(v >= args.min_free_gb for v in free.values()),
+           {"freeGB": free, "minGB": args.min_free_gb})
+    if not all(checks[k]["ok"] for k in ("toolchain", "simctl", "diskFree")):
+        return abort("工具链或磁盘不满足")
+
+    # 2. git archive 快照 + 本轮专属目录构建；不碰共享 worktree，也不用 /tmp/pl-verify-build。
+    full = sh(["git", "rev-parse", "--verify", f"{args.sha}^{{commit}}"], check=False).stdout.strip()
+    if not record("sha", bool(full), full or f"无法解析 {args.sha}"):
+        return abort("SHA 无效")
+    result["frozen"]["gitSha"] = full
+    base = BUILDS / run_id
+    if base.exists():
+        shutil.rmtree(base)
+    src = base / "src"
+    src.mkdir(parents=True)
+    tarball = base / "snapshot.tar"
+    sh(["git", "archive", "--format=tar", "-o", str(tarball), full])
+    sh(["tar", "-xf", str(tarball), "-C", str(src)])
+    result["frozen"]["snapshotSha256"] = sha256_file(tarball)
+    result["frozen"]["buildDir"] = str(base)
+    record("snapshot", (src / "PostureLab.xcodeproj").exists(), f"{tarball} -> {src}")
+
+    # 4. 本轮专属模拟器。
+    udid = create_sim(run_id)
+    if not record("simulatorCreated", bool(udid), udid or "simctl create 失败"):
+        return abort("建模拟器失败")
+    result["frozen"].update({"udid": udid, "deviceId": udid, "simCreatedByPreflight": True,
+                             "bootedByUs": True})
+    sh(["xcrun", "simctl", "boot", udid], check=False)
+    bs = sh(["xcrun", "simctl", "bootstatus", udid, "-b"], check=False, timeout=600)
+    if not record("simulatorBooted", bs.returncode == 0 and sim_booted(udid), udid):
+        return abort("模拟器没有 boot 完成")
+
+    build_log = rd / "logs" / "preflight-build.log"
+    dd = base / "dd"
+    b = subprocess.run(["xcodebuild", "-project", str(src / "PostureLab.xcodeproj"),
+                        "-scheme", "PostureLab", "-destination", f"platform=iOS Simulator,id={udid}",
+                        "-derivedDataPath", str(dd), "build"],
+                       cwd=src, env=env(), text=True, capture_output=True, timeout=3600)
+    build_log.parent.mkdir(parents=True, exist_ok=True)
+    build_log.write_text(b.stdout + b.stderr + f"\n[exit {b.returncode}]\n")
+    app = dd / "Build" / "Products" / "Debug-iphonesimulator" / "PostureLab.app"
+    if not record("build", b.returncode == 0 and app.exists(), str(build_log.relative_to(ROOT))):
+        return abort("构建失败")
+    binary = app / "PostureLab"
+    result["frozen"]["appPath"] = str(app)
+    result["frozen"]["binarySha256"] = sha256_file(binary)
+
+    # 3. 版本号：构建产物一次，装进模拟器后再读一次。
+    built_v, built_b = plist_value(app / "Info.plist", "CFBundleShortVersionString"), \
+        plist_value(app / "Info.plist", "CFBundleVersion")
+    if not record("versionBuilt", built_v == args.version and built_b == args.build,
+                  f"产物 {built_v} ({built_b})，预期 {args.version} ({args.build})"):
+        return abort("产物版本号不符")
+    sh(["xcrun", "simctl", "install", udid, str(app)])
+    installed = Path(sh_out(["xcrun", "simctl", "get_app_container", udid, BUNDLE, "app"]))
+    inst_v, inst_b = plist_value(installed / "Info.plist", "CFBundleShortVersionString"), \
+        plist_value(installed / "Info.plist", "CFBundleVersion")
+    inst_hash = sha256_file(installed / "PostureLab")
+    record("versionInstalled", inst_v == args.version and inst_b == args.build
+           and inst_hash == result["frozen"]["binarySha256"],
+           f"已安装 {inst_v} ({inst_b})，二进制哈希{'一致' if inst_hash == result['frozen']['binarySha256'] else '不一致'}")
+    result["frozen"].update({"version": inst_v, "build": inst_b})
+
+    # 5. 相机预授权，启动后截图，OCR 确认没有系统弹窗。
+    ocr_bin = base / "ocr"
+    oc = sh(["swiftc", "-O", "-o", str(ocr_bin), str(OCR_SOURCE)], check=False, timeout=600)
+    record("ocrTool", oc.returncode == 0 and ocr_bin.exists(), str(ocr_bin))
+    grant = sh(["xcrun", "simctl", "privacy", udid, "grant", "camera", BUNDLE], check=False)
+    record("cameraGranted", grant.returncode == 0, (grant.stdout + grant.stderr).strip() or "ok")
+    launch_sim(udid, [])
+    time.sleep(6)
+    shot = pf_dir / "launch.png"
+    shot_ok = screenshot(udid, shot)
+    texts = ocr(ocr_bin, shot) if shot_ok and ocr_bin.exists() else []
+    alerts = [t for t in texts if any(w in t for w in ALERT_WORDS)]
+    (pf_dir / "launch-ocr.txt").write_text("\n".join(texts) + "\n")
+    record("noAlertOnLaunch", shot_ok and bool(texts) and not alerts,
+           {"screenshot": str(shot.relative_to(rd)), "ocrLines": len(texts), "alertText": alerts})
+    terminate_sim(udid)
+
+    # 7. 每种取证方法在一个短用例上试一次，必须拿到非空值。
+    case = ["-scenario", "pomodoroDay", "-focusMinutes", "1", "-shortBreakMinutes", "1",
+            "-voice", "0", "-debug", "1"]
+    launch_sim(udid, case)
+    time.sleep(12)
+    shot = pf_dir / "case.png"
+    shot_ok = screenshot(udid, shot)
+    record("evidence:screenshot", shot_ok and shot.stat().st_size > 0 if shot_ok else False,
+           {"file": str(shot.relative_to(rd)), "bytes": shot.stat().st_size if shot_ok else 0})
+    texts = ocr(ocr_bin, shot) if shot_ok and ocr_bin.exists() else []
+    (pf_dir / "case-ocr.txt").write_text("\n".join(texts) + "\n")
+    record("evidence:ocr", bool(texts), {"lines": len(texts), "sample": texts[:5]})
+    container = sh(["xcrun", "simctl", "get_app_container", udid, BUNDLE, "data"], check=False).stdout.strip()
+    docs = pf_dir / "Documents"
+    copy_documents(container, docs) if container else None
+    files = [p for p in docs.rglob("*") if p.is_file() and p.stat().st_size > 0] if docs.exists() else []
+    record("evidence:sandboxCopy", bool(files),
+           {"container": container, "nonEmptyFiles": len(files)})
+    log = newest_log(pf_dir)
+    fields: dict = {}
+    if log is not None:
+        rows = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
+        last = rows[-1] if rows else {}
+        fields = {"rows": len(rows), "keys": len(last), "lastEvent": last.get("event"),
+                  "remaining_seconds": next((r["remaining_seconds"] for r in reversed(rows)
+                                             if r.get("remaining_seconds") is not None), None)}
+    record("evidence:debugLogField", bool(fields) and fields.get("keys") == len(LOG_KEYS)
+           and bool(fields.get("lastEvent")) and fields.get("remaining_seconds") is not None, fields)
+    idle_logs = sorted(docs.glob("debug/idle-*.jsonl")) if docs.exists() else []
+    idle_rows = [json.loads(l) for p in idle_logs for l in p.read_text().splitlines() if l.strip()]
+    record("evidence:idleTimerField",
+           any(isinstance(r.get("idle_timer_disabled"), bool) for r in idle_rows),
+           {"rows": idle_rows[:4]})
+    terminate_sim(udid)
+
+    # 6（收尾）. 预检本身不允许制造崩溃。
+    after = crash_reports()
+    new = sorted(set(after) - set(baseline))
+    record("noNewCrash", not new, {"new": new})
+    return finish()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="PostureLab 验证运行器")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -512,12 +793,25 @@ def main() -> int:
         if name == "up":
             p.add_argument("--target", choices=["sim", "device"], default="sim")
             p.add_argument("--udid", default=None)
-            p.add_argument("--skip-build", action="store_true")
             p.add_argument("--launch", nargs="*", default=None)
+        if name == "doctor":
+            p.add_argument("--version", default=None, help="预期 CFBundleShortVersionString；默认取 preflight.json")
+            p.add_argument("--build", default=None, help="预期 CFBundleVersion；默认取 preflight.json")
+        if name == "down":
+            p.add_argument("--delete-sim", action="store_true", help="删掉 preflight 建的本轮模拟器")
+            p.add_argument("--preflight-only", action="store_true", help="只跑过 preflight，不检查场景证据")
+    pf = sub.add_parser("preflight", help="开跑前环境预检；不过就非零退出")
+    pf.add_argument("--sha", required=True)
+    pf.add_argument("--version", required=True)
+    pf.add_argument("--build", required=True)
+    pf.add_argument("--slug", required=True)
+    pf.add_argument("--run", default=None, help="默认 r<下一个N>-<slug>；slug 本身是 r<N>-xxx 时直接用")
+    pf.add_argument("--min-free-gb", type=int, default=20)
     args = parser.parse_args()
     if args.command == "up" and args.run is None:
         parser.error("up 需要 --run <run-id>")
     return {
+        "preflight": command_preflight,
         "up": command_up,
         "doctor": command_doctor,
         "drive": command_drive,
