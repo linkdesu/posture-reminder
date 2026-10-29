@@ -45,12 +45,12 @@ FAILED=0
 # show it. Both wait the same 26 seconds, which puts them mid-focus over a running countdown.
 CASES=(
   "1-home-idle|10|-pomodoro 1"
-  "2-home-focus|26|-pomodoro 1 -debug 0 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
-  "3-home-debug|26|-pomodoro 1 -debug 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
-  "4-settings|10|-pomodoro 1 -settings 1"
-  "5-stats-day|10|-pomodoro 1 -seedHistory 30 -report day"
-  "6-stats-week|10|-pomodoro 1 -seedHistory 30 -report week"
-  "7-stats-month|10|-pomodoro 1 -seedHistory 30 -report month"
+  "2-home-focus|26|-debug 0 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
+  "3-home-debug|26|-debug 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1"
+  "4-settings|10|-settings 1"
+  "5-stats-day|10|-seedHistory 30 -report day"
+  "6-stats-week|10|-seedHistory 30 -report week"
+  "7-stats-month|10|-seedHistory 30 -report month"
 )
 
 for entry in "${CASES[@]}"; do

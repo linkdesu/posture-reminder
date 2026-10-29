@@ -88,7 +88,7 @@ run_case() {
     debugOffMonitoring) launch+=(-debug 0); extra_verify=(--expect-view-mode avatar --expect-overlay-off) ;;
     # A live three-pomodoro day. Shortened clocks keep the round to six minutes, and the
     # pomodoro verifier reads the history file instead of a single reading session.
-    pomodoroDay) launch+=(-pomodoro 1 -focusMinutes 1 -shortBreakMinutes 1); pomodoro_run=1 ;;
+    pomodoroDay) launch+=(-focusMinutes 1 -shortBreakMinutes 1); pomodoro_run=1 ;;
   esac
   if [[ "$SURFACE" == device ]]; then
     if ! xcrun devicectl device install app --device "$DEVICE" "$DEV_APP" >/dev/null 2>&1; then

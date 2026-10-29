@@ -268,12 +268,12 @@ def command_up(args) -> int:
     if not args.skip_build:
         build_sim(sim, run_id)
     install_sim(sim)
-    pid = launch_sim(sim, args.launch or ["-pomodoro", "1"])
+    pid = launch_sim(sim, args.launch or [])
     time.sleep(4)
     container = container_sim(sim)
     state["pid"] = pid
     state["appContainerDataPath"] = container
-    ok = screenshot(sim, rd / "launch" / "home.png")
+    ok = screenshot(sim, rd / "launch" / "pomodoro_main.png")
     check(state, "launch", ok and bool(container), f"pid={pid} container={container}")
     write_state(run_id, state)
     return 0
@@ -332,18 +332,18 @@ def command_drive(args) -> int:
     sim = state["udid"]
     scenarios = [
         ("pomodoro-focus",
-         ["-pomodoro", "1", "-scenario", "pomodoroDay", "-focusMinutes", "1",
+         ["-scenario", "pomodoroDay", "-focusMinutes", "1",
           "-shortBreakMinutes", "1", "-voice", "1", "-debug", "1", "-endSound", "chime"],
          [(35, "mid-focus.png"), (70, "after-focus.png"), (130, "history-ready.png")]),
         ("posture-voice",
-         ["-pomodoro", "1", "-scenario", "deskLean", "-focusMinutes", "1",
+         ["-scenario", "deskLean", "-focusMinutes", "1",
           "-shortBreakMinutes", "1", "-voice", "1", "-debug", "1"],
          [(30, "desk-lean.png")]),
         ("pause",
-         ["-pomodoro", "1", "-scenario", "pauseWhileBreach", "-focusMinutes", "1", "-debug", "0"],
+         ["-scenario", "pauseWhileBreach", "-focusMinutes", "1", "-debug", "0"],
          [(30, "absence-pause.png")]),
         ("settings",
-         ["-pomodoro", "1", "-settings", "1"],
+         ["-settings", "1"],
          [(5, "settings.png")]),
     ]
     for scenario, launch, shots in scenarios:
@@ -355,7 +355,7 @@ def command_drive(args) -> int:
     report_dir = run_dir(run_id) / "scenarios" / "report"
     report_dir.mkdir(parents=True, exist_ok=True)
     install_sim(sim)
-    launch_sim(sim, ["-pomodoro", "1", "-seedHistory", "30", "-report", "day"])
+    launch_sim(sim, ["-seedHistory", "30", "-report", "day"])
     time.sleep(6)
     screenshot(sim, report_dir / "report-day.png")
     container = container_sim(sim)
@@ -364,7 +364,7 @@ def command_drive(args) -> int:
     before = len(json.loads(history_file(report_dir).read_text())) if history_file(report_dir).exists() else 0
     terminate_sim(sim)
     # 不重装：历史必须来自同一个沙盒，否则证明的只是 seed，不是持久化。
-    launch_sim(sim, ["-pomodoro", "1", "-report", "day"])
+    launch_sim(sim, ["-report", "day"])
     time.sleep(6)
     screenshot(sim, report_dir / "report-day-after-restart.png")
     container = container_sim(sim)
@@ -489,7 +489,7 @@ def command_down(args) -> int:
     state["pid"] = 0
     state["checks"]["cleanup"] = {"ok": True, "detail": "app terminated; evidence kept", "at": now()}
     write_state(run_id, state)
-    expected = ["state.json", "launch/home.png", "verification.json",
+    expected = ["state.json", "launch/pomodoro_main.png", "verification.json",
                 "scenarios/pomodoro-focus/mid-focus.png",
                 "scenarios/pomodoro-focus/provenance.json",
                 "audits/offline.txt"]

@@ -15,7 +15,8 @@
 
 - 所有命令都在仓库根目录执行，路径写绝对或仓库相对路径。
 - 用 `verify.py up|doctor|drive|evidence|down --run <run-id>` 完成生命周期；不要手工拼接另一套状态目录。
-- 模拟器没有可脚本化点击，能用启动参数表达的状态用启动参数；必须真实点击的设置页修改与手动暂停用 XCUITest。
+- 应用无参启动即进入 `pomodoro_main`；`-pomodoro` 参数已删除，不要传入。
+- 模拟器没有可脚本化点击，能用启动参数表达的状态用启动参数；必须真实点击的设置页修改、手动输入数字、提示音试听与手动暂停用 XCUITest。
 - 优先使用稳定标识：`pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`、accessibility label、日志事件名。
 - 每个场景重装应用，避免设置、历史与日志在场景之间泄漏。
 - 清理只终止本次启动的 App；只有 `state.json.bootedByUs` 为真时才关闭模拟器。
@@ -32,6 +33,6 @@
 
 - [番茄钟专注与休息](./pomodoro-focus-and-break.md)：主页倒计时、阶段流转、开始/暂停/恢复/放弃、今日目标、阶段提示音。
 - [体态监测与语音提醒](./posture-monitoring-and-voice.md)：3D 人形点云、静默基线、8 种体态、15 秒预录语音、无人暂停、调试叠加层。
-- [番茄钟设置](./pomodoro-settings.md)：12 项参数、灵敏度、调试开关、真实控件交互与重启持久化。
+- [番茄钟设置](./pomodoro-settings.md)：11 项参数（含手动输入与夹取）、提示音试听、调试开关、真实控件交互与重启持久化。
 - [统计页与历史](./posture-report-and-history.md)：日/周/月视图、姿态时间轴、`focusedSeconds`/`pausedSeconds` 对账、历史持久化与清空。
 - [离线与沙盒隐私](./offline-and-sandbox-privacy.md)：零网络、无 RGB 落盘、38-key JSONL 契约。

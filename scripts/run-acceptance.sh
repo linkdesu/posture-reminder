@@ -94,7 +94,7 @@ blocked() {
 # ---------------------------------------------------------------- AC1
 # Two shots inside one 60 s focus, plus the tick log, whose descent must match the clock.
 if wanted AC1; then
-  begin AC1 40 -pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -debug 0
+  begin AC1 40 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -debug 0
   xcrun simctl io "$SIM" screenshot /tmp/ac-AC1-b.png >/dev/null 2>&1 && cp /tmp/ac-AC1-b.png "$OUT/AC1/screen-later.png"
   if python3 scripts/verify-acceptance.py "$AC_LOG" --history "$AC_HISTORY" --ac1 --quiet >"$OUT/AC1/ac1.txt" 2>&1; then
     verdict AC1 "PASS" "$(cat "$OUT/AC1/ac1.txt")" "two screenshots: screen.png and screen-later.png (the second taken 15 s after the first)"
@@ -116,14 +116,14 @@ fi
 # ---------------------------------------------------------------- AC4
 # deskLean trips three postures at once, which is the concurrency the queue has to serialise.
 if wanted AC4; then
-  begin AC4 40 -pomodoro 1 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1
+  begin AC4 40 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1
   if python3 scripts/verify-acceptance.py "$AC_LOG" --history "$AC_HISTORY" --ac4 --quiet >"$OUT/AC4/ac4.txt" 2>&1; then
     verdict AC4 "PASS" "$(cat "$OUT/AC4/ac4.txt")"
   else
     verdict AC4 "FAIL" "$(cat "$OUT/AC4/ac4.txt")"
   fi
   # Same scenario with the voice switch off: the log must contain no playback at all.
-  begin AC4-voice-off 30 -pomodoro 1 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 0
+  begin AC4-voice-off 30 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 0
   plays=$(grep -c '"event": "speech_played"' "$AC_LOG" 2>/dev/null || true)
   if [[ "${plays:-0}" == "0" ]]; then
     verdict AC4-voice-off "PASS" "voice switch off, speech_played lines: 0"
@@ -136,7 +136,7 @@ fi
 # pauseWhileBreach carries a real absence inside a short focus, so the focus ends abandoned
 # with the absent seconds missing from it.
 if wanted AC5; then
-  begin AC5 45 -pomodoro 1 -scenario pauseWhileBreach -focusMinutes 1 -debug 0
+  begin AC5 45 -scenario pauseWhileBreach -focusMinutes 1 -debug 0
   if python3 scripts/verify-acceptance.py "$AC_LOG" --history "$AC_HISTORY" --ac5 --quiet >"$OUT/AC5/ac5.txt" 2>&1; then
     verdict AC5 "PASS" "$(cat "$OUT/AC5/ac5.txt")"
   else
@@ -147,11 +147,11 @@ fi
 # ---------------------------------------------------------------- AC6
 # Seed, screenshot the three views, kill the process, relaunch without seeding, screenshot again.
 if wanted AC6; then
-  begin AC6 25 -pomodoro 1 -seedHistory 30 -report day
+  begin AC6 25 -seedHistory 30 -report day
   for scope in day week month; do
     xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1
     sleep 1
-    xcrun simctl launch "$SIM" "$BUNDLE" -pomodoro 1 -seedHistory 30 -report "$scope" >/dev/null 2>&1
+    xcrun simctl launch "$SIM" "$BUNDLE" -seedHistory 30 -report "$scope" >/dev/null 2>&1
     sleep 8
     xcrun simctl io "$SIM" screenshot /tmp/ac-AC6-$scope.png >/dev/null 2>&1
     cp /tmp/ac-AC6-$scope.png "$OUT/AC6/stats-$scope.png"
@@ -160,7 +160,7 @@ if wanted AC6; then
   # Relaunch with no seeding at all: whatever shows now came off the disk.
   xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1
   sleep 1
-  xcrun simctl launch "$SIM" "$BUNDLE" -pomodoro 1 -report day >/dev/null 2>&1
+  xcrun simctl launch "$SIM" "$BUNDLE" -report day >/dev/null 2>&1
   sleep 8
   xcrun simctl io "$SIM" screenshot /tmp/ac-AC6-after.png >/dev/null 2>&1
   cp /tmp/ac-AC6-after.png "$OUT/AC6/stats-day-after-restart.png"
@@ -177,8 +177,8 @@ fi
 
 # ---------------------------------------------------------------- AC7
 if wanted AC7; then
-  begin AC7 40 -pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -debug 0
-  xcrun simctl launch "$SIM" "$BUNDLE" -pomodoro 1 -report day >/dev/null 2>&1
+  begin AC7 40 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -debug 0
+  xcrun simctl launch "$SIM" "$BUNDLE" -report day >/dev/null 2>&1
   sleep 8
   xcrun simctl io "$SIM" screenshot /tmp/ac-AC7-day.png >/dev/null 2>&1
   cp /tmp/ac-AC7-day.png "$OUT/AC7/stats-day.png"
@@ -196,7 +196,7 @@ if wanted AC8; then
   mkdir -p "$OUT/AC8"
   xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1
   sleep 1
-  xcrun simctl launch "$SIM" "$BUNDLE" -pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 >/dev/null 2>&1
+  xcrun simctl launch "$SIM" "$BUNDLE" -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 >/dev/null 2>&1
   sleep 6
   pid=$(xcrun simctl spawn "$SIM" launchctl list 2>/dev/null | awk '/me.xieal.posturelab/ {print $1; exit}')
   {
@@ -241,7 +241,7 @@ if wanted AC11; then
   for pair in "headTilt:head_tilt" "shoulderTilt:shoulder_tilt"; do
     scenario="${pair%%:*}"
     kind="${pair##*:}"
-    begin "AC11-$scenario" 40 -pomodoro 1 -scenario "$scenario" -focusMinutes 1 -debug 0
+    begin "AC11-$scenario" 40 -scenario "$scenario" -focusMinutes 1 -debug 0
     if python3 scripts/verify-session.py "$AC_LOG" --expect-scenario "$scenario" --quiet --expect-kind "$kind" --expect-level1 5 --expect-level2 15 >"$OUT/AC11-$scenario.txt" 2>&1; then
       :
     else
@@ -260,7 +260,7 @@ fi
 
 # ---------------------------------------------------------------- AC12
 if wanted AC12; then
-  begin AC12-absence 40 -pomodoro 1 -scenario pauseWhileBreach -focusMinutes 1 -debug 0
+  begin AC12-absence 40 -scenario pauseWhileBreach -focusMinutes 1 -debug 0
   if python3 scripts/verify-acceptance.py "$AC_LOG" --history "$AC_HISTORY" --ac5 --quiet >"$OUT/AC12/absence.txt" 2>&1; then
     absence="PASS"
   else
@@ -277,7 +277,7 @@ fi
 # 301 s of absence must interrupt; 299 s must not. Both need the real clock, so this is the
 # slowest criterion in the round.
 if wanted AC13; then
-  begin AC13-over 330 -pomodoro 1 -scenario longRun -focusMinutes 5 -debug 0
+  begin AC13-over 330 -scenario longRun -focusMinutes 5 -debug 0
   outcome_over=$(python3 -c "
 import json,sys
 try:
@@ -291,9 +291,9 @@ fi
 
 # ---------------------------------------------------------------- AC14
 if wanted AC14; then
-  begin AC14-on 75 -pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound chime
+  begin AC14-on 75 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound chime
   cues_on=$(grep -o '"message": "[a-z_]*"' "$AC_LOG" 2>/dev/null | sort | uniq -c | tr '\n' ' ')
-  begin AC14-off 75 -pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound none
+  begin AC14-off 75 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound none
   cues_off=$(grep -c '"event": "cue_played"' "$AC_LOG" 2>/dev/null || true)
   verdict AC14 "INFO" "cues with the sound on: ${cues_on:-none}" "cue_played lines with the sound off: ${cues_off:-0}" "the home screen states 今日 x/目标 and the day view states whether the goal was met; see artifacts/r5-pomodoro/screenshots/2-home-focus.png and 5-stats-day.png"
 fi
