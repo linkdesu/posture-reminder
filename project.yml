@@ -20,8 +20,8 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "0.6.3"
-        CURRENT_PROJECT_VERSION: "9"
+        MARKETING_VERSION: "0.6.4"
+        CURRENT_PROJECT_VERSION: "10"
   PostureLabTests:
     type: bundle.unit-test
     platform: iOS
@@ -33,7 +33,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.depth.tests
         GENERATE_INFOPLIST_FILE: YES
         DEVELOPMENT_TEAM: DFA8MZ9MZW
-  # The UI target exists for the two criteria a launch argument cannot express: AC2's eleven
+  # The UI target exists for the two criteria a launch argument cannot express: AC2's ten
   # per-setting taps and AC12's manual pause. The dependency on the app is what gives the bundle its
   # TEST_TARGET_NAME, so `XCUIApplication()` launches PostureLab without naming it here.
   PostureLabUITests:
