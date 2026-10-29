@@ -30,7 +30,7 @@ Preconditions：
 - **校验语音。** `verify.py evidence --run <run-id>` 运行 `scripts/verify-acceptance.py <log> --ac4 --quiet`：同一时刻多条 `speech_played` 不得重叠，播放顺序按 `PostureKind.priority`；同时检查 `desk_lean` 二级语音至少出现一次。
 - **校验无人暂停。** `verify.py drive` 的 `pause` 场景启动 `pauseWhileBreach`，30 秒截图；`verify.py evidence` 运行 `scripts/verify-acceptance.py <log> --history <pomodoro-history.json> --ac5 --quiet`，要求存在暂停记录且 `focusedSeconds` 不包含暂停。
 - **校验 300 秒中断。** 单元测试覆盖 299/301 秒边界：`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild ... -only-testing:PostureLabTests/PomodoroEngineTests test`；模拟器长跑不适合作为唯一证据。
-- **调试叠加层。** `-debug 1` 的截图必须能看到带中文关节名的骨架/特征表（每个指标有算法来源行），且「暂停」「休息」仍可见；`-debug 0` 的截图必须没有关节数据与实验级文字。停驻（`-holdStart 1`）时的截图必须能看到摄像头预览/点云且没有「休息」按钮（截图 `AC-parked-before-start`）。
+- **调试叠加层。** `-debug 1` 的截图必须能看到带中文关节名的骨架/特征表（每个指标有算法来源行），且「暂停」「离开」仍可见；`-debug 0` 的截图必须没有关节数据与实验级文字。停驻（`-holdStart 1`）时的截图必须能看到摄像头预览/点云且没有「离开」按钮（截图 `AC-parked-before-start`）。
 - **证据。** 每个场景保留截图、`session-*.jsonl`、`Documents/` 与 `sandbox-audit.json`；实验级体态只应在日志/历史中出现，不应有 `reminder` 或 `speech_played`。
 
 ## Gotchas
