@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		010322E1DA15346F23E7942F /* DepthCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */; };
+		046691B680564E2D7F4EE523 /* VerifyDriveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C0C8E3EFD057439798567B /* VerifyDriveUITests.swift */; };
 		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
 		07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */; };
 		09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */; };
@@ -32,6 +33,7 @@
 		4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */; };
 		4FA5FAF4E26E7AFE50117616 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865D8839C4C8F659BB29252A /* SessionController.swift */; };
 		58AF263DF6D7220A3D95E4D0 /* PomodoroSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */; };
+		5EB2B3992E53FBAD5343E0F3 /* CompletedTodayCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */; };
 		5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */; };
 		5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34CF188A7BF03E96664807B /* MonitoringEngine.swift */; };
 		602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D597B6333310C45A83D6402 /* ReminderPlayer.swift */; };
@@ -117,6 +119,8 @@
 		0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsView.swift; sourceTree = "<group>"; };
 		0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthPipelineTests.swift; sourceTree = "<group>"; };
 		11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroStore.swift; sourceTree = "<group>"; };
+		13C0C8E3EFD057439798567B /* VerifyDriveUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyDriveUITests.swift; sourceTree = "<group>"; };
+		1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletedTodayCountTests.swift; sourceTree = "<group>"; };
 		16AEB838486856F512DE30ED /* Sensitivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sensitivity.swift; sourceTree = "<group>"; };
 		16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDebugLogger.swift; sourceTree = "<group>"; };
 		20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettings.swift; sourceTree = "<group>"; };
@@ -274,6 +278,7 @@
 			isa = PBXGroup;
 			children = (
 				3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */,
+				1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */,
 				6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */,
 				0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */,
 				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
@@ -378,6 +383,7 @@
 				58068D70C0C4672F10367EE5 /* SettingsTogglesPersistenceUITests.swift */,
 				62F814308CAD266969085F82 /* StartHitAreaUITests.swift */,
 				A7C23BDEA7206E390ADDB2D4 /* Support.swift */,
+				13C0C8E3EFD057439798567B /* VerifyDriveUITests.swift */,
 			);
 			path = PostureLabUITests;
 			sourceTree = "<group>";
@@ -576,6 +582,7 @@
 				9D71A483E25ACB4938B3F90B /* SettingsTogglesPersistenceUITests.swift in Sources */,
 				20EFC09A01034AB24E76F078 /* StartHitAreaUITests.swift in Sources */,
 				E066DE6D76B50AF19CD97E55 /* Support.swift in Sources */,
+				046691B680564E2D7F4EE523 /* VerifyDriveUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -584,6 +591,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */,
+				5EB2B3992E53FBAD5343E0F3 /* CompletedTodayCountTests.swift in Sources */,
 				66F3893B5FC0E50A80A5CF10 /* DebugLogLineTests.swift in Sources */,
 				6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */,
 				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
@@ -719,7 +727,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "PostureLab 深度版";
@@ -731,7 +739,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6.6;
+				MARKETING_VERSION = 0.6.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.xieal.posturelab.depth;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -818,7 +826,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "PostureLab 深度版";
@@ -830,7 +838,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6.6;
+				MARKETING_VERSION = 0.6.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.xieal.posturelab.depth;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
