@@ -1,25 +1,28 @@
 import AVFoundation
 import Foundation
 
-/// Real-device input: the front TrueDepth camera's depth stream, and nothing else.
+/// Real-device input: the front TrueDepth camera's depth stream plus the colour frame the pose model
+/// runs on.
 ///
-/// The session has two outputs for one reason: iOS will not stream depth from the TrueDepth camera
-/// unless a video output is attached as well. The video output is created, connected and then left
-/// without a delegate — no sample buffer ever reaches this class, no pixel is read, copied or
-/// stored — while every sample the app sees comes from the depth output. The check script in the
-/// repository greps for a video delegate and for pixel access precisely to keep that true.
+/// The session has two outputs for two reasons: iOS will not stream depth from the TrueDepth camera
+/// unless a video output is attached, and the pose model needs pixels. The video output's delegate
+/// keeps **the most recent frame only** — a borrowed `CVPixelBuffer` reference, no copy — and every
+/// depth frame consumes it once and clears it. Nothing here draws it, encodes it, writes it to disk or
+/// puts it in a log line; the engine's sample carries joints, a depth grid and depth points only. The
+/// body mask and the point cloud still come from the depth frame (see `VisionPoseMapping`).
 ///
-/// Depth frames arrive on `queue`; segmentation and joint estimation run there, and only the finished
-/// `PostureSample` hops to the main thread.
+/// Depth frames arrive on `queue`; segmentation, pose and joint estimation run there, and only the
+/// finished `PostureSample` hops to the main thread.
 final class DepthCaptureSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
 
   private let jointSource: JointSource
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
-  /// Attached only so the session will start; it has no delegate and is never read.
+  /// One frame of colour, replaced by the next and dropped by the depth frame that uses it. It is
+  /// the graph's second output, and the only thing that ever touches its bytes is the pose model.
   private let videoOutput = AVCaptureVideoDataOutput()
-  private let queue = DispatchQueue(label: "me.xieal.posturelab.depth", qos: .userInitiated)
+  private let queue = DispatchQueue(label: "me.xieal.posturelab.vision", qos: .userInitiated)
 
   private var startedAt: TimeInterval?
   private var lastEmittedAt: TimeInterval = 0
@@ -33,12 +36,16 @@ final class DepthCaptureSource: NSObject, SampleSource {
   /// still pauses the timer.
   private static let watchdogInterval: TimeInterval = 0.5
 
-  init(jointSource: JointSource = DepthJointSource()) {
+  init(jointSource: JointSource = VisionJointSource()) {
     self.jointSource = jointSource
     super.init()
     depthOutput.setDelegate(self, callbackQueue: queue)
     depthOutput.isFilteringEnabled = true
     depthOutput.alwaysDiscardsLateDepthData = true
+    videoOutput.setSampleBufferDelegate(self, queue: queue)
+    // A backlog of colour frames would only mean a pose paired with a stale depth frame, so the
+    // session drops late frames before they ever reach the delegate.
+    videoOutput.alwaysDiscardsLateVideoFrames = true
   }
 
   func start() {
@@ -62,6 +69,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
   func stop() {
     watchdog?.cancel()
     watchdog = nil
+    latestColour = nil
     queue.async { [session] in
       if session.isRunning { session.stopRunning() }
     }
@@ -107,8 +115,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
     }
     session.addOutput(videoOutput)
     session.addOutput(depthOutput)
-    // The video output exists for the graph, not for data: no delegate is installed, and this file
-    // contains no access to its buffers.
+    // The video output feeds the pose model only: its delegate above keeps one frame for the next
+    // depth frame and drops it. No colour pixel leaves this class.
     orient(depthOutput.connection(with: .depthData))
     orient(videoOutput.connection(with: .video))
     session.commitConfiguration()
@@ -167,6 +175,20 @@ final class DepthCaptureSource: NSObject, SampleSource {
   /// The last processing frame, kept only long enough for `emit` to downsample it. It is a depth
   /// grid, never a colour image.
   private var lastDepth: DepthImage?
+
+  /// The newest colour frame, alive only between two depth frames. It is never drawn, encoded or
+  /// written: the one consumer is the pose request inside `jointSource`.
+  private var latestColour: CVPixelBuffer?
+}
+
+extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
+  /// Keeps the newest frame and returns. The previous one is released here — it is replaced, not
+  /// accumulated — so at most one colour frame exists in memory at a time.
+  func captureOutput(_ output: AVCaptureOutput,
+                     didOutput sampleBuffer: CMSampleBuffer,
+                     from connection: AVCaptureConnection) {
+    latestColour = CMSampleBufferGetImageBuffer(sampleBuffer)
+  }
 }
 
 extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
@@ -185,7 +207,18 @@ extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
 
     lastEmittedAt = t
     lastDepth = image
-    emit(jointSource.estimate(from: image), at: t)
+    // The colour frame this depth frame is paired with, handed over once and dropped: `takeColour`
+    // clears the reference before the estimate returns.
+    let colour = takeColour()
+    emit(jointSource.estimate(from: image, colour: colour), at: t)
+  }
+
+  /// Hands the most recent colour frame to one estimate and drops it. The buffer is a borrowed
+  /// reference: no copy is made here and none is kept after the call.
+  private func takeColour() -> CVPixelBuffer? {
+    let colour = latestColour
+    latestColour = nil
+    return colour
   }
 
   /// Copies the depth plane into a Swift array, then drops the pixel buffer. One plane, one read:
