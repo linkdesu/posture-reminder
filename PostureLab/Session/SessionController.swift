@@ -120,6 +120,8 @@ final class SessionController: ObservableObject {
   /// Whether the scene has reported its phase. The launch path runs before `UIApplicationMain`, so it
   /// must not touch the idle timer: the first write waits for the scene to say it is on screen.
   private var idleTimerArmed = false
+  /// 上一次常亮取证时的会话状态，用来判定四个记录时刻（`IdleTimerLogTrigger`）。
+  private var idleTimerLogState: IdleTimerLogTrigger.State?
 
   private var engine: MonitoringEngine?
   private var inputSource: SampleSource?
@@ -824,6 +826,25 @@ final class SessionController: ObservableObject {
     idleTimer.update(IdleTimerPolicy(pomodoro: pomodoro,
                                      focusOpen: pomodoroFocusOpen,
                                      isSceneActive: sceneActive))
+    logIdleTimerTriggers()
+  }
+
+  /// v0.6.5：专注开始、暂停、结束、切到后台时，把应用上实际的常亮值记进
+  /// `Documents/debug/idle-*.jsonl`（只在 DEBUG 构建）。
+  private func logIdleTimerTriggers() {
+    let state = IdleTimerLogTrigger.State(focusOpen: pomodoroFocusOpen,
+                                          paused: pomodoroFocusPaused,
+                                          sceneActive: sceneActive)
+    let triggers = IdleTimerLogTrigger.triggers(from: idleTimerLogState, to: state)
+    idleTimerLogState = state
+    #if DEBUG
+    guard !triggers.isEmpty, let value = idleTimer.actualValue else { return }
+    for trigger in triggers {
+      IdleTimerDebugLog.shared.write(IdleTimerLogTrigger.line(trigger: trigger,
+                                                              idleTimerDisabled: value,
+                                                              epochSeconds: now()))
+    }
+    #endif
   }
 
   /// The whole child-facing state, as one value, refreshed per sample so the countdown moves with the

@@ -41,6 +41,10 @@ final class IdleTimerController {
   /// Whether the screen is being held at the moment.
   var isDisabled: Bool { applied ?? false }
 
+  /// 应用上实际的 `isIdleTimerDisabled`（v0.6.5 取证日志读这个，而不是本控制器记住的值）；
+  /// 应用还不存在时为 nil。
+  var actualValue: Bool? { application()?.isIdleTimerDisabled }
+
   /// Evaluates `policy` and writes the application if the answer changed. Returns whether it wrote.
   @discardableResult
   func update(_ policy: IdleTimerPolicy) -> Bool {
