@@ -1,8 +1,8 @@
 import SwiftUI
-import UIKit
 
 /// The eleven pomodoro settings of the domain spec (`GLOSSARY.md`), in the order of its table, plus
-/// the app-level debug switch.
+/// the monitoring section (sensitivity and the avatar switch) and the debug section (debug mode and
+/// the experimental-posture switch).
 ///
 /// Every integer row builds its controls from `PomodoroSettings.ranges` — the one table
 /// `PomodoroSettings.clamped()` also enforces — so the screen can never offer a limit the store
@@ -103,6 +103,20 @@ struct PomodoroSettingsView: View {
           }
         }
 
+        Section("监测") {
+          Picker("灵敏度", selection: $settings.sensitivity) {
+            ForEach(Sensitivity.allCases, id: \.self) { sensitivity in
+              Text(sensitivity.displayName).tag(sensitivity)
+            }
+          }
+          .pickerStyle(.segmented)
+
+          Toggle(isOn: $settings.avatarEnabled) {
+            settingLabel(title: "形象模式",
+                         subtitle: "让孩子看到自己的坐姿点云；摄像头画面只在本机屏幕上显示，不保存、不上传")
+          }
+        }
+
         Section("屏幕") {
           Toggle(isOn: $settingsStore.settings.keepScreenAwake) {
             settingLabel(title: "屏幕常亮",
@@ -116,7 +130,14 @@ struct PomodoroSettingsView: View {
           // debug build ships with it on and keeps the switch.
           Toggle(isOn: $settings.debugEnabled) {
             settingLabel(title: "调试模式",
-                         subtitle: "关闭时孩子看不到关节数据和实验性体态；开启后专注时显示关节数据")
+                         subtitle: "开启后显示带关节名的骨架、每个指标的算法来源与实验性体态")
+          }
+
+          // Experimental postures are a parent/QA concern, so the switch lives inside the debug
+          // section rather than among the child's settings.
+          Toggle(isOn: $settings.experimentalPostures) {
+            settingLabel(title: "实验性体态",
+                         subtitle: "头前伸和驼背只做记录与调试高亮，不发出声音")
           }
         }
 
@@ -134,27 +155,17 @@ struct PomodoroSettingsView: View {
             Label("主页", systemImage: "chevron.left")
           }
         }
-        // A number pad has no return key, so a typed value needs its own way out: dropping the
-        // keyboard is what commits it.
-        ToolbarItemGroup(placement: .keyboard) {
-          Spacer()
-          Button("完成") { Self.dismissKeyboard() }
-        }
+        // The way back to the child's screen. A typed number's way out lives on the field's own
+        // keyboard accessory: its first responder is a UIKit field, which a SwiftUI keyboard
+        // toolbar does not follow.
       }
       .confirmationDialog("恢复默认设置？", isPresented: $confirmingReset, titleVisibility: .visible) {
         Button("恢复", role: .destructive) { settingsStore.reset() }
         Button("取消", role: .cancel) {}
       } message: {
-        Text("十一项设置都会回到默认值。")
+        Text("十一项番茄钟设置都会回到默认值；灵敏度、形象模式与调试开关不受影响。")
       }
     }
-  }
-
-  /// Commits whatever number is being typed by ending the edit, which is the same thing closing the
-  /// keyboard does.
-  private static func dismissKeyboard() {
-    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                    to: nil, from: nil, for: nil)
   }
 
   private var volumeText: String {
@@ -195,22 +206,18 @@ private struct IntegerSettingRow: View {
   /// What the field shows while it is being edited. It is the source of the value only on commit;
   /// until then the stored `value` is untouched.
   @State private var text = ""
-  @FocusState private var isEditing: Bool
+  @State private var isEditing = false
 
   var body: some View {
     if let range = PomodoroSettings.ranges[rangeKey] {
       HStack(spacing: 8) {
         Text(title)
         Spacer(minLength: 8)
-        TextField("\(value)", text: $text)
-          .keyboardType(.numberPad)
-          .multilineTextAlignment(.trailing)
-          .monospacedDigit()
+        SelectAllNumberField(text: $text,
+                             isEditing: $isEditing,
+                             accessibilityLabel: "\(title)数值",
+                             onCommit: commit)
           .frame(width: 56)
-          .textFieldStyle(.roundedBorder)
-          .focused($isEditing)
-          .onSubmit(commit)
-          .accessibilityLabel("\(title)数值")
         Text(unit)
           .foregroundStyle(.secondary)
         Stepper("", value: $value, in: range, step: PomodoroSettings.step(for: rangeKey))
@@ -224,23 +231,13 @@ private struct IntegerSettingRow: View {
         guard !isEditing else { return }
         text = String(newValue)
       }
-      .onChange(of: isEditing) { _, editing in
-        // Editing starts from an empty field, so what is typed is exactly what is read — a number pad
-        // offers no reliable way to place a caret inside "25". Dropping focus is what commits it, and
-        // an empty field keeps the value the row already had.
-        if editing {
-          text = ""
-        } else {
-          commit()
-        }
-      }
     }
   }
 
   /// Writes the typed number through the same clamp the store uses, then puts the legal value back on
   /// screen. Text that holds no number is dropped: the row keeps the value it already had.
-  private func commit() {
-    if let next = PomodoroSettings.value(fromManualEntry: text, for: rangeKey) {
+  private func commit(_ typed: String) {
+    if let next = PomodoroSettings.value(fromManualEntry: typed, for: rangeKey) {
       value = next
     }
     text = String(value)

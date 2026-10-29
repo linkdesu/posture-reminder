@@ -41,10 +41,18 @@ final class SettingsInputUITests: XCTestCase {
     XCTAssertEqual(integerValue(of: "短休息"), "15", "an oversized break was not pulled down")
     attachScreenshot(of: app, named: "AC-input-short-break-clamped")
 
-    // An empty field is not a number, so the row keeps the value it had.
+    // A tap selects the whole number, so leaving it untouched keeps the value the row had.
     let held = integerValue(of: "短休息")
     enter("", in: "短休息")
-    XCTAssertEqual(integerValue(of: "短休息"), held, "an empty entry did not restore the held value")
+    XCTAssertEqual(integerValue(of: "短休息"), held, "leaving the field untouched changed the value")
+
+    // And deleting the selected number is the same outcome: there is no number to commit.
+    let field = app.first(.textField, labelled: "短休息数值")
+    field.tap()
+    field.typeText(XCUIKeyboardKey.delete.rawValue)
+    app.first(.button, labelled: "完成").tap()
+    XCTAssertEqual(integerValue(of: "短休息"), held, "an emptied field did not restore the held value")
+    attachScreenshot(of: app, named: "AC-input-empty-keeps-value")
 
     // And the store holds what the rows show: the child's screen counts down from the same value,
     // which can only be true if nothing illegal was written.
@@ -52,6 +60,20 @@ final class SettingsInputUITests: XCTestCase {
     XCTAssertTrue(app.first(.button, labelled: "开始专注").waitForExistence(timeout: 10),
                   "the child's screen is not offering the parked focus")
 
+    restoreDefaults()
+  }
+
+  /// A tap selects the whole number: typing 7 replaces whatever the row held, so the row reads the
+  /// clamp of 7 — 5 on the 5-minute step — and never the old number with a 7 appended.
+  func testTapSelectsTheWholeValueSoTypingReplacesIt() {
+    let field = app.first(.textField, labelled: "专注时长数值")
+    XCTAssertTrue(field.waitForExistence(timeout: 10), "专注时长 has no number field")
+    field.tap()
+    field.typeText("7")
+    app.first(.button, labelled: "完成").tap()
+    XCTAssertEqual(integerValue(of: "专注时长"), "5",
+                   "the typed digit was appended to the old value instead of replacing it")
+    attachScreenshot(of: app, named: "AC-input-select-all")
     restoreDefaults()
   }
 
@@ -78,8 +100,8 @@ final class SettingsInputUITests: XCTestCase {
   // MARK: - Driving a row
 
   /// Types `text` into `title`'s field and commits it through the keyboard's 完成 button — the same
-  /// steps a parent takes, because a number pad has no return key. The field starts empty on the tap,
-  /// so nothing has to be cleared first; `text` empty is the "leave it blank" case.
+  /// steps a parent takes, because a number pad has no return key. Tapping the field selects its whole
+  /// value, so typed text replaces the old number; `text` empty is the "leave it alone" case.
   private func enter(_ text: String, in title: String) {
     let field = app.first(.textField, labelled: "\(title)数值")
     XCTAssertTrue(field.waitForExistence(timeout: 10), "\(title) has no number field")
