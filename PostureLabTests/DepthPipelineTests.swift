@@ -1,0 +1,160 @@
+import XCTest
+@testable import PostureLab
+
+/// The depth pipeline end to end on synthetic frames: segmentation, the joints a depth-only source
+/// can honestly report, the joints it must leave unavailable, and the cloud sampled from the mask.
+///
+/// The fixtures are built by hand rather than recorded from a device so every assertion has a known
+/// geometry: a head disc, a torso trapezoid and a flat wall behind them, in metres.
+final class DepthPipelineTests: XCTestCase {
+  private let width = 160
+  private let height = 120
+  private let background: Float = 2.0
+
+  // MARK: - Fixtures
+
+  /// A seated upper body: head disc centred at (80, 30) with radius 13, torso from y 40 to 100 with
+  /// shoulders 44 px wide, everything `bodyDepth` metres from the camera.
+  private func bodyImage(bodyDepth: Float = 0.5,
+                         headDepth: Float? = nil,
+                         headSlope: Float = 0) -> DepthImage {
+    var metres = [Float](repeating: background, count: width * height)
+    for y in 0..<height {
+      for x in 0..<width {
+        let inHead = hypot(Double(x - 80), Double(y - 30)) <= 13
+        let inTorso = y >= 39 && y <= 100 && abs(x - 80) <= 22
+        guard inHead || inTorso else { continue }
+        if inHead {
+          // `headSlope` is metres of depth change per image row, so a positive slope means the
+          // bottom of the head is farther away: a head tilted up.
+          metres[y * width + x] = (headDepth ?? bodyDepth) + headSlope * Float(y - 30)
+        } else {
+          metres[y * width + x] = bodyDepth
+        }
+      }
+    }
+    return DepthImage(width: width, height: height, metres: metres)!
+  }
+
+  private func flatWall() -> DepthImage {
+    DepthImage(width: width, height: height,
+               metres: [Float](repeating: 1.4, count: width * height))!
+  }
+
+  // MARK: - Segmentation
+
+  func testSegmentationKeepsTheBodyAndDropsTheWall() throws {
+    let mask = try XCTUnwrap(DepthSegmentation.segment(bodyImage()))
+
+    XCTAssertGreaterThan(mask.count, 400)
+    XCTAssertLessThan(mask.maxY, height)
+    XCTAssertGreaterThan(mask.minY, 0)
+    // The wall is 1.5 m behind the body and never enters the mask.
+    XCTAssertFalse(mask.contains(x: 2, y: 2))
+    XCTAssertTrue(mask.contains(x: 80, y: 60))
+  }
+
+  func testSegmentationDropsAnIsolatedNearArtifact() throws {
+    // A 3x3 speck at 25 cm in front of everything: nearer than the body, but a separate component.
+    var image = bodyImage()
+    var metres = image.metres
+    for y in 2..<5 {
+      for x in 2..<5 { metres[y * width + x] = 0.25 }
+    }
+    image = DepthImage(width: width, height: height, metres: metres)!
+
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    XCTAssertTrue(mask.contains(x: 80, y: 60), "the body must survive a near artifact")
+    XCTAssertFalse(mask.contains(x: 3, y: 3), "the 3x3 speck is not a body")
+  }
+
+  func testSegmentationFindsNobodyInAFlatWall() {
+    XCTAssertNil(DepthSegmentation.segment(flatWall()))
+  }
+
+  func testSegmentationFindsNobodyInAnEmptyFrame() {
+    let empty = DepthImage(width: width, height: height,
+                           metres: [Float](repeating: 0, count: width * height))!
+    XCTAssertNil(DepthSegmentation.segment(empty))
+  }
+
+  // MARK: - Joints
+
+  func testDepthJointsReportTheHeadNeckShouldersTorsoAndHips() throws {
+    let estimate = DepthJointSource().estimate(from: bodyImage())
+
+    XCTAssertEqual(estimate.joints[.nose]?.depthM ?? 0, 0.5, accuracy: 0.05)
+    for joint in [JointID.neck, .leftShoulder, .rightShoulder, .root, .leftHip, .rightHip] {
+      XCTAssertNotNil(estimate.joints[joint], "\(joint.rawValue) should come from the mask")
+    }
+    XCTAssertEqual(estimate.distanceCM ?? 0, 50, accuracy: 6)
+  }
+
+  func testDepthJointsNeverInventEyesEarsElbowsOrWrists() {
+    let estimate = DepthJointSource().estimate(from: bodyImage())
+
+    let mustBeUnavailable: Set<JointID> = [
+      .leftEye, .rightEye, .leftEar, .rightEar, .leftElbow, .rightElbow, .leftWrist, .rightWrist,
+    ]
+    XCTAssertTrue(mustBeUnavailable.isSubset(of: estimate.unavailable))
+    for joint in mustBeUnavailable {
+      XCTAssertNil(estimate.joints[joint], "\(joint.rawValue) must not be fabricated")
+    }
+    XCTAssertEqual(estimate.unavailable.count + estimate.joints.count, JointID.allCases.count)
+  }
+
+  func testNobodyInFrameLeavesEveryJointUnavailable() {
+    let estimate = DepthJointSource().estimate(from: flatWall())
+    XCTAssertTrue(estimate.joints.isEmpty)
+    XCTAssertTrue(estimate.cloud.isEmpty)
+    XCTAssertNil(estimate.distanceCM)
+    XCTAssertEqual(estimate.unavailable, Set(JointID.allCases))
+  }
+
+  func testHeadOrientationFollowsTheDepthSlope() throws {
+    let upright = DepthJointSource().estimate(from: bodyImage())
+    XCTAssertEqual(upright.pitchDeg ?? .nan, 0, accuracy: 1.5)
+
+    // The bottom of the head 0.3 m farther than its top: a head tipped back, positive pitch here.
+    let up = DepthJointSource().estimate(from: bodyImage(headSlope: 0.3 / 30))
+    let pitch = try XCTUnwrap(up.pitchDeg)
+    XCTAssertGreaterThan(pitch, 5)
+
+    // The opposite slope is a nod.
+    let down = DepthJointSource().estimate(from: bodyImage(headSlope: -0.3 / 30))
+    XCTAssertLessThan(try XCTUnwrap(down.pitchDeg), -5)
+  }
+
+  // MARK: - Cloud
+
+  func testCloudComesFromMaskPixelsAndKeepsTheirDepth() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let cloud = DepthCloud.points(mask: mask, image: image)
+
+    XCTAssertFalse(cloud.isEmpty)
+    XCTAssertLessThanOrEqual(cloud.count, 1200)
+    for point in cloud {
+      XCTAssertEqual(point.z, 0.5, accuracy: 0.001)
+      XCTAssertTrue((0...1).contains(point.x))
+      XCTAssertTrue((0...1).contains(point.y))
+    }
+  }
+
+  func testCloudIsDeterministic() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    XCTAssertEqual(DepthCloud.points(mask: mask, image: image),
+                   DepthCloud.points(mask: mask, image: image))
+  }
+
+  // MARK: - Coarse grid
+
+  func testDownsampleKeepsTheBodyCellsAndBlanksTheWall() throws {
+    let frame = DepthImage(width: 160, height: 120, metres: bodyImage().metres)!.downsampled()
+    XCTAssertEqual(frame.metres.count, DepthFrame.width * DepthFrame.height)
+    // The head occupies the centre column near the top of the frame.
+    XCTAssertGreaterThan(frame.value(x: 12, y: 6), 0)
+    XCTAssertEqual(frame.value(x: 0, y: 0), 2.0, accuracy: 0.01)
+  }
+}

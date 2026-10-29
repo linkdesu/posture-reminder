@@ -11,8 +11,15 @@ struct PostureSample: Equatable {
   var joints: [JointID: JointSample] = [:]
   var depth: DepthFrame? = nil
   var depthAvailable: Bool = false
+  /// Points sampled straight from the segmented depth frame.
+  var cloud: [BodyPoint] = []
+  /// Joints the source could not measure on this frame.
+  var unavailableJoints: Set<JointID> = []
 
-  var facePresent: Bool { distanceCM != nil && pitchDeg != nil }
+  /// Whether a head was measured. A depth-only source always has a distance when it has a head;
+  /// pitch may be unavailable on a frame whose head band is too noisy to fit a plane through, and
+  /// that must not turn a sitting child into an absent one.
+  var facePresent: Bool { distanceCM != nil }
   /// Whether the body is still in frame. Leaning on the desk has to stay apart from having got up.
   var bodyPresent: Bool { !joints.isEmpty }
 }

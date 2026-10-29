@@ -1,14 +1,5 @@
 import Foundation
 
-/// One point of the avatar's body cloud. `x` and `y` are normalized image coordinates — the same
-/// (0...1, y downwards) space as the joints, so `PoseProjection` can place them — and `z` is the
-/// distance to the camera in metres, positive away from it.
-struct BodyPoint: Equatable {
-  var x: Double
-  var y: Double
-  var z: Double
-}
-
 /// Builds a 3D point cloud that has the shape of the body the joints describe.
 ///
 /// The points sit on three volumes derived from the joints — a head ellipsoid, a torso tube from the

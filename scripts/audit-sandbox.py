@@ -5,7 +5,7 @@ Usage:
   scripts/audit-sandbox.py <app-container-root> [--json out.json]
 
 Argument: the directory that *contains* Documents/, i.e. what
-`xcrun simctl get_app_container <sim> me.xieal.posturelab data` prints, or the
+`xcrun simctl get_app_container <sim> me.xieal.posturelab.depth data` prints, or the
 `--destination` of a `devicectl device copy from --domain-type appDataContainer`
 pull. Everything under it is walked.
 

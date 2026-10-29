@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The child's pomodoro screen: the camera preview and the point-cloud likeness fill the ground
-/// from launch — before 开始专注 is pressed — the countdown and the phase sit quietly over the empty
-/// space above them, and the controls wait at the bottom.
+/// The child's pomodoro screen: the depth-derived point cloud and its vector silhouette fill the
+/// ground from launch — before 开始专注 is pressed — the countdown and the phase sit quietly over the
+/// empty space above them, and the controls wait at the bottom.
 ///
 /// Nothing here can interrupt. A breaching posture never changes the layout, never takes over the
 /// screen and never stops the clock — it only tints the part of the avatar that is in trouble, which
@@ -31,27 +31,12 @@ struct PomodoroView: View {
       Color.black
         .ignoresSafeArea()
 
-      // The live camera and the likeness are the ground as soon as the app opens, unless a parent
-      // turned 形象模式 off — that switch is the one way to take the mirror away. A scripted run has
-      // no camera, so there the point cloud keeps the plain black ground the rig's figures were
-      // drawn for.
+      // The likeness is the ground as soon as the app opens, unless a parent turned 形象模式 off —
+      // that switch is the one way to take the mirror away. No camera picture is ever drawn: the
+      // cloud comes from the depth mask, and with no body yet the view draws a vector silhouette.
       if settings.avatarEnabled {
-        if !controller.isSimulating {
-          CameraPreview(session: controller.cameraSession)
-            .ignoresSafeArea()
-            .opacity(0.55)
-          // A quiet scrim so the cloud and its labels stay legible over a bright room.
-          Color.black.opacity(0.25)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-        }
-
-        // The likeness is the ground of the screen, not a card inside a layout. It also draws the
-        // quiet placeholder while there is no geometry yet, so the ground never turns into a blank
-        // warning.
         AvatarView(geometry: controller.latestGeometry,
-                   assessment: childAssessment,
-                   drawsGround: controller.isSimulating)
+                   assessment: childAssessment)
           .ignoresSafeArea()
           // When the overlay is up it is inset for the controls and the likeness takes the same
           // frame, so the skeleton stays on the body. See `controlsClearance`.

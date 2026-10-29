@@ -21,8 +21,8 @@ enum PomodoroLaunch {
   }
 
   /// A scripted run held before its first focus (`-holdStart`, debug builds only): the point cloud
-  /// and the camera are live, the countdown is parked, and 开始专注 is waiting for a tap. This is the
-  /// state the child's screen opens in.
+  /// and the silhouette are live, the countdown is parked, and 开始专注 is waiting for a tap. This is
+  /// the state the child's screen opens in.
   static func parkedPreview(scenario: String = "headDown", minutes: Int = 5) -> [String] {
     ["-scenario", scenario, "-holdStart", "1", "-focusMinutes", String(minutes), "-debug", "0"]
   }

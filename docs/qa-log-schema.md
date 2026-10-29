@@ -28,12 +28,12 @@
 xcrun devicectl device copy from \
   --device <device-id> \
   --domain-type appDataContainer \
-  --domain-identifier me.xieal.posturelab \
+  --domain-identifier me.xieal.posturelab.depth \
   --source Documents \
   --destination <local-round-directory>
 ```
 
-这会把 `Documents/`——包括 `debug/session-*.jsonl` 与 `debug/screenshots/`——取到本轮目录。模拟器中的等价命令是 `xcrun simctl get_app_container <sim-id> me.xieal.posturelab data`。`scripts/run-scenarios.sh` 两者都会做，然后把最新的 `session-*.jsonl` 交给 `scripts/verify-session.py`。
+这会把 `Documents/`——包括 `debug/session-*.jsonl` 与 `debug/screenshots/`——取到本轮目录。模拟器中的等价命令是 `xcrun simctl get_app_container <sim-id> me.xieal.posturelab.depth data`。`scripts/run-scenarios.sh` 两者都会做，然后把最新的 `session-*.jsonl` 交给 `scripts/verify-session.py`。
 
 ## 行格式与完整键集
 

@@ -23,7 +23,7 @@ set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
 DEVICE="${DEVICE:-00008110-001271181AD3801E}"
-BUNDLE=me.xieal.posturelab
+BUNDLE=me.xieal.posturelab.depth
 SIM_APP=/tmp/pl-sim/Build/Products/Debug-iphonesimulator/PostureLab.app
 DEV_APP=/tmp/pl-device/Build/Products/Debug-iphoneos/PostureLab.app
 DO_BUILD=0

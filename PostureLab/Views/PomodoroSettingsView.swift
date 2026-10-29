@@ -113,7 +113,7 @@ struct PomodoroSettingsView: View {
 
           Toggle(isOn: $settings.avatarEnabled) {
             settingLabel(title: "形象模式",
-                         subtitle: "显示坐姿点云与摄像头预览；关闭后两者都隐藏，画面只在本机显示、不保存不上传")
+                         subtitle: "显示由深度数据生成的人形点云；关闭后隐藏，画面只在本机显示、不保存不上传")
           }
         }
 

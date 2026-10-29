@@ -54,8 +54,14 @@ struct DepthFrame: Equatable {
   }
 }
 
-/// The fake body geometry a simulated input produces: every joint of one sample plus one depth frame.
+/// The body geometry one sample produces: the joints a joint source measured, the coarse depth grid,
+/// the points sampled straight from the segmented depth frame, and the joints the source could not
+/// measure.
 struct PoseGeometry: Equatable {
   var joints: [JointID: JointSample]
   var depth: DepthFrame?
+  /// Points taken from the depth mask itself. Empty when the source had no depth to sample.
+  var cloud: [BodyPoint] = []
+  /// Joints the source reported as unmeasurable on this frame; the overlay names them 不可用.
+  var unavailableJoints: Set<JointID> = []
 }

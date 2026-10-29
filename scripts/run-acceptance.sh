@@ -15,7 +15,7 @@
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
-BUNDLE=me.xieal.posturelab
+BUNDLE=me.xieal.posturelab.depth
 APP=/tmp/pl-sim/Build/Products/Debug-iphonesimulator/PostureLab.app
 OUT="${OUT:-artifacts/r6-pomodoro}"
 DO_BUILD=0
@@ -198,7 +198,7 @@ if wanted AC8; then
   sleep 1
   xcrun simctl launch "$SIM" "$BUNDLE" -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 >/dev/null 2>&1
   sleep 6
-  pid=$(xcrun simctl spawn "$SIM" launchctl list 2>/dev/null | awk '/me.xieal.posturelab/ {print $1; exit}')
+  pid=$(xcrun simctl spawn "$SIM" launchctl list 2>/dev/null | awk '/me.xieal.posturelab.depth/ {print $1; exit}')
   {
     echo "static audit of the sources:"
     python3 scripts/audit-offline.py

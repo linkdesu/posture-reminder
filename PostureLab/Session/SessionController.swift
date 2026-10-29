@@ -1,4 +1,3 @@
-import ARKit
 import Combine
 import Foundation
 import UIKit
@@ -103,10 +102,6 @@ final class SessionController: ObservableObject {
   let settings: Settings
   let logger: DebugLogging
 
-  /// The camera the preview and the face source share. It runs on the child's screen from launch,
-  /// so the preview and the point cloud are already alive before 开始专注; the report stops it.
-  let cameraSession = ARSession()
-
   /// The pomodoro history the parent report reads and every closed pomodoro is written to.
   private let pomodoroStore: PomodoroStore
   /// The eleven pomodoro settings; the settings screen edits this very instance.
@@ -132,8 +127,8 @@ final class SessionController: ObservableObject {
   /// so a record and its segments land on the same spot of the report's time axis.
   private var pomodoroEpochOrigin: TimeInterval = 0
   /// The last sample time both engines saw, and the offset that keeps that clock monotonic: a source
-  /// restarts its own clock at zero, and the child's screen gives the camera up when the parent opens
-  /// the report, so the controller maintains the shared clock rather than trusting the source to.
+  /// restarts its own clock at zero, and the child's screen gives the depth sensor up when the parent
+  /// opens the report, so the controller maintains the shared clock rather than trusting the source.
   private var pomodoroLastT: TimeInterval = 0
   private var pomodoroClockOffset: TimeInterval = 0
   /// The last whole second of the shared clock a `pomodoro_tick` line was written for. The tick is
@@ -163,7 +158,7 @@ final class SessionController: ObservableObject {
   private var debugAutoPausePaused = false
   private var debugAutoPauseFinished = false
   /// `-holdStart 1`: a scripted run that keeps its first focus parked, for the evidence that the
-  /// preview and the point cloud are on screen before 开始专注. Debug builds only.
+  /// point cloud and the silhouette are on screen before 开始专注. Debug builds only.
   var debugHoldStart = false
   #endif
 
@@ -212,8 +207,8 @@ final class SessionController: ObservableObject {
     applyPomodoroAudio(pomodoroSettings.settings)
     startPomodoroTimer()
     refreshPomodoroSnapshot()
-    // The child's screen is the root, so the camera starts with it: the preview and the point cloud
-    // are the screen's ground, not something a focus has to turn on.
+    // The child's screen is the root, so the depth sensor starts with it: the point cloud and the
+    // silhouette are the screen's ground, not something a focus has to turn on.
     startPomodoroInput()
   }
 
@@ -247,7 +242,7 @@ final class SessionController: ObservableObject {
   func showReport(scope: ReportScope) {
     reportScope = scope  // the observer refreshes the report
     flushPomodoroPending()
-    // A parent-facing screen needs no camera, so the camera stops here; returning to the child's
+    // A parent-facing screen needs no depth, so the sensor stops here; returning to the child's
     // screen starts a fresh source on the shared clock.
     stopInput()
     phase = .report
@@ -393,7 +388,10 @@ final class SessionController: ObservableObject {
     } else {
       // No engine in flight — a parked focus, a break, a pause — so this sample feeds only the
       // mirror. The point cloud is the child's screen from launch, not something 开始专注 turns on.
-      latestGeometry = PoseGeometry(joints: sample.joints, depth: sample.depth)
+      latestGeometry = PoseGeometry(joints: sample.joints,
+                                    depth: sample.depth,
+                                    cloud: sample.cloud,
+                                    unavailableJoints: sample.unavailableJoints)
     }
 
     let events = pomodoro.ingest(sample)
@@ -517,7 +515,10 @@ final class SessionController: ObservableObject {
       }
     }
 
-    latestGeometry = PoseGeometry(joints: sample.joints, depth: sample.depth)
+    latestGeometry = PoseGeometry(joints: sample.joints,
+                                  depth: sample.depth,
+                                  cloud: sample.cloud,
+                                  unavailableJoints: sample.unavailableJoints)
     latestAssessment = engine.latestAssessment
   }
 
@@ -689,9 +690,8 @@ final class SessionController: ObservableObject {
   }
 
   private func startPomodoroInput() {
-    // The camera is the child's screen, not the focus's: it runs before the first 开始 so the
-    // preview and the cloud are already there, and it is only the parent-facing report that gives
-    // the camera up.
+    // The depth sensor is the child's screen, not the focus's: it runs before the first 开始 so the
+    // cloud is already there, and it is only the parent-facing report that gives the sensor up.
     guard phase != .report, !pomodoroRunFinished, inputSource == nil else { return }
     let source = makeSource()
     source.onSample = { [weak self] sample in self?.handlePomodoro(sample) }
@@ -771,7 +771,7 @@ final class SessionController: ObservableObject {
     if let scenario = simulatedScenario {
       return SimulatedSampleSource(scenario: scenario)
     }
-    return ARFaceSampleSource(session: cameraSession)
+    return DepthCaptureSource()
   }
 
   private func stopInput() {

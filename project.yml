@@ -10,17 +10,18 @@ targets:
     sources: [PostureLab]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.depth
         DEVELOPMENT_TEAM: DFA8MZ9MZW
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_NSCameraUsageDescription: "用于检测阅读坐姿和眼睛到屏幕的距离（全部在本机处理）"
+        INFOPLIST_KEY_NSCameraUsageDescription: "用于读取前置 TrueDepth 深度数据来估计阅读坐姿；不读取彩色画面，全部在本机处理"
+        INFOPLIST_KEY_CFBundleDisplayName: "PostureLab 深度版"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "0.3"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "0.4"
+        CURRENT_PROJECT_VERSION: "4"
   PostureLabTests:
     type: bundle.unit-test
     platform: iOS
@@ -29,7 +30,7 @@ targets:
       - target: PostureLab
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.tests
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.depth.tests
         GENERATE_INFOPLIST_FILE: YES
         DEVELOPMENT_TEAM: DFA8MZ9MZW
   # The UI target exists for the two criteria a launch argument cannot express: AC2's eleven
@@ -43,7 +44,7 @@ targets:
       - target: PostureLab
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: me.xieal.posturelab.depth.uitests
         GENERATE_INFOPLIST_FILE: YES
         DEVELOPMENT_TEAM: DFA8MZ9MZW
 schemes:

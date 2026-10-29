@@ -18,7 +18,7 @@
 set -uo pipefail
 
 SIM="${SIM:-C12DA589-2444-4F2E-A943-4D6BAFB02BF1}"
-BUNDLE=me.xieal.posturelab
+BUNDLE=me.xieal.posturelab.depth
 APP=/tmp/pl-sim/Build/Products/Debug-iphonesimulator/PostureLab.app
 OUT="${OUT:-artifacts/r5-pomodoro}"
 DO_BUILD=0
