@@ -15,7 +15,7 @@
 ## How to get to it (user POV)
 
 - 启动后进入 `pomodoro_main`，点击「开始专注」。
-- 勾选 ` -debug 1` 或设置页「调试模式」后，专注中可见骨架/特征叠加。
+- 通过 `-debug 1` 关闭默认开启的调试模式，或在设置页关闭「调试模式」后，专注中不再显示骨架/特征叠加；DEBUG 构建默认开启该开关。
 - 体态越阈不改变布局；只有 15 秒后的预录语音，以及点云上对应部位的着色。
 - 无人时倒计时冻结、界面安静；回来后继续。
 
@@ -26,7 +26,7 @@ Preconditions：
 - `verify.py up` 与 `doctor` 已通过。
 - 使用脚本化 `-scenario deskLean`，模拟器无摄像头也能产生关节点与深度帧。
 
-- **跨体态语音。** `verify.py drive --run <run-id>` 的 `posture-voice` 场景启动 `-pomodoro 1 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1`，30 秒截图。
+- **跨体态语音。** `verify.py drive --run <run-id>` 的 `posture-voice` 场景启动 `-scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1`，30 秒截图。
 - **校验语音。** `verify.py evidence --run <run-id>` 运行 `scripts/verify-acceptance.py <log> --ac4 --quiet`：同一时刻多条 `speech_played` 不得重叠，播放顺序按 `PostureKind.priority`；同时检查 `desk_lean` 二级语音至少出现一次。
 - **校验无人暂停。** `verify.py drive` 的 `pause` 场景启动 `pauseWhileBreach`，30 秒截图；`verify.py evidence` 运行 `scripts/verify-acceptance.py <log> --history <pomodoro-history.json> --ac5 --quiet`，要求存在暂停记录且 `focusedSeconds` 不包含暂停。
 - **校验 300 秒中断。** 单元测试覆盖 299/301 秒边界：`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild ... -only-testing:PostureLabTests/PomodoroEngineTests test`；模拟器长跑不适合作为唯一证据。

@@ -1,6 +1,6 @@
 # QA 日志结构——如何阅读 PostureLab 会话日志
 
-这是阅读会话日志的参考。它描述 `FileDebugLogger` 写出、`scripts/verify-session.py` 读取的日志格式。它是日志参考，不是 PRD 的复述；日志为何是契约见 `docs/adr/0002-jsonl-log-contract-with-qa.md`，领域词汇见 `GLOSSARY.md`。日志结构是与 QA 的契约：新增、重命名或删除键对脚本的破坏程度与行为变更相同，落地前必须与 QA 协调。
+这是番茄钟会话日志的参考。它描述 `FileDebugLogger` 写出、`scripts/verify-session.py` 与 `scripts/verify-acceptance.py` 读取的日志格式。它是日志参考，不是 PRD 的复述；日志为何是契约见 `docs/adr/0002-jsonl-log-contract-with-qa.md`，领域词汇见 `GLOSSARY.md`。日志结构是与 QA 的契约：新增、重命名或删除键对脚本的破坏程度与行为变更相同，落地前必须与 QA 协调。
 
 ## `ts` 与 `t` 不是一回事
 
@@ -50,7 +50,7 @@ xcrun devicectl device copy from \
 | `wall_clock` | String? | 与 `ts` 同一时刻的 ISO8601 表示（`withInternetDateTime`）。便于人读；算术请用 `ts`。 |
 | `event` | String? | 事件类型。见事件表。 |
 | `state` | String? | 该行之后的体态状态。在 `status_changed` 行它是新状态；在其他每一行，写入器盖上它最近看到的状态（初始为 `good`）。永不为 `null`。 |
-| `screen` | String? | 该行对应的可见界面。在 `screen_shown` 行它是刚展示的界面；其他行写入器盖上最近看到的界面（初始为 `home`）。永不为 `null`。 |
+| `screen` | String? | 该行对应的可见界面。在 `screen_shown` 行它是刚展示的界面；其他行写入器盖上最近看到的界面（初始为 `pomodoro_main`，即应用启动页）。永不为 `null`。 |
 | `distance_cm` | Double? | 该 tick 的样本/状态/提醒对应的到书本距离，单位厘米；未检测到人脸或事件不携带样本时为 `null`。 |
 | `pitch_deg` | Double? | 同一 tick 的头部俯仰角，单位度；未检测到人脸时为 `null`。 |
 | `alert_type` | String? | 提醒对应的体态：八个 `PostureKind` rawValue 之一（见 `alert_type` 词汇）。在 `reminder`、`speech_timeout`、`speech_unavailable` 与 `speech_played` 行填写。 |
@@ -72,7 +72,7 @@ xcrun devicectl device copy from \
 | `head_down_remind_count` | Int? | 在 `session_ended` 行：“低头”的提醒**行**数，两个级别都算。 |
 | `longest_good_streak_seconds` | Double? | 在 `session_ended` 行：最长连续良好秒数。 |
 | `scenario` | String? | 在 `session_started` 行：脚本化场景名；相机运行为 `null`。 |
-| `message` | String? | 在 `cue_played` 行：提示音名称——`warn_before_end`、`end_soft` 或 `end_chime`。其他行为 `null`。 |
+| `message` | String? | 在 `cue_played` 行：提示音名称——`end_soft` 或 `end_chime`。其他行为 `null`。 |
 | `battery_level` | Double? | 电量比例 `0...1`。**由写入器采样**，不是事件驱动——见下文。 |
 | `thermal_state` | String? | `nominal` / `fair` / `serious` / `critical`。**由写入器采样**——见下文。 |
 | `highlighted_feature` | String? | 在 `features` 行：调试叠加层当前标红的 `PostureFeature` rawValue；没有高亮时为 `null`。 |
@@ -122,7 +122,7 @@ xcrun devicectl device copy from \
 |---|---|---|
 | `session_started` | 一次会话开始。 | `scenario` |
 | `config` | 本次会话生效的阈值。 | `sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg` |
-| `calibration_done` | 校准结束；基线已设定。 | `baseline_distance_cm`、`baseline_pitch_deg` |
+| `calibration_done` | 校准结束；基线已设定。旧阅读流程写过这一行；当前无写入路径（静默校准尚未实现），事件与键保留。 | `baseline_distance_cm`、`baseline_pitch_deg` |
 | `screen_shown` | 一个界面出现。 | `screen` |
 | `sample` | 一个相机 tick（脚本运行中为 10 Hz）。 | `t`、`distance_cm`、`pitch_deg` |
 | `status_changed` | 显示的体态状态发生变化。 | `t`、`state`、`distance_cm`、`pitch_deg` |
@@ -133,7 +133,7 @@ xcrun devicectl device copy from \
 | `speech_unavailable` | 该体态的占位片段无法加载或解码，因此提醒是静音的。不会重复播放，队列继续推进。 | `alert_type`（没有 `t`，没有 `level`） |
 | `speech_played` | 某个片段报告它**开始**播放。写在播放器真正开始片段的地方，而不是排队的地方，因此该行绝不会为缺失或无法播放的资源声称有声音——那些会写 `speech_unavailable`。它证明播放器已加载并开始片段，不证明房间里有人听到了。 | `alert_type`、`level`（没有 `t`——播放器没有会话时钟） |
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
-| `cue_played` | 番茄钟提示音报告它**开始**播放：一分钟提醒，或完成专注的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
+| `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
 | `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
 | `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |
 | `session_ended` | 会话结束；携带汇总。 | `total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`paused_seconds`、`near_count`、`near_remind_count`、`head_down_count`、`head_down_remind_count`、`longest_good_streak_seconds`、`posture_stats` |
@@ -152,7 +152,7 @@ xcrun devicectl device copy from \
 
 ### `screen`
 
-`home`、`calibration`、`calibration_result`、`monitoring`、`summary`、`settings`（阅读流程），加上 `pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`（番茄钟流程；统计页的三个范围是三个界面名，因此它们的截图不会互相覆盖）。注意 `reminder` 与 `highlight` **不是** `screen` 值：这些截图直接捕获，不写 `screen_shown` 行，因此不会污染 `screen` 键。
+`pomodoro_main`、`pomodoro_settings`、`report_day`、`report_week`、`report_month`。番茄钟主页是应用唯一入口，所以一次运行的首行就是 `pomodoro_main`；统计页的三个范围是三个界面名，因此它们的截图不会互相覆盖。旧阅读流程的 `home`、`calibration`、`calibration_result`、`monitoring`、`summary`、`settings` 已随该流程退役（ADR-0006）。注意 `reminder` 与 `highlight` **不是** `screen` 值。
 
 ### `alert_type`
 
@@ -160,7 +160,7 @@ xcrun devicectl device copy from \
 
 ### `level`
 
-`1` = 轻提示（阅读流程中为提示音 + 橙色边缘；番茄钟保留该行但不播放提示音），`2` = 语音（应用包内的预录 WAV 片段——没有系统 TTS）。
+`1` = 轻提示（番茄钟保留该行与计数，但不播放提示音），`2` = 语音（应用包内的预录 WAV 片段——没有系统 TTS）。
 
 ### `sensitivity`
 
@@ -200,7 +200,7 @@ xcrun devicectl device copy from \
 | `MonitoringEvent.resumed(...)` | `resumed` |
 | `MonitoringEvent.sessionEnded(...)` | `session_ended` |
 | `PomodoroPhase.focus` / `.shortBreak` / `.longBreak` | `phase` = `focus` / `shortBreak` / `longBreak`（rawValue 保留 camelCase 拼写） |
-| `PomodoroCue.warnBeforeEnd` / `.endSoft` / `.endChime` | `cue_played.message` = `warn_before_end` / `end_soft` / `end_chime` |
+| `PomodoroCue.endSoft` / `.endChime` | `cue_played.message` = `end_soft` / `end_chime` |
 | `SessionSummary.tooCloseSeconds` | `near_seconds` |
 | `SessionSummary.tooCloseCount` | `near_count` |
 | `SessionSummary.tooCloseRemindCount` | `near_remind_count` |
@@ -249,33 +249,25 @@ head_down_count = 1         head_down_remind_count = 1
 
 ## 电量与热状态是趋势线，不是逐样本读数
 
-`battery_level` 与 `thermal_state` 背后没有事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。阅读时比较一次会话的首行与末行（见 AC8）；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
+`battery_level` 与 `thermal_state` 背后没有事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
 
 ## 截图
 
-`Documents/debug/screenshots/` 为运行到达过的每个 `screen_shown` 名称保存一张 PNG，另加两张直接捕获的证据截图：
+`Documents/debug/screenshots/` 为运行到达过的每个 `screen_shown` 名称保存一张 PNG：
 
-- 阅读流程：`home`、`calibration`、`calibration_result`、`monitoring`、`summary`、`settings`。
-- 番茄钟流程：`pomodoro_main`、`pomodoro_settings`，以及 `report_day` / `report_week` / `report_month`（每个统计范围一个名称）。
-- 证据：`reminder`（首次一级提醒）与 `highlight`（首次高亮特征）。二者都不写 `screen_shown` 行。
+- `pomodoro_main`（应用启动页）、`pomodoro_settings`，以及 `report_day` / `report_week` / `report_month`（每个统计范围一个名称）。
 
-只有到达过对应界面，名称才存在。脚本化阅读运行中，`settings` 截图只在带 `-captureSettings` 时产生；番茄钟流程中，设置页通过 `-settings 1` 到达，统计页通过 `-report day|week|month` 到达。`reminder` 截图只在实际触发过一级提醒的运行中存在，否则 `verify-session.py` 会把它从期望集合中移除。
+只有到达过对应界面，名称才存在；设置页通过 `-settings 1` 到达，统计页通过 `-report day|week|month` 到达。`reminder` 与 `highlight` 曾是旧阅读流程直接捕获的证据截图，已随该流程退役。
 
 ## 哪个键回答哪条验收标准
 
-本表索引阅读会话验收清单（AC1 = 首次运行经过 `calibration_done`，依此类推）。番茄钟轮次单独编号自己的清单：那里的 AC1 是倒计时，由 `pomodoro_tick` 序列回答——`remaining_seconds` 与相邻行之间的 `ts` 间隔同步下降，且序列中没有断档——AC4 是音频，由 `speech_played` 行（`alert_type` + `level`）以及语音开关关闭时完全没有这类行来回答。
+番茄钟轮次编号自己的验收清单。日志侧的几条：
 
-| AC | 日志中的证据 |
+| 验收 | 日志中的证据 |
 |---|---|
-| AC1 | `screen_shown` 行的顺序（`home` → `calibration` → `calibration_result`）以及 `calibration_done` 行的 `baseline_distance_cm` / `baseline_pitch_deg`。 |
-| AC2 | `sample` 行上的 `distance_cm` / `pitch_deg` 用来找首次越阈；`reminder` 行上的 `t`（`level` 1 与 2）减去首次越阈；`config` 中的 `distance_threshold_cm` / `pitch_threshold_deg`；`baseline_pitch_deg`。 |
-| AC3 | 靠近之后 `status_changed` 的 `state = good`；冷却窗口内没有 `near` 的 `reminder` 行。 |
-| AC4 | `alert_type = head_down` 的 `reminder` 行，`level` 1 以及（持续时）2。 |
-| AC5 | `status_changed` 的 `state = no_person`；`paused` / `resumed` 行；`paused_seconds`，以及暂停期间 `total_seconds` 不增长。 |
-| AC6 | `session_ended` 的汇总键：`total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`longest_good_streak_seconds`（从样本重算）。 |
-| AC7 | `config`：`sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg`（35/15、30/20、25/25）；`reminder` 触发时机的变化。 |
-| AC8 | 首行与末行的 `battery_level` 与 `thermal_state`；整个运行的 `ts` 跨度。 |
-| AC9 | `Documents/debug/screenshots/` 下的期望截图集合（不是日志键）。 |
-| AC10 | 真机相机运行中与 AC2/AC4 相同的键：`reminder` 时机与 `alert_type`。 |
-| AC11 | 完全没有 `reminder` 行。 |
-| AC12 | `paused` 行、没有 `reminder` 行、没有越阈秒数，且每条 `reminder` 行都带 `t`、`alert_type` 与 `level`。 |
+| 倒计时 | `pomodoro_tick` 序列：`remaining_seconds` 与相邻行之间的 `ts` 间隔同步下降，`phase` 只在阶段切换处改变，序列中没有断档。 |
+| 阶段流转 | `pomodoro_tick` 的 `phase` 从 `focus` 走到 `shortBreak` / `longBreak`，再回到 `focus`；每完成一个专注有一条 `session_ended`。 |
+| 音频 | `speech_played` 行（`alert_type` + `level`）；语音开关关闭时完全没有这类行。阶段结束提示音只写 `cue_played`（`end_soft` / `end_chime`），静音时没有。 |
+| 暂停 | `paused` / `resumed` 行；暂停期间倒计时冻结，暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴带。 |
+| 体态提醒 | `reminder` 行带 `t`、`alert_type`、`level`（1 与 2）与 `breach_seconds`；实验级体态永不发声。 |
+| 隐私 | 没有任何网络键或远端地址；`Documents/` 下没有 RGB 图像，只有 JSONL、截图与番茄钟历史。 |

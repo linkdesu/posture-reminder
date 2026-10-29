@@ -26,11 +26,11 @@ cd /Volumes/Data/worktrees/posture-lab/v0.4-v0.5-sim
 
 1. 启动并等待模拟器；
 2. 用 `xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=<udid>" -derivedDataPath /tmp/pl-verify-build build` 构建；
-3. 卸载/安装 `PostureLab.app`，以 `-pomodoro 1` 启动；
+3. 卸载/安装 `PostureLab.app`，无参启动（应用直接进入番茄钟主页 `pomodoro_main`）；
 4. 把 pid、容器路径、gitSha、branch、target、时间戳和检查结果写入 `tmp/verify/<run-id>/state.json`；
-5. 更新 `tmp/verify/latest` 软链接，截图 `launch/home.png`。
+5. 更新 `tmp/verify/latest` 软链接，截图 `launch/pomodoro_main.png`。
 
-就绪判据：`state.json` 有非空 `pid` 与 `appContainerDataPath`，`launch/home.png` 存在，且 `doctor` 全绿。只是进程存在不算就绪。
+就绪判据：`state.json` 有非空 `pid` 与 `appContainerDataPath`，`launch/pomodoro_main.png` 存在，且 `doctor` 全绿。只是进程存在不算就绪。
 
 真机：
 
@@ -42,7 +42,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
   --device 00008110-001271181AD3801E /tmp/pl-verify-device/Build/Products/Debug-iphoneos/PostureLab.app
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device process launch \
-  --terminate-existing --device 00008110-001271181AD3801E me.xieal.posturelab -- -pomodoro 1
+  --terminate-existing --device 00008110-001271181AD3801E me.xieal.posturelab
 ```
 
 真机拉取沙盒：
@@ -76,15 +76,15 @@ Doctor 失败时先修复环境（解锁真机、重新 boot、重新 install）
 
 运行器会执行：
 
-- `pomodoro-focus`：`-pomodoro 1 -scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1 -endSound chime`，在 35 秒、70 秒与 130 秒截图；130 秒时休息结束，历史写入第一条完成记录；70 秒日志快照用于历史对账。
-- `posture-voice`：`-pomodoro 1 -scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1`，30 秒截图，覆盖多体态串行语音与二级播放。
-- `pause`：`-pomodoro 1 -scenario pauseWhileBreach -focusMinutes 1 -debug 0`，30 秒截图，覆盖无人暂停。
-- `settings`：`-pomodoro 1 -settings 1`，截图设置页。
-- `report`：先 `-pomodoro 1 -seedHistory 30 -report day` 截图并复制历史；然后杀进程、**不重装**、以 `-pomodoro 1 -report day` 重开，证明历史来自磁盘。
+- `pomodoro-focus`：`-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1 -endSound chime`，在 35 秒、70 秒与 130 秒截图；130 秒时休息结束，历史写入第一条完成记录；70 秒日志快照用于历史对账。
+- `posture-voice`：`-scenario deskLean -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1`，30 秒截图，覆盖多体态串行语音与二级播放。
+- `pause`：`-scenario pauseWhileBreach -focusMinutes 1 -debug 0`，30 秒截图，覆盖无人暂停。
+- `settings`：`-settings 1`，截图设置页。
+- `report`：先 `-seedHistory 30 -report day` 截图并复制历史；然后杀进程、**不重装**、以 `-report day` 重开，证明历史来自磁盘。
 
 每次启动都记录 `launch-args.txt`、`provenance.json`、截图、`Documents/` 与 `sandbox-audit.json`。详细特性入口见 `features/`。
 
-XCUITest 只用于模拟器无法用 launch argument 表达的真实点击（例如设置页 12 项参数逐项修改与杀进程重启持久化）：
+XCUITest 只用于模拟器无法用 launch argument 表达的真实点击（例如设置页 11 项参数逐项修改、手动输入数字与杀进程重启持久化）：
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
@@ -106,7 +106,7 @@ tmp/verify/<run-id>/
 ├── state.json
 ├── doctor.json
 ├── verification.json
-├── launch/home.png
+├── launch/pomodoro_main.png
 ├── audits/offline.txt
 └── scenarios/<scenario>/
     ├── launch-args.txt
@@ -138,7 +138,7 @@ tmp/verify/<run-id>/
 
 ```sh
 ls tmp/verify/r9-skill-smoke/scenarios/pomodoro-focus/Documents/debug/session-*.jsonl
-ls tmp/verify/r9-skill-smoke/launch/home.png
+ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 ```
 
 真机清理只终止本次启动的进程；不要按进程名批量结束其他 App。
