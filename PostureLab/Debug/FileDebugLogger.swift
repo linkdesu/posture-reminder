@@ -20,8 +20,9 @@ final class FileDebugLogger: DebugLogging {
   private let directory: URL
   private var handle: FileHandle?
 
-  /// Last screen the app reported; fills the `screen` key on lines that do not carry one.
-  private var currentScreen = "home"
+  /// Last screen the app reported; fills the `screen` key on lines that do not carry one. The app
+  /// launches on the child's screen, so the first lines carry its name.
+  private var currentScreen = "pomodoro_main"
 
   /// Last posture value the engine reported; fills the `state` key on lines that do not carry one.
   private var currentState = "good"

@@ -6,8 +6,8 @@ final class SmokeTests: XCTestCase {
     XCTAssertTrue(true)
   }
 
-  /// The saved history outlives the schema, and `SessionStore` loads it with `try?`, so a file
-  /// written before a key existed must still decode instead of coming back as an empty history.
+  /// A stored summary outlives the schema: the tolerant decoder fills a key that was written
+  /// before it existed with the zero value instead of throwing the record away.
   func testSummaryDecodesWithoutPostureStats() throws {
     let summary = makeSummary()
 

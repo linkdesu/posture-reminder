@@ -39,8 +39,8 @@ struct SessionSummary: Equatable, Codable {
   /// evidence and the checker read them.
   var postureStats: [String: PostureStat] = SessionSummary.zeroPostureStats()
 
-  /// Stored-property names, which are the JSON keys of `sessions.json`. Declared so the tolerant
-  /// `init(from:)` below and the synthesised `encode(to:)` read the same list.
+  /// Stored-property names, which are also the JSON keys a stored summary carries. Declared so the
+  /// tolerant `init(from:)` below and the synthesised `encode(to:)` read the same list.
   enum CodingKeys: String, CodingKey {
     case startedAt
     case totalSeconds
@@ -78,9 +78,9 @@ struct SessionSummary: Equatable, Codable {
   }
 }
 
-// The saved history outlives the schema, and `SessionStore` loads it with `try?`, so a key added
-// after a file was written must not throw the file away. The decoders live in extensions: an
-// initialiser in the type body itself would suppress the memberwise one.
+// A stored summary outlives the schema, so a key added after one was written must not throw the
+// record away. The decoders live in extensions: an initialiser in the type body itself would
+// suppress the memberwise one.
 extension SessionSummary {
   /// Every key but `startedAt` — the record's origin, present since the first schema — falls back
   /// to its zero value when absent. Encoding stays synthesised and still writes all of them.

@@ -2,9 +2,8 @@ import Foundation
 
 /// Persisted pomodoro history: reads and writes `Documents/pomodoro-history.json`.
 ///
-/// Same durability contract as `SessionStore`: a missing or unparseable file starts an empty
-/// history instead of throwing, and a record accepted into `records` stays there even if the write
-/// fails. `records` is always kept sorted by `startedAt` ascending.
+/// A missing or unparseable file starts an empty history instead of throwing, and a record accepted
+/// into `records` stays there even if the write fails. `records` is always kept sorted by `startedAt` ascending.
 final class PomodoroStore {
   static let defaultDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 

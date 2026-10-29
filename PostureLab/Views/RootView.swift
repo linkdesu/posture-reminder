@@ -1,27 +1,15 @@
 import SwiftUI
 
 /// Switches the whole app between the screens of `SessionController.Phase`.
+///
+/// The child's pomodoro screen is the root; the settings page and the parent report are the only
+/// other screens, and both are reached from the two icons on it.
 struct RootView: View {
   @EnvironmentObject private var controller: SessionController
 
   var body: some View {
     Group {
       switch controller.phase {
-      case .home:
-        HomeView()
-          .onAppear { controller.didShow("home") }
-      case .calibration:
-        CalibrationView()
-          .onAppear { controller.didShow("calibration") }
-      case .monitoring:
-        MonitoringView()
-          .onAppear { controller.didShow("monitoring") }
-      case .summary:
-        SummaryView()
-          .onAppear { controller.didShow("summary") }
-      case .settings:
-        SettingsView()
-          .onAppear { controller.didShow("settings") }
       case .pomodoro:
         PomodoroView()
           .onAppear { controller.didShow("pomodoro_main") }

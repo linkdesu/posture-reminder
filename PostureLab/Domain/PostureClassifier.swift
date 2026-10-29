@@ -1,5 +1,11 @@
 import Foundation
 
+/// What a calibration measured: the two numbers a baseline is really made of.
+struct CalibrationResult: Equatable {
+  var distanceCM: Double
+  var pitchDeg: Double
+}
+
 /// What a verdict is measured against. Calibration itself only ever measures distance and pitch.
 struct PostureBaseline: Equatable {
   var distanceCM: Double

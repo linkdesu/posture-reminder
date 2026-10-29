@@ -2,21 +2,22 @@ import XCTest
 
 /// How the UI tests start the app, and what they leave behind.
 ///
-/// Every argument here is one `App.swift` already parses for the acceptance runner — `-pomodoro 1`
-/// for the child's screen, `-settings 1` for the settings page, `-scenario`/`-focusMinutes` for a
-/// scripted run, `-debug 0` to keep a screenshot child-facing. The tests add no flag of their own and
-/// no back door: what they check, they check by touching the controls a child or a parent touches.
+/// Every argument here is one `App.swift` already parses for the acceptance runner — `-settings 1`
+/// for the settings page, `-scenario`/`-focusMinutes` for a scripted run, `-debug 0` to keep a
+/// screenshot child-facing. The app launches on the child's screen with no arguments at all; the
+/// tests add no flag of their own and no back door: what they check, they check by touching the
+/// controls a child or a parent touches.
 enum PomodoroLaunch {
   /// The settings page, opened before the first frame.
-  static let settingsPage = ["-pomodoro", "1", "-settings", "1"]
+  static let settingsPage = ["-settings", "1"]
 
   /// The child's screen with nothing overridden: every value it shows comes from what the last run
   /// wrote down, which is the whole point of the relaunch in `SettingsPersistenceUITests`.
-  static let withoutOverrides = ["-pomodoro", "1"]
+  static let withoutOverrides: [String] = []
 
   /// A scripted run, whose first focus starts on its own and whose countdown is `minutes` long.
   static func scriptedFocus(scenario: String, minutes: Int) -> [String] {
-    ["-pomodoro", "1", "-scenario", scenario, "-focusMinutes", String(minutes), "-debug", "0"]
+    ["-scenario", scenario, "-focusMinutes", String(minutes), "-debug", "0"]
   }
 }
 

@@ -11,7 +11,6 @@ struct PostureLabApp: App {
     let settings = Settings()
     let pomodoroSettings = PomodoroSettingsStore(defaults: defaults)
     let scenarios = PostureLabApp.scenarios(from: defaults)
-    let pomodoroMode = PostureLabApp.pomodoroMode(from: defaults)
     let reportScope = PostureLabApp.reportScope(from: defaults)
     // Launch arguments are per-run overrides: stage them without writing to the store, so they
     // never become the user's saved settings on the next launch.
@@ -34,11 +33,11 @@ struct PostureLabApp: App {
     // persistence write, not for a per-run override.
     var stagedPomodoro = pomodoroSettings.settings
     #if DEBUG
-    // `-presetSettings focusMinutes=10,remindBeforeEnd=1,endSound=chime`: a debug-only list of the
-    // twelve settable pomodoro settings, for the acceptance run that has to photograph every row
-    // before and after a change. It is staged like every other launch-argument override, so nothing
-    // it names becomes the saved setting, and it is applied before the single-value arguments below,
-    // which therefore still win when both name the same key.
+    // `-presetSettings focusMinutes=10,endSound=chime`: a debug-only list of the eleven settable
+    // pomodoro settings, for the acceptance run that has to photograph every row before and after a
+    // change. It is staged like every other launch-argument override, so nothing it names becomes the
+    // saved setting, and it is applied before the single-value arguments below, which therefore still
+    // win when both name the same key.
     PostureLabApp.applyPresetSettings(from: defaults, to: &stagedPomodoro)
     #endif
     if let focus = PostureLabApp.intArgument("focusMinutes", from: defaults) {
@@ -63,10 +62,8 @@ struct PostureLabApp: App {
     pomodoroSettings.suppressPersistence = false
 
     // The log and its screenshots stay on for every scripted run even when `-debug 0` hides the
-    // overlay, so those runs still leave evidence behind. A pomodoro screen is only ever reached by a
-    // launch argument in this slice, so a pomodoro launch is a capture run and needs the same.
-    let logger = FileDebugLogger(enabled: settings.debugEnabled || !scenarios.isEmpty || pomodoroMode)
-    let store = SessionStore()
+    // overlay, so those runs still leave evidence behind.
+    let logger = FileDebugLogger(enabled: settings.debugEnabled || !scenarios.isEmpty)
     let pomodoroStore = PomodoroStore()
     // `-seedHistory 30` fills the report for screenshots. It replaces the history rather than adding
     // to it, so a seeded report shows the same picture on every run of the capture script.
@@ -79,10 +76,8 @@ struct PostureLabApp: App {
     self.settings = settings
     self.pomodoroSettings = pomodoroSettings
     controller = SessionController(settings: settings,
-                                   store: store,
                                    logger: logger,
                                    scenarios: scenarios,
-                                   captureSettings: PostureLabApp.captureSettings(from: defaults),
                                    pomodoroStore: pomodoroStore,
                                    pomodoroSettings: pomodoroSettings)
     #if DEBUG
@@ -91,18 +86,14 @@ struct PostureLabApp: App {
     controller.debugAutoPause = DebugAutoPause(defaults.string(forKey: "autopause"))
     #endif
 
-    // The pomodoro screens are reached by launch argument before the first frame: `-pomodoro 1` is the
-    // child's screen, `-settings 1` the pomodoro settings (never the reading-session 设置 screen, which
-    // `-settings` deliberately does not open outside pomodoro mode), and `-report day|week|month` the
-    // parent report with that period selected.
-    if pomodoroMode {
-      controller.enterPomodoroMode()
-      if PostureLabApp.boolOverride("settings", from: defaults) == true {
-        controller.showPomodoroSettings()
-      }
-      if let reportScope {
-        controller.showReport(scope: reportScope)
-      }
+    // The child's screen is the app's only root. The two parent pages are reached by launch argument
+    // before the first frame: `-settings 1` is the pomodoro settings, and `-report day|week|month`
+    // the parent report with that period selected.
+    if PostureLabApp.boolOverride("settings", from: defaults) == true {
+      controller.showPomodoroSettings()
+    }
+    if let reportScope {
+      controller.showReport(scope: reportScope)
     }
   }
 
@@ -151,27 +142,14 @@ struct PostureLabApp: App {
     defaults.string(forKey: "endSound").flatMap { EndSound(rawValue: $0) }
   }
 
-  /// `-pomodoro 1`, or a report launch argument: the report is only reachable in pomodoro mode, so
-  /// asking for one implies the mode.
-  private static func pomodoroMode(from defaults: UserDefaults) -> Bool {
-    if boolOverride("pomodoro", from: defaults) == true { return true }
-    return reportScope(from: defaults) != nil
-  }
-
   /// `-report day|week|month`: which report to open, nil when the flag was not given.
   private static func reportScope(from defaults: UserDefaults) -> ReportScope? {
     defaults.string(forKey: "report").flatMap { ReportScope(rawValue: $0) }
   }
 
-  /// `-captureSettings value` on the launch arguments; anything but `0`/`false` counts as on.
-  private static func captureSettings(from defaults: UserDefaults) -> Bool {
-    guard let raw = defaults.string(forKey: "captureSettings") else { return false }
-    return raw != "0" && raw.lowercased() != "false"
-  }
-
   #if DEBUG
   /// `-presetSettings focusMinutes=10,shortBreakMinutes=1,monitorDuringBreak=1,endSound=chime`: the
-  /// twelve settable pomodoro settings as one comma-separated launch argument, so the acceptance can
+  /// eleven settable pomodoro settings as one comma-separated launch argument, so the acceptance can
   /// put any of them on screen without tapping through the settings screen.
   ///
   /// Every value goes through `PomodoroSettings.clamped()`, the same gate the settings screen writes
@@ -179,7 +157,7 @@ struct PostureLabApp: App {
   /// names are touched, and it is applied before the single-value arguments, which still win.
   ///
   /// The keys are the settable property names: `focusMinutes`, `shortBreakMinutes`,
-  /// `longBreakMinutes`, `focusPerLongBreak`, `dailyGoal`, `remindBeforeEnd`, `postureVoiceEnabled`,
+  /// `longBreakMinutes`, `focusPerLongBreak`, `dailyGoal`, `postureVoiceEnabled`,
   /// `monitorDuringBreak`, `keepScreenAwake`, `autoStartBreak`, `autoStartFocus` and `endSound`.
   /// Integers read as integers, booleans as `1`/`0`/`true`/`false`, and `endSound` as
   /// `soft`/`chime`/`none`. An unknown key, a malformed pair or an unparsable value is ignored.
@@ -222,8 +200,6 @@ struct PostureLabApp: App {
         if let number = Int(value) { staged.dailyGoal = gate(number, \.dailyGoal) }
       case "endSound":
         if let sound = EndSound(rawValue: value) { staged.endSound = gate(sound, \.endSound) }
-      case "remindBeforeEnd":
-        if let flag = presetFlag(value) { staged.remindBeforeEnd = gate(flag, \.remindBeforeEnd) }
       case "postureVoiceEnabled":
         if let flag = presetFlag(value) {
           staged.postureVoiceEnabled = gate(flag, \.postureVoiceEnabled)
