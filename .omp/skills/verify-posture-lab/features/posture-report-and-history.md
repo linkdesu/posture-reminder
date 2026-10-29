@@ -34,7 +34,7 @@ Preconditions：
 
 ## Gotchas
 
-- Q2 已确认手动暂停与无人暂停都计入 `pausedSeconds`，且与所有灰色 `paused` 段时长严格相等；当前代码的记录只累加手动暂停。`verify-acceptance.py --ac5` 可能因此失败；按实际差异报告，不要修改断言。
+- Q2 已确认手动暂停与无人暂停都计入 `pausedSeconds`，且与所有灰色 `paused` 段时长严格相等；v0.5 起无人暂停的整段也累加，`verify-acceptance.py --ac5` 应通过。仍按实际差异报告，不要修改断言。
 - `goodRatio` 的分母是“有体态数据的秒数”，不含 `no_person`；空日不画空时间轴，显示「这一天还没有姿态记录」。
 - `-seedHistory 30` 会先清空再写入固定种子；它只用于截图，不是持久化证明。持久化必须用“杀进程、不重装、重开”。
 - 统计页三个 scope 是三个 `screen` 名；截图文件名不要互相覆盖。

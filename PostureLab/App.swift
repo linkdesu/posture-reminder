@@ -110,7 +110,11 @@ struct PostureLabApp: App {
   }
 
   private static func scenarios(from defaults: UserDefaults) -> [Scenario] {
-    guard let raw = defaults.string(forKey: "scenario") else { return [] }
+    // `-scenario` is the canonical name; `-sim-scenario` is accepted for the long-absence probe in
+    // SKILL/verify runbooks, so both spellings reach the same parser.
+    guard let raw = defaults.string(forKey: "scenario")
+      ?? defaults.string(forKey: "sim-scenario")
+    else { return [] }
     return raw
       .split(separator: ",")
       .map { $0.trimmingCharacters(in: .whitespaces) }

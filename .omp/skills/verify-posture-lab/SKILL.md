@@ -13,12 +13,12 @@ PostureLab 是纯离线的儿童专注与阅读坐姿应用。本技能用于真
 
 - macOS 与 Xcode 27；本机 `xcode-select -p` 可能指向 CommandLineTools，因此每条命令都显式设置 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`。
 - 默认模拟器 UDID：`C12DA589-2444-4F2E-A943-4D6BAFB02BF1`（iPhone 17）。真机：`00008110-001271181AD3801E`（iPhone 13），需解锁。
-- Bundle id：`me.xieal.posturelab`。
+- Bundle id：`me.xieal.posturelab.depth`（深度版）。
 
 模拟器从干净数据目录启动：
 
 ```sh
-cd /Volumes/Data/worktrees/posture-lab/v0.4-v0.5-sim
+cd /Volumes/Data/worktrees/posture-lab/depth-pose
 .omp/skills/verify-posture-lab/scripts/verify.py up --run r9-skill-smoke
 ```
 

@@ -32,6 +32,11 @@ enum Scenario: String, CaseIterable, Equatable {
   case avatarOffMonitoring
   case debugOffMonitoring
 
+  // AC13: a long absence on the real clock. The child sits for five seconds and then leaves for the
+  // rest of the run, which is the only scripted way to cross the 300-second B5 limit (the other
+  // absence scenarios are ten seconds long). Referenced by the verify skill; do not rename.
+  case longAbsence = "long-absence"
+
   // v0.5: the PRD's three-pomodoro day, which is what gives the parent's timeline something to
   // show. Also referenced by the acceptance runner; do not rename.
   case pomodoroDay
@@ -61,6 +66,7 @@ enum Scenario: String, CaseIterable, Equatable {
     case .pauseResumeStillNear: return "暂停后仍越阈"
     case .avatarOffMonitoring: return "黑底监测"
     case .debugOffMonitoring: return "无叠加监测"
+    case .longAbsence: return "长时间无人"
     case .pomodoroDay: return "一天三个番茄"
     }
   }
@@ -83,6 +89,8 @@ enum Scenario: String, CaseIterable, Equatable {
     case .slouch, .slouchMiss: return 26
     case .pauseWhileBreach, .pauseResumeStillNear: return 30
     case .avatarOffMonitoring, .debugOffMonitoring: return 20
+    // Long enough to sit through the whole 300-second absence limit and the interrupt it causes.
+    case .longAbsence: return Self.longAbsenceSeconds
     // Three shortened focuses with their breaks, at the runner's `-focusMinutes 1 -shortBreakMinutes 1`.
     case .pomodoroDay: return Self.pomodoroDaySeconds
     }
@@ -306,6 +314,17 @@ enum Scenario: String, CaseIterable, Equatable {
                     pitchDeg: Self.baselinePitchDeg,
                     rollDeg: 0)
 
+    // AC13: five seconds at the desk, then nobody in frame for the rest of the run. The timer must
+    // freeze on the first absent sample and, past 300 seconds, end the focus as interrupted.
+    case .longAbsence:
+      if t >= 5 {
+        return Script(pose: .absent, distanceCM: nil, pitchDeg: nil, rollDeg: nil)
+      }
+      return Script(pose: .upright,
+                    distanceCM: Self.baselineDistanceCM,
+                    pitchDeg: Self.baselinePitchDeg,
+                    rollDeg: 0)
+
     // The PRD's three-pomodoro day. The three focuses breach in three different ways — too close,
     // then head down, then chin in hand — with good posture either side of each breach, so the
     // parent's timeline shows a mix of colours instead of one. The breaks carry no posture at all:
@@ -363,6 +382,10 @@ enum Scenario: String, CaseIterable, Equatable {
   /// Where inside a focus the posture goes bad: fifteen seconds of good sitting, thirty of the
   /// focus's posture — long enough to reach both reminder levels — then fifteen more seconds of good,
   /// so every focus writes `good` segments as well as its own.
+  /// AC13's run: a five-second lead-in, then an absence that outlives the 300-second limit at
+  /// 305 s, leaving time to read the interrupt before the script ends.
+  private static let longAbsenceSeconds: TimeInterval = 320
+
   private static let pomodoroBreachStart: TimeInterval = 15
   private static let pomodoroBreachEnd: TimeInterval = 45
 
