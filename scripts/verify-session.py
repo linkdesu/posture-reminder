@@ -4,7 +4,7 @@
 Usage:
   scripts/verify-session.py <session.jsonl> [--expect-scenario NAME]
       [--expect-level1 SECONDS] [--expect-level2 SECONDS]
-      [--expect-no-reminders] [--quiet]
+      [--expect-no-reminders] [--expect-summary] [--quiet]
       [--expect-feature-over FEATURE] [--expect-feature-under FEATURE]
       [--expect-highlight FEATURE] [--expect-features]
       [--expect-view-mode MODE] [--expect-overlay]
@@ -19,7 +19,9 @@ Checks:
   AC2  level 1 and level 2 fire at the requested offsets from the first
        sample that breaks the threshold
   AC5  an absence pause appears and its seconds are excluded from the total
-  AC6  the five summary numbers in session_ended match the samples
+  AC6  the five summary numbers in each session_ended match the samples of
+       that pomodoro only (multi-pomodoro logs are split at session_started);
+       a log with no session_ended is SKIP unless --expect-summary
   AC11 no reminder at all (--expect-no-reminders)
   AC13 a view_mode line reports the overlay on when --expect-overlay is given
   AC17 --expect-feature-over / --expect-feature-under read the features lines'
@@ -348,47 +350,80 @@ def recompute(rows, rows_times, config, baseline_pitch):
     }
 
 
-def check_summary(rows):
-    """AC6: the numbers on the summary screen equal what the log supports."""
-    ended = None
-    for row in rows:
-        if row.get("event") == "session_ended":
-            ended = row
-    if ended is None:
-        print("AC6 FAIL: no session_ended record")
-        return False
-    config = config_of(rows)
-    baseline_pitch = None
-    for row in rows:
-        if row.get("event") == "calibration_done":
-            baseline_pitch = row.get("baseline_pitch_deg")
-    reported = recompute(rows, samples(rows), config, baseline_pitch)
+def sessions_of(rows):
+    """把日志按 `session_started` 切成一段段番茄钟，返回 [(段内行, 段内 session_ended 或 None)]。
+
+    一个进程可以连跑多个番茄钟（专注→休息→下一段专注），样本的 `t` 跨段连续、休息期间也照常记
+    样本；只有把每个 `session_ended` 和它自己那一段的样本配对，重算才有意义。段内行只取到
+    `session_ended` 为止，之后的休息样本不算进这一段。
+    """
+    starts = [i for i, row in enumerate(rows) if row.get("event") == "session_started"]
+    # 第一段之前的 screen_shown 等行并进第一段，不单独算一段。
+    starts = [0] + starts[1:] if starts else [0]
+    out = []
+    for begin, stop in zip(starts, starts[1:] + [len(rows)]):
+        chunk = rows[begin:stop]
+        ended_at = next((i for i, row in enumerate(chunk) if row.get("event") == "session_ended"), None)
+        if ended_at is None:
+            out.append((chunk, None))
+        else:
+            out.append((chunk[: ended_at + 1], chunk[ended_at]))
+    return out
+
+
+def check_summary(rows, required=False):
+    """AC6: the numbers on the summary screen equal what the log supports.
+
+    每个有 `session_ended` 的番茄钟各自重算、各自比对。整份日志没有任何 `session_ended`
+    （例如「装上→启动→杀掉」的短日志）时记 SKIP 而不是 FAIL；`--expect-summary` 时才算失败。
+    """
+    sessions = sessions_of(rows)
+    ended_sessions = [(chunk, ended) for chunk, ended in sessions if ended is not None]
+    if not ended_sessions:
+        if required:
+            print("AC6 FAIL: no session_ended record (--expect-summary)")
+            return False
+        print(f"AC6 SKIP: no session_ended record in this log ({len(rows)} lines, "
+              "short or unfinished session); pass --expect-summary to require one")
+        return True
+    open_tail = len(sessions) - len(ended_sessions)
+    if open_tail:
+        print(f"AC6 INFO: {open_tail} session(s) without session_ended (still running when the log was taken), not recomputed")
     ok = True
-    for key, label in SUMMARY_FIELDS.items():
-        claimed = ended.get(key)
-        got = reported[label]
-        if claimed is None:
-            print(f"AC6 FAIL: session_ended has no {key}")
-            ok = False
-            continue
-        delta = abs(claimed - got)
-        verdict = "PASS" if delta <= 1.0 else "FAIL"
-        if verdict == "FAIL":
-            ok = False
-        print(f"AC6 {verdict}: {key}: log says {claimed:.2f}, samples give {got:.2f} (delta {delta:.2f})")
-    for kind in ("near", "head_down"):
-        counted = len(
-            [
-                row
-                for row in rows
-                if row.get("event") == "reminder"
-                and row.get("level") == 1
-                and row.get("alert_type") == kind
-            ]
-        )
-        print(f"AC6 INFO: level-1 {kind} reminder lines in the log={counted}")
-    if ended.get("near_count") is not None:
-        print(f"AC6 INFO: session_ended near_count={ended.get('near_count')}")
+    many = len(ended_sessions) > 1
+    for number, (chunk, ended) in enumerate(ended_sessions, 1):
+        tag = f"AC6[{number}/{len(ended_sessions)}]" if many else "AC6"
+        config = config_of(chunk) or config_of(rows)
+        baseline_pitch = None
+        for row in chunk:
+            if row.get("event") == "calibration_done":
+                baseline_pitch = row.get("baseline_pitch_deg")
+        reported = recompute(chunk, samples(chunk), config, baseline_pitch)
+        for key, label in SUMMARY_FIELDS.items():
+            claimed = ended.get(key)
+            got = reported[label]
+            if claimed is None:
+                print(f"{tag} FAIL: session_ended has no {key}")
+                ok = False
+                continue
+            delta = abs(claimed - got)
+            verdict = "PASS" if delta <= 1.0 else "FAIL"
+            if verdict == "FAIL":
+                ok = False
+            print(f"{tag} {verdict}: {key}: log says {claimed:.2f}, samples give {got:.2f} (delta {delta:.2f})")
+        for kind in ("near", "head_down"):
+            counted = len(
+                [
+                    row
+                    for row in chunk
+                    if row.get("event") == "reminder"
+                    and row.get("level") == 1
+                    and row.get("alert_type") == kind
+                ]
+            )
+            print(f"{tag} INFO: level-1 {kind} reminder lines in the log={counted}")
+        if ended.get("near_count") is not None:
+            print(f"{tag} INFO: session_ended near_count={ended.get('near_count')}")
     return ok
 
 
@@ -683,6 +718,8 @@ def main():
     parser.add_argument("--expect-no-reminders-during-pause", action="store_true")
     parser.add_argument("--expect-not-good-after-resume", action="store_true")
     parser.add_argument("--expect-posture-stats", action="store_true")
+    parser.add_argument("--expect-summary", action="store_true",
+                        help="AC6: require at least one session_ended (default: SKIP when absent)")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -727,7 +764,7 @@ def main():
         if extra is not None:
             results.append(extra)
     results.append(check_timing(rows, args))
-    results.append(check_summary(rows))
+    results.append(check_summary(rows, required=args.expect_summary))
     results.append(check_no_images(args.log))
 
     if args.expect_feature_over:
