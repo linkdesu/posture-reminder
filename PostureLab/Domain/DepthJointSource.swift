@@ -27,10 +27,19 @@ final class DepthJointSource: JointSource {
     static let headCentre = 0.09
     static let headTop = 0.00
     static let headBottom = 0.20
-    static let neck = 0.25
-    static let shoulder = 0.29
     static let root = 0.47
     static let hip = 0.68
+  }
+
+  /// 肩线的判定约束。三条都要过，任何一条不过就说明这一帧的轮廓里没有可信的肩，双肩记为不可用，
+  /// 而不是拿一个固定比例的行凑两个点出来。
+  private enum Shoulder {
+    /// 肩线要比颈部最窄处宽这么多倍，才算「脖子张开成肩膀」。
+    static let widthJump = 1.6
+    /// 肩宽 / 头宽 的合理区间。儿童肩宽约为头宽的 1.5–2.5 倍，留到 1.2–3.2 以容下轮廓误差。
+    static let toHeadRange = 1.2...3.2
+    /// 两肩三维距离的合理区间，米。超出这个范围的点落在耳朵或背景上，不是肩。
+    static let spanRange = 0.20...0.45
   }
 
   init(options: DepthSegmentation.Options = DepthSegmentation.Options(), processingWidth: Int = 160) {
@@ -77,20 +86,30 @@ final class DepthJointSource: JointSource {
     let headDepth = medianDepth(image, mask: mask, x: headCentreX, y: headY, radius: 2)
     joints[.nose] = joint(headCentre, depth: headDepth, confidence: 0.9)
 
-    let neckY = row(Landmark.neck)
-    let neckX = centreX(mask, y: neckY, fallback: headCentreX)
-    joints[.neck] = joint(mask.normalized(x: neckX, y: neckY),
-                          depth: medianDepth(image, mask: mask, x: neckX, y: neckY, radius: 2),
+    let headTop = row(Landmark.headTop)
+    let headBottom = row(Landmark.headBottom)
+    let headWidth = widestRow(mask: mask, from: headTop, through: headBottom)
+
+    // The neck is the narrowest row between the head's bottom and 40% of the mask: the waist between
+    // head and shoulders. A fixed fraction of the mask height drifts onto the ears as soon as the
+    // child leans in and the mask is cut off at the chest; the narrowest row does not.
+    let neck = neckRow(mask: mask, headBottom: headBottom)
+    let neckX = centreX(mask, y: neck.row, fallback: headCentreX)
+    joints[.neck] = joint(mask.normalized(x: neckX, y: neck.row),
+                          depth: medianDepth(image, mask: mask, x: neckX, y: neck.row, radius: 2),
                           confidence: 0.85)
 
-    let shoulderY = row(Landmark.shoulder)
-    if let extent = mask.rowExtent(y: shoulderY), extent.maxX - extent.minX >= 2 {
-      let leftDepth = medianDepth(image, mask: mask, x: extent.minX, y: shoulderY, radius: 1)
-      let rightDepth = medianDepth(image, mask: mask, x: extent.maxX, y: shoulderY, radius: 1)
-      joints[.leftShoulder] = joint(mask.normalized(x: extent.minX, y: shoulderY),
-                                    depth: leftDepth, confidence: 0.8)
-      joints[.rightShoulder] = joint(mask.normalized(x: extent.maxX, y: shoulderY),
-                                     depth: rightDepth, confidence: 0.8)
+    // The shoulders are the first row below the neck whose width jumps — that jump is the neck
+    // opening into the shoulder line. Both shoulder points must sit below the neck, the width must
+    // stay plausible against the head, and the two points must be 20–45 cm apart in depth. Anything
+    // else is left unavailable.
+    if let shoulders = shoulderPoints(mask: mask,
+                                      image: image,
+                                      neck: neck,
+                                      headWidth: headWidth,
+                                      neckY: joints[.neck]?.y) {
+      joints[.leftShoulder] = shoulders.left
+      joints[.rightShoulder] = shoulders.right
     }
 
     let rootY = row(Landmark.root)
@@ -122,8 +141,7 @@ final class DepthJointSource: JointSource {
     emitDebugSample(image: image,
                     mask: mask,
                     joints: joints,
-                    headTop: row(Landmark.headTop),
-                    headBottom: row(Landmark.headBottom))
+                    headWidth: headWidth)
     #endif
 
     return JointEstimate(joints: joints,
@@ -142,19 +160,12 @@ final class DepthJointSource: JointSource {
   private func emitDebugSample(image: DepthImage,
                                mask: BodyMask,
                                joints: [JointID: JointSample],
-                               headTop: Int,
-                               headBottom: Int) {
+                               headWidth: Int) {
     guard let onDebugSample else { return }
     let left = joints[.leftShoulder]
     let right = joints[.rightShoulder]
     let camera = DepthCamera()
     let span = left.flatMap { left in right.flatMap { right in camera.distance(left, right) } }
-
-    var headWidthPixels = 0
-    for y in headTop...max(headTop, headBottom) {
-      guard let extent = mask.rowExtent(y: y) else { continue }
-      headWidthPixels = max(headWidthPixels, extent.maxX - extent.minX + 1)
-    }
 
     onDebugSample(JointDebugSample(
       neck: joints[.neck],
@@ -162,9 +173,9 @@ final class DepthJointSource: JointSource {
       rightShoulder: right,
       shoulderSpanCM: span.map { $0 * 100 },
       shouldersAvailable: left != nil && right != nil,
-      headWidth: Double(headWidthPixels) / Double(image.width),
-      headTopY: mask.normalized(x: 0, y: headTop).y,
-      headBottomY: mask.normalized(x: 0, y: headBottom).y,
+      headWidth: Double(headWidth) / Double(image.width),
+      headTopY: mask.normalized(x: 0, y: mask.minY).y,
+      headBottomY: mask.normalized(x: 0, y: min(mask.maxY, mask.minY + Int(0.20 * Double(mask.maxY - mask.minY)))).y,
       shoulderRowY: left?.y))
   }
   #endif
@@ -174,6 +185,81 @@ final class DepthJointSource: JointSource {
                 y: point.y,
                 depthM: depth.map { Double($0) },
                 confidence: confidence)
+  }
+
+  /// The widest row between two rows of the mask, in pixels; 0 when neither row has a body pixel.
+  private func widestRow(mask: BodyMask, from top: Int, through bottom: Int) -> Int {
+    var widest = 0
+    for y in min(top, bottom)...max(top, bottom) {
+      guard let extent = mask.rowExtent(y: y) else { continue }
+      widest = max(widest, extent.maxX - extent.minX + 1)
+    }
+    return widest
+  }
+
+  /// 颈部：头部下沿到轮廓 40% 高度之间最窄的一行。脖子是头与肩之间最细的地方，这个最窄处不会
+  /// 随着孩子离镜头远近而漂到耳朵上。
+  private func neckRow(mask: BodyMask, headBottom: Int) -> (row: Int, width: Int) {
+    let height = mask.maxY - mask.minY
+    let top = min(mask.maxY, max(headBottom, mask.minY))
+    let bottom = min(mask.maxY, mask.minY + Int(0.40 * Double(height)))
+    var best = (row: top, width: Int.max)
+    for y in top...max(top, bottom) {
+      guard let extent = mask.rowExtent(y: y) else { continue }
+      let width = extent.maxX - extent.minX + 1
+      if width < best.width { best = (y, width) }
+    }
+    return best.width == Int.max ? (top, 0) : best
+  }
+
+  /// 肩线：颈部往下第一行，宽度跳到颈部宽度的 `Shoulder.widthJump` 倍以上、且不窄于头宽。宽度
+  /// 跳变就是「脖子张开成肩膀」的那一行；找不到就说明这一帧的轮廓里没有可用的肩。
+  private func shoulderRow(mask: BodyMask,
+                           neck: (row: Int, width: Int),
+                           headWidth: Int) -> (row: Int, extent: (minX: Int, maxX: Int))? {
+    let height = mask.maxY - mask.minY
+    let start = min(mask.maxY, neck.row + max(1, Int(0.02 * Double(height))))
+    let end = min(mask.maxY, mask.minY + Int(0.60 * Double(height)))
+    guard start <= end else { return nil }
+    let minimumWidth = max(Double(neck.width) * Shoulder.widthJump, Double(headWidth))
+    for y in start...end {
+      guard let extent = mask.rowExtent(y: y) else { continue }
+      if Double(extent.maxX - extent.minX + 1) >= minimumWidth {
+        return (y, extent)
+      }
+    }
+    return nil
+  }
+
+  /// 双肩的最终判定：候选行要过「肩宽 / 头宽」与「两肩三维距离」两条约束，两个点还必须在颈部
+  /// 以下。任何一条不过就返回 nil，调用方据此把双肩记为不可用。
+  private func shoulderPoints(mask: BodyMask,
+                              image: DepthImage,
+                              neck: (row: Int, width: Int),
+                              headWidth: Int,
+                              neckY: Double?) -> (left: JointSample, right: JointSample)? {
+    guard headWidth > 0,
+          let candidate = shoulderRow(mask: mask, neck: neck, headWidth: headWidth),
+          candidate.extent.maxX - candidate.extent.minX >= 2
+    else { return nil }
+
+    let width = Double(candidate.extent.maxX - candidate.extent.minX + 1)
+    let ratio = width / Double(headWidth)
+    guard Shoulder.toHeadRange.contains(ratio) else { return nil }
+
+    let left = joint(mask.normalized(x: candidate.extent.minX, y: candidate.row),
+                     depth: medianDepth(image, mask: mask,
+                                        x: candidate.extent.minX, y: candidate.row, radius: 1),
+                     confidence: 0.8)
+    let right = joint(mask.normalized(x: candidate.extent.maxX, y: candidate.row),
+                      depth: medianDepth(image, mask: mask,
+                                         x: candidate.extent.maxX, y: candidate.row, radius: 1),
+                      confidence: 0.8)
+
+    guard let neckY, left.y > neckY, right.y > neckY else { return nil }
+    guard let span = DepthCamera().distance(left, right),
+          Shoulder.spanRange.contains(span) else { return nil }
+    return (left, right)
   }
 
   /// The midpoint of the mask on one row; the head's centre when the row is empty.

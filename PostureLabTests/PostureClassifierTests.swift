@@ -170,6 +170,24 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertFalse(reading(headOnly, .shoulderTilt).isOverThreshold)
   }
 
+  /// 肩部不可用时不能编一个值出来：肩线倾斜停在阈值一半、严重度 0、永不越线；即便上一帧是
+  /// 15° 的肩线，这一帧也不能越线。深度版把「找不到可信的肩」如实标成 unavailable，分类器必须
+  /// 照此降级为 N/A。
+  func testAnUnavailableShoulderLineDegradesToNotAvailable() {
+    var sample = rigged(.shoulderTilt)
+    sample.joints.removeValue(forKey: .leftShoulder)
+    sample.joints.removeValue(forKey: .rightShoulder)
+
+    let assessment = assess(sample)
+    XCTAssertEqual(assessment.breached[.shoulderTilt], false)
+    let tilt = reading(assessment, .shoulderTilt)
+    XCTAssertFalse(tilt.isOverThreshold)
+    XCTAssertEqual(tilt.severity, 0)
+    XCTAssertEqual(tilt.value, tilt.threshold / 2, accuracy: 1e-9)
+    // 驼背的另一半代理（颈到躯干）还在，但肩线那一半缺席也不能被当成越线。
+    XCTAssertFalse(reading(assessment, .slouch).isOverThreshold)
+  }
+
   /// Desk lean needs a dropped head *and* either a deep pitch or a lost face.
   func testDeskLeanNeedsTheDroppedHeadPlusAPitchOrALostFace() {
     let breach = assess(rigged(.deskLean, distanceCM: 20, pitchDeg: -45))

@@ -14,15 +14,19 @@ final class DepthPipelineTests: XCTestCase {
   // MARK: - Fixtures
 
   /// A seated upper body: head disc centred at (80, 30) with radius 13, torso from y 40 to 100 with
-  /// shoulders 44 px wide, everything `bodyDepth` metres from the camera.
+  /// shoulders 60 px wide (about 22 cm at 50 cm through the assumed 60° depth field), everything
+  /// `bodyDepth` metres from the camera.
   private func bodyImage(bodyDepth: Float = 0.5,
                          headDepth: Float? = nil,
-                         headSlope: Float = 0) -> DepthImage {
+                         headSlope: Float = 0,
+                         headRadius: Double = 13,
+                         torsoHalfWidth: Double = 30,
+                         torsoTop: Int = 39) -> DepthImage {
     var metres = [Float](repeating: background, count: width * height)
     for y in 0..<height {
       for x in 0..<width {
-        let inHead = hypot(Double(x - 80), Double(y - 30)) <= 13
-        let inTorso = y >= 39 && y <= 100 && abs(x - 80) <= 22
+        let inHead = hypot(Double(x - 80), Double(y - 30)) <= headRadius
+        let inTorso = y >= torsoTop && y <= 100 && abs(Double(x - 80)) <= torsoHalfWidth
         guard inHead || inTorso else { continue }
         if inHead {
           // `headSlope` is metres of depth change per image row, so a positive slope means the
@@ -31,6 +35,23 @@ final class DepthPipelineTests: XCTestCase {
         } else {
           metres[y * width + x] = bodyDepth
         }
+      }
+    }
+    return DepthImage(width: width, height: height, metres: metres)!
+  }
+
+  /// A close child whose mask is cut off at the chest: a wide head with ears, and a neck that never
+  /// opens into a shoulder line because the shoulders are below the frame. The frame that made
+  /// v0.6.1 call the ears "shoulders".
+  private func headWithEarsImage() -> DepthImage {
+    var metres = [Float](repeating: background, count: width * height)
+    for y in 0..<height {
+      for x in 0..<width {
+        let inHead = hypot(Double(x - 80), Double(y - 35)) <= 30
+        let inEar = (y >= 30 && y <= 44) && (abs(x - 44) <= 6 || abs(x - 116) <= 6)
+        let inNeck = y >= 65 && abs(x - 80) <= 12
+        guard inHead || inEar || inNeck else { continue }
+        metres[y * width + x] = 0.32
       }
     }
     return DepthImage(width: width, height: height, metres: metres)!
@@ -88,6 +109,54 @@ final class DepthPipelineTests: XCTestCase {
       XCTAssertNotNil(estimate.joints[joint], "\(joint.rawValue) should come from the mask")
     }
     XCTAssertEqual(estimate.distanceCM ?? 0, 50, accuracy: 6)
+  }
+
+  // MARK: - Shoulders
+
+  func testShouldersSitBelowTheNeckInANormalSittingPose() throws {
+    let estimate = DepthJointSource().estimate(from: bodyImage())
+    let neck = try XCTUnwrap(estimate.joints[.neck])
+    let left = try XCTUnwrap(estimate.joints[.leftShoulder])
+    let right = try XCTUnwrap(estimate.joints[.rightShoulder])
+
+    XCTAssertGreaterThan(left.y, neck.y, "a shoulder above the neck is a head")
+    XCTAssertGreaterThan(right.y, neck.y, "a shoulder above the neck is a head")
+    // 两肩的三维距离落在 20–45 cm：这条约束是肩点被判为可用的前提。
+    let span = try XCTUnwrap(DepthCamera().distance(left, right))
+    XCTAssertGreaterThanOrEqual(span, 0.20)
+    XCTAssertLessThanOrEqual(span, 0.45)
+    XCTAssertFalse(estimate.unavailable.contains(.leftShoulder))
+    XCTAssertFalse(estimate.unavailable.contains(.rightShoulder))
+  }
+
+  func testTheEarsOfACutOffNearMaskAreNotShoulders() {
+    let estimate = DepthJointSource().estimate(from: headWithEarsImage())
+
+    // 头部两侧的耳朵与颈部都在轮廓里，但没有任何一行宽到能当肩线：双肩必须记为不可用。
+    XCTAssertNil(estimate.joints[.leftShoulder], "an ear is not a shoulder")
+    XCTAssertNil(estimate.joints[.rightShoulder], "an ear is not a shoulder")
+    XCTAssertTrue(estimate.unavailable.contains(.leftShoulder))
+    XCTAssertTrue(estimate.unavailable.contains(.rightShoulder))
+  }
+
+  func testShouldersAreUnavailableWhenTheSpanIsOutOfRange() throws {
+    // 肩线比头宽合理，但同样的宽度在 0.8 m 处换算是 58 cm：远超两肩 20–45 cm 的区间。
+    let estimate = DepthJointSource().estimate(from: bodyImage(bodyDepth: 0.8,
+                                                               headRadius: 20,
+                                                               torsoHalfWidth: 50,
+                                                               torsoTop: 40))
+    XCTAssertNil(estimate.joints[.leftShoulder])
+    XCTAssertNil(estimate.joints[.rightShoulder])
+    XCTAssertTrue(estimate.unavailable.contains(.leftShoulder))
+    // 颈部本身仍然可用：不可用的只是没有通过约束的肩。
+    XCTAssertNotNil(estimate.joints[.neck])
+  }
+
+  func testShouldersAreUnavailableWhenTheHeadIsWiderThanTheShoulderLine() {
+    // 头（含耳朵）60 px、肩线只有 40 px：肩宽 / 头宽 落到合理区间之外。
+    let estimate = DepthJointSource().estimate(from: bodyImage(headRadius: 30, torsoHalfWidth: 20))
+    XCTAssertNil(estimate.joints[.leftShoulder])
+    XCTAssertNil(estimate.joints[.rightShoulder])
   }
 
   func testDepthJointsNeverInventEyesEarsElbowsOrWrists() {
