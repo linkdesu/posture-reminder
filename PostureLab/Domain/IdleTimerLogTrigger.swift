@@ -1,6 +1,9 @@
 import Foundation
 
-/// 屏幕常亮的四个取证时刻：专注开始、暂停、专注结束、切到后台。
+/// 屏幕常亮的取证时刻：专注开始、暂停、继续、专注结束、切到后台、回到前台。
+///
+/// v0.6.6 新增 `resume`（手动「继续」或无人自动暂停后人回来自动恢复）与 `foreground`（scene 重新
+/// 变为 active）。所有时刻都在状态真正生效、常亮值已写到应用之后才记。
 ///
 /// v0.6.5：QA 用 lldb 读不到 `UIApplication.isIdleTimerDisabled`（r15），于是 DEBUG 构建在这四个时刻
 /// 把**实际写到应用上的值**记一行到 `Documents/debug/idle-*.jsonl`。这是独立文件、独立键名，和
@@ -8,8 +11,10 @@ import Foundation
 enum IdleTimerLogTrigger: String, Equatable {
   case focusStart = "focus_start"
   case pause = "pause"
+  case resume = "resume"
   case focusEnd = "focus_end"
   case background = "background"
+  case foreground = "foreground"
 
   /// 判定所需的那一小块会话状态。
   struct State: Equatable {
@@ -30,8 +35,10 @@ enum IdleTimerLogTrigger: String, Equatable {
     var result: [IdleTimerLogTrigger] = []
     if !old.focusOpen && new.focusOpen { result.append(.focusStart) }
     if new.focusOpen && new.paused && !(old.focusOpen && old.paused) { result.append(.pause) }
+    if old.focusOpen && old.paused && new.focusOpen && !new.paused { result.append(.resume) }
     if old.focusOpen && !new.focusOpen { result.append(.focusEnd) }
     if old.sceneActive && !new.sceneActive { result.append(.background) }
+    if !old.sceneActive && new.sceneActive { result.append(.foreground) }
     return result
   }
 

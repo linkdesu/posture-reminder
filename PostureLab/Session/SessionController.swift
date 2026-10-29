@@ -829,7 +829,8 @@ final class SessionController: ObservableObject {
     logIdleTimerTriggers()
   }
 
-  /// v0.6.5：专注开始、暂停、结束、切到后台时，把应用上实际的常亮值记进
+  /// v0.6.5/0.6.6：专注开始、暂停、继续、结束、切到后台、回到前台时，在常亮值写到应用之后，
+  /// 把应用上实际的值记进
   /// `Documents/debug/idle-*.jsonl`（只在 DEBUG 构建）。
   private func logIdleTimerTriggers() {
     let state = IdleTimerLogTrigger.State(focusOpen: pomodoroFocusOpen,

@@ -19,10 +19,88 @@ final class IdleTimerLogTriggerTests: XCTestCase {
     XCTAssertEqual(T.triggers(from: nil, to: parked), [])
   }
 
-  func testPauseIsLoggedOnceAndResumeIsNot() {
+  func testPauseAndResumeAreEachLoggedOnce() {
     XCTAssertEqual(T.triggers(from: counting, to: paused), [.pause])
     XCTAssertEqual(T.triggers(from: paused, to: paused), [])
-    XCTAssertEqual(T.triggers(from: paused, to: counting), [])
+    XCTAssertEqual(T.triggers(from: paused, to: counting), [.resume])
+    XCTAssertEqual(T.triggers(from: counting, to: counting), [])
+  }
+
+  /// 暂停中直接结束专注只记 focus_end，不记 resume。
+  func testEndingAPausedFocusIsNotAResume() {
+    XCTAssertEqual(T.triggers(from: paused, to: parked), [.focusEnd])
+  }
+
+  func testForegroundIsLoggedOnceInAnyState() {
+    var bg = counting
+    bg.sceneActive = false
+    XCTAssertEqual(T.triggers(from: bg, to: counting), [.foreground])
+    XCTAssertEqual(T.triggers(from: counting, to: counting), [])
+    var parkedBg = parked
+    parkedBg.sceneActive = false
+    XCTAssertEqual(T.triggers(from: parkedBg, to: parked), [.foreground])
+  }
+
+  // MARK: - 写入的是状态生效后应用上的实际值（按 SessionController 的顺序：先 update，再记）
+
+  @MainActor
+  private final class Recorder {
+    let application = LogFakeApplication()
+    lazy var controller = IdleTimerController(application: application)
+    var state: S?
+    var rows: [(T, Bool)] = []
+
+    /// counting：专注在计时（未暂停、未休息）。
+    func apply(_ new: S, counting: Bool) {
+      controller.update(IdleTimerPolicy(isFocusCounting: counting, isSceneActive: new.sceneActive))
+      let value = controller.actualValue ?? false
+      for trigger in T.triggers(from: state, to: new) { rows.append((trigger, value)) }
+      state = new
+    }
+
+    func last(_ trigger: T) -> Bool? { rows.last { $0.0 == trigger }?.1 }
+  }
+
+  @MainActor
+  func testResumeAfterPauseRecordsTrue() {
+    let r = Recorder()
+    r.apply(counting, counting: true)
+    r.apply(paused, counting: false)
+    XCTAssertEqual(r.last(.pause), false)
+    r.apply(counting, counting: true)
+    XCTAssertEqual(r.last(.resume), true)
+  }
+
+  @MainActor
+  func testForegroundDuringFocusRecordsTrue() {
+    let r = Recorder()
+    r.apply(counting, counting: true)
+    var bg = counting
+    bg.sceneActive = false
+    r.apply(bg, counting: true)
+    XCTAssertEqual(r.last(.background), false)
+    r.apply(counting, counting: true)
+    XCTAssertEqual(r.last(.foreground), true)
+  }
+
+  @MainActor
+  func testForegroundDuringBreakOrOnHomeRecordsFalse() {
+    // 休息：专注已关闭，计时的是休息，不占常亮。
+    let r = Recorder()
+    r.apply(counting, counting: true)
+    r.apply(parked, counting: false)
+    var bg = parked
+    bg.sceneActive = false
+    r.apply(bg, counting: false)
+    r.apply(parked, counting: false)
+    XCTAssertEqual(r.last(.foreground), false)
+    // 首页（还没开始专注）。
+    let home = Recorder()
+    home.apply(parked, counting: false)
+    home.apply(bg, counting: false)
+    home.apply(parked, counting: false)
+    XCTAssertEqual(home.rows.map { $0.0 }, [.background, .foreground])
+    XCTAssertEqual(home.last(.foreground), false)
   }
 
   func testFocusEndIsLogged() {
@@ -69,6 +147,6 @@ final class IdleTimerLogTriggerTests: XCTestCase {
 }
 
 @MainActor
-private final class LogFakeApplication: IdleTimerControlling {
+final class LogFakeApplication: IdleTimerControlling {
   var isIdleTimerDisabled = false
 }
