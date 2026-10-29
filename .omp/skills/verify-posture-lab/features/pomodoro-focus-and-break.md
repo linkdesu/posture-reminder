@@ -46,3 +46,10 @@ Preconditions：
 - `pomodoroDay` 的 `-focusMinutes 1` 是启动参数覆盖，不会写回用户设置。
 - 70 秒刚好跨过第一个 60 秒专注；太早截图只能看到专注中，太晚会进入休息。不要把休息截图当作专注证据。
 - `cue_played` 只证明播放器启动了片段，不证明房间听见；不要声称“听到了”。
+
+## 屏幕常亮取证（v0.6.5）
+
+- 常亮不再用 lldb 读（r15 读不出值）。DEBUG 构建在 `Documents/debug/idle-*.jsonl` 里每个时刻写一行：`{"t":<墙钟毫秒>,"trigger":"focus_start|pause|focus_end|background","idle_timer_disabled":<bool>}`。
+- 四个时刻：专注开始（点「开始」）、暂停（手动暂停或无人自动暂停，各写一次）、专注结束、切到后台。值是写完后应用上**实际的** `isIdleTimerDisabled`，不是策略的期望值。
+- 判据：`focus_start` 为 `true`（App 在前台时）；`pause`、`focus_end`、`background` 为 `false`。恢复计时不写行。
+- 这是独立文件、独立键名，`docs/qa-log-schema.md` 的 42 键契约不变，`session-*.jsonl` 的逐行契约检查不受影响。
