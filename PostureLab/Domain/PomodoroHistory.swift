@@ -35,6 +35,22 @@ struct ReportPeriod: Equatable {
 /// Pure aggregation over `PomodoroRecord`s for the parent report. No clock, no I/O: the caller
 /// supplies the records and the calendar, so tests pin a timezone and get deterministic results.
 enum PomodoroHistory {
+  /// 首页「今天 x/目标」的分子：今天开始、且完成了的番茄个数。`pending` 是刚倒计时归零、还在等
+  /// 休息结束才落盘的那条记录——它在归零那一刻就算数，不必等休息结束；落盘后它进了 `records`，
+  /// 按 id 去重，所以下一阶段开始时不会再加一。放弃、被打断的不算。
+  static func completedToday(_ records: [PomodoroRecord],
+                             pending: PomodoroRecord?,
+                             now: Date,
+                             calendar: Calendar) -> Int {
+    var all = records
+    if let pending, !records.contains(where: { $0.id == pending.id }) { all.append(pending) }
+    return all.reduce(0) { count, record in
+      guard record.outcome == .completed else { return count }
+      let started = Date(timeIntervalSince1970: record.startedAt)
+      return calendar.isDate(started, inSameDayAs: now) ? count + 1 : count
+    }
+  }
+
   /// Aggregates one calendar day. `date` may be any instant in the day; the day boundary comes from
   /// `calendar`, and records are assigned to the day their `startedAt` falls in.
   static func day(_ records: [PomodoroRecord], on date: Date, calendar: Calendar) -> ReportDay {

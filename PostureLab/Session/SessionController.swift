@@ -368,13 +368,15 @@ final class SessionController: ObservableObject {
     reportTotals = period.totals
 
     // The child's screen shows today's count, so it rides along with the same store change.
-    let calendar = Calendar.current
-    let now = Date()
-    pomodoroCompletedTodayCount = pomodoroStore.records.reduce(0) { count, record in
-      guard record.outcome == .completed else { return count }
-      let started = Date(timeIntervalSince1970: record.startedAt)
-      return calendar.isDate(started, inSameDayAs: now) ? count + 1 : count
-    }
+    refreshCompletedTodayCount()
+  }
+
+  /// 今日完成数含刚归零、尚未落盘的那条：倒计时归零那一刻首页就加一（0.6.7）。
+  private func refreshCompletedTodayCount() {
+    pomodoroCompletedTodayCount = PomodoroHistory.completedToday(pomodoroStore.records,
+                                                                 pending: pomodoroPending,
+                                                                 now: Date(),
+                                                                 calendar: Calendar.current)
   }
 
   /// The report screen's 清空历史 button. The history is on this device only, and the parent is the
@@ -663,6 +665,9 @@ final class SessionController: ObservableObject {
       // Waits one beat: a skipped break is reported after the completion, and the flag belongs on this
       // record. The break that follows ends with a `phaseChanged(to: .focus)` that writes it.
       closePomodoroFocus(record: record, at: t)
+      // 归零即计数：首页「今天 x/目标」不等休息结束（0.6.7）。
+      refreshCompletedTodayCount()
+      refreshPomodoroSnapshot()
     case .abandoned(let record):
       closePomodoroFocus(record: record, at: t)
       // Nothing can change an abandoned pomodoro, so it goes in the history at once.
