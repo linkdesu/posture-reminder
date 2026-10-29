@@ -22,6 +22,16 @@ struct PostureSample: Equatable {
   var facePresent: Bool { distanceCM != nil }
   /// Whether the body is still in frame. Leaning on the desk has to stay apart from having got up.
   var bodyPresent: Bool { !joints.isEmpty }
+
+  /// 肩线是否可用：两个肩关节都在、且来源没有把它们标成不可用。
+  ///
+  /// 不可用时 `PostureKind.requiresShoulderLine` 的体态一律不判——既不发声，也不进时间轴与统计。
+  var hasShoulderLine: Bool {
+    joints[.leftShoulder] != nil
+      && joints[.rightShoulder] != nil
+      && !unavailableJoints.contains(.leftShoulder)
+      && !unavailableJoints.contains(.rightShoulder)
+  }
 }
 
 /// The single value the monitoring screen displays: doing fine, nobody there, or the posture that

@@ -452,6 +452,48 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertFalse(try reading(line.readings, .headRoll).isOverThreshold)
   }
 
+  /// 肩部不可用时，依赖肩线的三种体态一律不发声、不进时间轴、不计统计（pr-PM，0.6.2）：
+  /// 同一段 20 秒的高低肩姿态，肩线缺失时一条提醒都没有、状态仍是良好、统计秒数为 0；
+  /// 肩线在时照常触发两级提醒——证明这条门控是门控，不是姿态本身不越线。
+  func testShoulderDependentPosturesStaySilentWhenTheShoulderLineIsMissing() {
+    func run(withShoulders: Bool) -> (engine: MonitoringEngine, events: [MonitoringEvent]) {
+      var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                    baselineDistanceCM: 40,
+                                    baselinePitchDeg: 0)
+      var events: [MonitoringEvent] = []
+      let upright = sampleStream([Segment(duration: 1, distanceCM: 40, pitchDeg: 0)])
+      let tilted = posing([Segment(duration: 20, distanceCM: 40, pitchDeg: 0)],
+                          as: .shoulderTilt,
+                          from: 1.0)
+      for sample in upright + tilted {
+        var next = sample
+        if !withShoulders {
+          next.joints.removeValue(forKey: .leftShoulder)
+          next.joints.removeValue(forKey: .rightShoulder)
+          next.unavailableJoints = [.leftShoulder, .rightShoulder]
+        }
+        events += engine.ingest(next)
+      }
+      return (engine, events)
+    }
+
+    let control = run(withShoulders: true)
+    XCTAssertEqual(reminders(in: control.events).map(\.kind), [.shoulderTilt, .shoulderTilt])
+    XCTAssertEqual(control.engine.status, .posture(.shoulderTilt))
+
+    let gated = run(withShoulders: false)
+    XCTAssertEqual(reminders(in: gated.events).count, 0)
+    XCTAssertEqual(gated.engine.status, .good)
+    for kind in PostureKind.allCases where kind.requiresShoulderLine {
+      XCTAssertEqual(gated.engine.summary.postureStats[kind.rawValue]?.seconds ?? 0, 0,
+                     "\(kind.rawValue) must not be counted as bad posture without a shoulder line")
+      XCTAssertEqual(gated.engine.episodeCount(for: kind), 0)
+      XCTAssertEqual(gated.engine.reminderCount(for: kind), 0)
+    }
+    // 21 秒的流全算良好，没有一秒落进不良体态。
+    XCTAssertEqual(gated.engine.summary.goodSeconds, 21, accuracy: 0.5)
+  }
+
   /// An experimental kind still runs its episode, still moves the status and still writes feature
   /// lines; only the reminder is dropped, because its `voiceLine` is nil.
   func testExperimentalKindLogsWithoutAReminder() throws {

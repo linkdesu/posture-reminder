@@ -57,19 +57,22 @@ enum PostureClassifier {
 
     let pitchDrop = sample.pitchDeg.map { baseline.pitchDeg - $0 }
     let bodyPresent = sample.bodyPresent
+    // 肩线不可用时，依赖肩线的体态一律不判：宁可漏报，也不能拿一条不存在的肩线去提醒孩子或把
+    // 时间记成不良。`hasShoulderLine` 同时认「关节缺失」与「来源标成不可用」两种情况。
+    let shoulderLine = sample.hasShoulderLine
 
     var breached: [PostureKind: Bool] = [:]
     breached[.near] = over(.distance)
     breached[.headDown] = over(.headPitch)
-    breached[.headTilt] = over(.headRoll)
-    breached[.shoulderTilt] = over(.shoulderTilt)
+    breached[.headTilt] = shoulderLine && over(.headRoll)
+    breached[.shoulderTilt] = shoulderLine && over(.shoulderTilt)
     // `bodyPresent` gates the whole rule and not just the face-lost branch: without it a child who got
     // up and walked away would be read as leaning on the desk.
     let deepDip = pitchDrop.map { $0 > 2 * thresholds.pitchDeg } ?? false
     breached[.deskLean] = bodyPresent && over(.headHeightDrop) && (deepDip || !sample.facePresent)
     breached[.chinRest] = over(.handToFace)
     breached[.headForward] = over(.headForward)
-    breached[.slouch] = over(.slouch)
+    breached[.slouch] = shoulderLine && over(.slouch)
 
     let dominant = PostureKind.allCases
       .filter { breached[$0] == true }

@@ -170,9 +170,45 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertFalse(reading(headOnly, .shoulderTilt).isOverThreshold)
   }
 
-  /// 肩部不可用时不能编一个值出来：肩线倾斜停在阈值一半、严重度 0、永不越线；即便上一帧是
-  /// 15° 的肩线，这一帧也不能越线。深度版把「找不到可信的肩」如实标成 unavailable，分类器必须
-  /// 照此降级为 N/A。
+  /// 肩线不可用时，依赖肩线的三种体态一律不判：高低肩、歪头、驼背都不越线，`dominant` 为空。
+  /// 宁可漏报，也不能拿一条不存在的肩线去提醒孩子。
+  func testAnUnavailableShoulderLineSilencesEveryShoulderDependentPosture() {
+    let withoutShoulders: (PostureSample) -> PostureSample = { sample in
+      var stripped = sample
+      stripped.joints.removeValue(forKey: .leftShoulder)
+      stripped.joints.removeValue(forKey: .rightShoulder)
+      stripped.unavailableJoints.insert(.leftShoulder)
+      stripped.unavailableJoints.insert(.rightShoulder)
+      return stripped
+    }
+
+    let tilted = assess(withoutShoulders(rigged(.shoulderTilt)))
+    XCTAssertEqual(tilted.breached[.shoulderTilt], false)
+    XCTAssertFalse(reading(tilted, .shoulderTilt).isOverThreshold)
+
+    let headTilt = assess(withoutShoulders(rigged(.headTilt, rollDeg: 22.5)))
+    XCTAssertEqual(headTilt.breached[.headTilt], false)
+    XCTAssertNil(headTilt.dominant)
+
+    let slouch = assess(withoutShoulders(rigged(.slouch)))
+    XCTAssertEqual(slouch.breached[.slouch], false)
+
+    // 对照：肩线在的时候，同样的帧照常越线。
+    XCTAssertEqual(assess(rigged(.shoulderTilt)).breached[.shoulderTilt], true)
+    XCTAssertEqual(assess(rigged(.headTilt, rollDeg: 22.5)).breached[.headTilt], true)
+    XCTAssertEqual(assess(rigged(.slouch)).breached[.slouch], true)
+  }
+
+  /// 关节还在、但来源把它们标成不可用时，同样闭嘴：`unavailable` 是关节来源的结论，比「碰巧
+  /// 有两个坐标」更权威。
+  func testAMarkedUnavailableShoulderSilencesTheVerdictEvenWhenTheJointIsPresent() {
+    var sample = rigged(.shoulderTilt)
+    sample.unavailableJoints = [.leftShoulder, .rightShoulder]
+
+    XCTAssertFalse(sample.hasShoulderLine)
+    XCTAssertEqual(assess(sample).breached[.shoulderTilt], false)
+  }
+
   func testAnUnavailableShoulderLineDegradesToNotAvailable() {
     var sample = rigged(.shoulderTilt)
     sample.joints.removeValue(forKey: .leftShoulder)
