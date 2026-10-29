@@ -9,7 +9,7 @@
 - `posture-kinds`：识别 `desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 - `posture-tiers`：稳定级、 中度级可发声；实验级只记录与调试高亮，永不触发任何提醒。
 - `posture-voice`：可发声体态连续越阈 15 秒后播放预录 WAV；多体态按 `priority` 1..8 串行。
-- `posture-absence`：连续 3 秒无人自动停表（中文统一写作「无人」，不叫「离开」）；日志写 `state: "no_person"` 与 `paused`/`resumed`，单次超过 300 秒转 `interrupted`。它与「离开」按钮是两件事：按钮只写历史 `abandoned`。
+- `posture-absence`：连续 3 秒无人自动停表（中文文档与验收统一写作「无人」，不叫「离开」；统计页/历史图例文案写「不在画面」）；日志写 `state: "no_person"` 与 `paused`/`resumed`，单次超过 300 秒转 `interrupted`。它与「离开」按钮是两件事：按钮只写历史 `abandoned`。
 - `posture-overlay`：`debugEnabled` 开启时主页随时显示骨架（中文关节名：头/左眼/右眼/左耳/右耳/颈/躯干/左肩/右肩/左肘/右肘/左腕/右腕/左髋/右髋，只画到髋因为 JointID 没有膝/踝）与特征读数，每个指标带一行算法来源（距离=脸到相机距离；低头角度=基线俯仰−当前脸俯仰；歪头=|当前脸滚转−基线滚转|；肩线=左肩-右肩连线与水平夹角−基线；头高=鼻尖 y−基线头高；手到脸=min(左腕、右腕到鼻尖的距离)；头前伸=基线鼻深−当前鼻深；驼背=max(肩宽缩短比, 颈-躯干缩短比)），未开始专注时数值列显示 `—`，不遮挡操作按钮。
 
 ## How to get to it (user POV)
