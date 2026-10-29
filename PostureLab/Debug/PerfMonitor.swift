@@ -25,9 +25,9 @@ final class PerfMonitor {
 
   private let lock = NSLock()
   private let queue = DispatchQueue(label: "me.xieal.posturelab.perf", qos: .utility)
+  private let file = DebugLineFile(prefix: "perf")
 
   private var timer: DispatchSourceTimer?
-  private var handle: FileHandle?
   private var windowStart = ProcessInfo.processInfo.systemUptime
 
   private var frames = 0
@@ -48,7 +48,6 @@ final class PerfMonitor {
     defer { lock.unlock() }
     guard timer == nil else { return }
     windowStart = ProcessInfo.processInfo.systemUptime
-    openLogFile()
 
     let timer = DispatchSource.makeTimerSource(queue: queue)
     timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
@@ -61,8 +60,6 @@ final class PerfMonitor {
     lock.lock()
     timer?.cancel()
     timer = nil
-    try? handle?.close()
-    handle = nil
     lock.unlock()
   }
 
@@ -115,13 +112,9 @@ final class PerfMonitor {
     jointCalls = 0
     assessments = 0
     windowStart = now
-    let handle = self.handle
     lock.unlock()
 
-    print("[perf] \(line)")
-    if let handle, let data = (line + "\n").data(using: .utf8) {
-      try? handle.write(contentsOf: data)
-    }
+    file.write(line)
   }
 
   /// 纯函数，便于在测试里核对字段与换算。
@@ -142,27 +135,6 @@ final class PerfMonitor {
       epochMilliseconds, frames, fps, gap * 1000,
       jointAverage * 1000, jointMax * 1000, jointCalls,
       assessments, window)
-  }
-
-  // MARK: - File
-
-  private func openLogFile() {
-    let directory = FileDebugLogger.defaultDirectory
-    do {
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let formatter = ISO8601DateFormatter()
-      formatter.formatOptions = [.withInternetDateTime]
-      let stamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "")
-      let url = directory.appendingPathComponent("perf-\(stamp).jsonl")
-      if !FileManager.default.fileExists(atPath: url.path) {
-        _ = FileManager.default.createFile(atPath: url.path, contents: nil)
-      }
-      let handle = try FileHandle(forWritingTo: url)
-      _ = try handle.seekToEnd()
-      self.handle = handle
-    } catch {
-      // 埋点写不了文件也必须让标准输出继续工作，绝不把错误抛给调用方。
-    }
   }
 }
 #endif

@@ -7,9 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		010322E1DA15346F23E7942F /* DepthCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */; };
 		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
 		07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */; };
 		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
+		0FF0E9104E69A80ACF39D554 /* JointDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE9B6B183743022B7C91425 /* JointDebugLog.swift */; };
 		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
 		18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */; };
 		193EE240EA99D8DB936FEBCE /* BodyCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DECA819287056EFAF59B08B /* BodyCloud.swift */; };
@@ -33,6 +35,7 @@
 		602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D597B6333310C45A83D6402 /* ReminderPlayer.swift */; };
 		615F29CABD4A4D803D1CC61E /* PomodoroSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */; };
 		6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */; };
+		6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */; };
 		727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040D7563C8041E76DE061B4A /* PerfMonitor.swift */; };
 		7CA32D1FA92C371E7CFF1B67 /* Pose.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCBAEB16FED6503FA1D580B8 /* Pose.swift */; };
 		840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */; };
@@ -130,6 +133,7 @@
 		69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPersistenceUITests.swift; sourceTree = "<group>"; };
 		6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureKind.swift; sourceTree = "<group>"; };
 		6DECA819287056EFAF59B08B /* BodyCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCloud.swift; sourceTree = "<group>"; };
+		7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLineFile.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
 		811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsStore.swift; sourceTree = "<group>"; };
 		83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimelineTests.swift; sourceTree = "<group>"; };
@@ -138,7 +142,9 @@
 		865D8839C4C8F659BB29252A /* SessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionController.swift; sourceTree = "<group>"; };
 		8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimeline.swift; sourceTree = "<group>"; };
 		8D89124CB90CB32D31F1777E /* PomodoroCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroCopy.swift; sourceTree = "<group>"; };
+		8EE9B6B183743022B7C91425 /* JointDebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JointDebugLog.swift; sourceTree = "<group>"; };
 		922487CB54BBCDE0E210C1FC /* BodyPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyPoint.swift; sourceTree = "<group>"; };
+		9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthCamera.swift; sourceTree = "<group>"; };
 		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
 		A3AE14E62E384345220D3E83 /* Scenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios.swift; sourceTree = "<group>"; };
 		A7C23BDEA7206E390ADDB2D4 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
@@ -178,7 +184,9 @@
 		047483D166B3818162835FE0 /* Debug */ = {
 			isa = PBXGroup;
 			children = (
+				7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */,
 				16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */,
+				8EE9B6B183743022B7C91425 /* JointDebugLog.swift */,
 				040D7563C8041E76DE061B4A /* PerfMonitor.swift */,
 			);
 			path = Debug;
@@ -288,6 +296,7 @@
 			children = (
 				922487CB54BBCDE0E210C1FC /* BodyPoint.swift */,
 				4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */,
+				9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */,
 				C80056FD012C04927DA0997E /* DepthCloud.swift */,
 				DB57EB7282F576BBD9E46A21 /* DepthImage.swift */,
 				DD7085F1683F29E97C684D94 /* DepthJointSource.swift */,
@@ -472,8 +481,10 @@
 				193EE240EA99D8DB936FEBCE /* BodyCloud.swift in Sources */,
 				E05DCDD71A5B8B4F81ACFDCF /* BodyPoint.swift in Sources */,
 				9628B624A31AC72209E46D2B /* BodyRig.swift in Sources */,
+				6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */,
 				5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */,
 				4D0EF23AB4D0D5063528375A /* DebugOverlayView.swift in Sources */,
+				010322E1DA15346F23E7942F /* DepthCamera.swift in Sources */,
 				9631FC5D284FC0FB2A2801B8 /* DepthCaptureSource.swift in Sources */,
 				3E296ABD3EFEFE6C5612823A /* DepthCloud.swift in Sources */,
 				3C23B092FFC5BA5A8E7DCFD1 /* DepthImage.swift in Sources */,
@@ -481,6 +492,7 @@
 				CE36B3AD08D569B2197162CE /* DepthSegmentation.swift in Sources */,
 				20BCEFA0C1E130818EDA47EE /* FileDebugLogger.swift in Sources */,
 				3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */,
+				0FF0E9104E69A80ACF39D554 /* JointDebugLog.swift in Sources */,
 				8C65F76A4BF512D746EDEFD1 /* JointSource.swift in Sources */,
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,

@@ -39,6 +39,10 @@ final class DepthCaptureSource: NSObject, SampleSource {
     depthOutput.setDelegate(self, callbackQueue: queue)
     depthOutput.isFilteringEnabled = true
     depthOutput.alwaysDiscardsLateDepthData = true
+    #if DEBUG
+    // 每个样本一行肩部快照，写 Documents/debug/joints-*.jsonl 并打到标准输出。
+    (jointSource as? DepthJointSource)?.onDebugSample = { JointDebugLog.shared.write($0) }
+    #endif
   }
 
   func start() {

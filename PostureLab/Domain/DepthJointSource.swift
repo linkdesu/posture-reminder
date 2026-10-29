@@ -38,6 +38,12 @@ final class DepthJointSource: JointSource {
     self.processingWidth = processingWidth
   }
 
+  #if DEBUG
+  /// 每个样本的肩部快照出口。只在 DEBUG 构建里存在，由 `DepthCaptureSource` 装上、测试与发布
+  /// 构建都不装，所以领域层自己不做任何 I/O。
+  var onDebugSample: ((JointDebugSample) -> Void)?
+  #endif
+
   func estimate(from depth: DepthImage) -> JointEstimate {
     let image = depth.resampled(maxWidth: processingWidth)
     guard let mask = DepthSegmentation.segment(image, options: options) else {
@@ -112,6 +118,14 @@ final class DepthJointSource: JointSource {
                                       minY: row(Landmark.headTop),
                                       maxY: row(Landmark.headBottom))
 
+    #if DEBUG
+    emitDebugSample(image: image,
+                    mask: mask,
+                    joints: joints,
+                    headTop: row(Landmark.headTop),
+                    headBottom: row(Landmark.headBottom))
+    #endif
+
     return JointEstimate(joints: joints,
                          unavailable: unavailable,
                          cloud: cloud,
@@ -122,6 +136,38 @@ final class DepthJointSource: JointSource {
   }
 
   // MARK: - Landmark helpers
+
+  #if DEBUG
+  /// 把这一帧的颈部、双肩、肩距与头部范围交给调试日志。肩距用 `DepthCamera` 的假设内参换算成厘米。
+  private func emitDebugSample(image: DepthImage,
+                               mask: BodyMask,
+                               joints: [JointID: JointSample],
+                               headTop: Int,
+                               headBottom: Int) {
+    guard let onDebugSample else { return }
+    let left = joints[.leftShoulder]
+    let right = joints[.rightShoulder]
+    let camera = DepthCamera()
+    let span = left.flatMap { left in right.flatMap { right in camera.distance(left, right) } }
+
+    var headWidthPixels = 0
+    for y in headTop...max(headTop, headBottom) {
+      guard let extent = mask.rowExtent(y: y) else { continue }
+      headWidthPixels = max(headWidthPixels, extent.maxX - extent.minX + 1)
+    }
+
+    onDebugSample(JointDebugSample(
+      neck: joints[.neck],
+      leftShoulder: left,
+      rightShoulder: right,
+      shoulderSpanCM: span.map { $0 * 100 },
+      shouldersAvailable: left != nil && right != nil,
+      headWidth: Double(headWidthPixels) / Double(image.width),
+      headTopY: mask.normalized(x: 0, y: headTop).y,
+      headBottomY: mask.normalized(x: 0, y: headBottom).y,
+      shoulderRowY: left?.y))
+  }
+  #endif
 
   private func joint(_ point: CGPointLike, depth: Float?, confidence: Double) -> JointSample {
     JointSample(x: point.x,
