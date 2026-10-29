@@ -1,3 +1,4 @@
+import CoreVideo
 import Foundation
 
 /// What one depth observation says about the body.
@@ -32,10 +33,24 @@ struct JointEstimate: Equatable {
 /// The depth build ships `DepthJointSource`. A later branch that estimates joints some other way
 /// (its own depth model, a different sensor) conforms to this protocol and is handed to
 /// `DepthCaptureSource` instead; the classifier, the point cloud, the overlay and the controller
-/// never change. The input is a depth image on purpose: this build must not be able to feed a video
-/// frame into the seam.
+/// never change. The input is a depth image on purpose: depth is the only thing the geometry may be
+/// built from.
+///
+/// A source whose model runs on pixels — `VisionJointSource` — also accepts the colour frame that
+/// matches that depth image. The buffer is borrowed for the duration of the call: nothing may keep,
+/// copy, draw or write it. Depth-only sources take the default implementation, which ignores it, so
+/// the depth build's seam is unchanged.
 protocol JointSource: AnyObject {
   /// Short name written into the log's provenance and shown nowhere else.
   var identifier: String { get }
   func estimate(from depth: DepthImage) -> JointEstimate
+  /// One depth frame plus the colour frame captured with it, if any.
+  func estimate(from depth: DepthImage, colour: CVPixelBuffer?) -> JointEstimate
+}
+
+extension JointSource {
+  /// Depth-only sources ignore the colour frame. A source that needs it overrides this method.
+  func estimate(from depth: DepthImage, colour: CVPixelBuffer?) -> JointEstimate {
+    estimate(from: depth)
+  }
 }

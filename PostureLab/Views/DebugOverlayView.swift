@@ -220,13 +220,13 @@ enum PostureFeatureSource {
     case .headPitch:
       return "低头角度 = 基线俯仰 − 头部深度平面俯仰"
     case .headRoll:
-      return "歪头 = |头部深度平面滚转 − 基线滚转|"
+      return "歪头 = |双眼连线夹角（无眼时用头部深度平面滚转）− 基线|"
     case .shoulderTilt:
       return "肩线 = 左肩-右肩连线与水平夹角 − 基线"
     case .headHeightDrop:
       return "头高 = 头中心 y − 基线头高"
     case .handToFace:
-      return "手到脸 = min(左腕、右腕 到 鼻尖的距离)；深度版无腕关节"
+      return "手到脸 = min(左腕、右腕 到 鼻尖的距离)；无腕关节时缺测"
     case .headForward:
       return "头前伸 = 基线鼻深 − 当前鼻深"
     case .slouch:

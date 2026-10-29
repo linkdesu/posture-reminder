@@ -108,9 +108,10 @@ final class DepthJointSource: JointSource {
     let unavailable = Set(JointID.allCases).subtracting(joints.keys)
 
     let distanceCM = headDepth.map { Double($0) * 100 }
-    let orientation = headOrientation(image, mask: mask,
-                                      minY: row(Landmark.headTop),
-                                      maxY: row(Landmark.headBottom))
+    let orientation = HeadOrientation.plane(in: image,
+                                            band: row(Landmark.headTop),
+                                            row(Landmark.headBottom),
+                                            mask: mask)
 
     return JointEstimate(joints: joints,
                          unavailable: unavailable,
@@ -153,65 +154,5 @@ final class DepthJointSource: JointSource {
     guard !values.isEmpty else { return nil }
     values.sort()
     return values[values.count / 2]
-  }
-
-  // MARK: - Head orientation
-
-  private struct Orientation {
-    var pitchDeg: Double
-    var rollDeg: Double
-  }
-
-  /// A least-squares plane through the head band's depth cells: `z = a·x + b·y + c` with x/y in
-  /// normalized image units. `b` is how much farther the bottom of the head sits than its top, so a
-  /// head nodding down makes `b` negative and the pitch negative; `a` is the left-right slope and
-  /// becomes the roll. Both are coarse: a face is not a plane, and the caller treats them as
-  /// estimates. A band whose own depth range is wider than `maximumSpread` is not a head (a sleeve,
-  /// a chair back) and gives no orientation at all.
-  private func headOrientation(_ image: DepthImage,
-                               mask: BodyMask,
-                               minY: Int,
-                               maxY: Int) -> Orientation? {
-    var points: [(x: Double, y: Double, z: Double)] = []
-    var zMin = Double.greatestFiniteMagnitude
-    var zMax = -Double.greatestFiniteMagnitude
-    for y in minY...maxY {
-      for x in 0..<image.width where mask.contains(x: x, y: y) && image.isValid(x: x, y: y) {
-        let z = Double(image.value(x: x, y: y))
-        let point = mask.normalized(x: x, y: y)
-        points.append((point.x, point.y, z))
-        zMin = min(zMin, z)
-        zMax = max(zMax, z)
-      }
-    }
-    guard points.count >= 24, zMax - zMin <= 0.35 else { return nil }
-
-    let count = Double(points.count)
-    let meanX = points.map(\.x).reduce(0, +) / count
-    let meanY = points.map(\.y).reduce(0, +) / count
-    let meanZ = points.map(\.z).reduce(0, +) / count
-
-    var sxx = 0.0
-    var sxy = 0.0
-    var syy = 0.0
-    var sxz = 0.0
-    var syz = 0.0
-    for point in points {
-      let dx = point.x - meanX
-      let dy = point.y - meanY
-      let dz = point.z - meanZ
-      sxx += dx * dx
-      sxy += dx * dy
-      syy += dy * dy
-      sxz += dx * dz
-      syz += dy * dz
-    }
-    let determinant = sxx * syy - sxy * sxy
-    guard abs(determinant) > 1e-9 else { return nil }
-    let a = (sxz * syy - syz * sxy) / determinant
-    let b = (syz * sxx - sxz * sxy) / determinant
-
-    let degrees = 180 / Double.pi
-    return Orientation(pitchDeg: atan(b) * degrees, rollDeg: atan(a) * degrees)
   }
 }
