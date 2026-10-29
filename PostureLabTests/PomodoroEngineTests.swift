@@ -60,7 +60,6 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(settings.postureVoiceEnabled, true)
     XCTAssertEqual(settings.postureVoiceVolume, 0.8)
     XCTAssertEqual(settings.monitorDuringBreak, false)
-    XCTAssertEqual(settings.keepScreenAwake, true)
   }
 
   func testRangesDescribeEveryIntegerSetting() {

@@ -104,7 +104,7 @@ final class SessionController: ObservableObject {
 
   /// The pomodoro history the parent report reads and every closed pomodoro is written to.
   private let pomodoroStore: PomodoroStore
-  /// The eleven pomodoro settings; the settings screen edits this very instance.
+  /// The ten pomodoro settings; the settings screen edits this very instance.
   private let pomodoroSettings: PomodoroSettingsStore
 
   /// Non-empty means scripted replay instead of the camera.
@@ -216,7 +216,7 @@ final class SessionController: ObservableObject {
           guard let self else { return }
           self.pomodoro?.update(settings: values)
           self.applyPomodoroAudio(values)
-          // The 保持屏幕常亮 switch is part of the policy, so it takes effect on the focus in flight.
+          // A settings change can move the focus state (e.g. a new length); re-evaluate the screen.
           self.syncIdleTimer()
         }
       }
@@ -821,8 +821,7 @@ final class SessionController: ObservableObject {
     // The launch path runs before `UIApplicationMain`; the idle timer waits for the scene to report
     // itself once (`scenePhaseChanged`).
     guard idleTimerArmed else { return }
-    idleTimer.update(IdleTimerPolicy(keepScreenAwake: pomodoroSettings.settings.keepScreenAwake,
-                                     pomodoro: pomodoro,
+    idleTimer.update(IdleTimerPolicy(pomodoro: pomodoro,
                                      focusOpen: pomodoroFocusOpen,
                                      isSceneActive: sceneActive))
   }

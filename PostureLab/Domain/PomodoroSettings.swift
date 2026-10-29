@@ -24,7 +24,9 @@ struct PomodoroSettings: Equatable, Codable {
   var postureVoiceEnabled: Bool = true  // posture voice reminders
   var postureVoiceVolume: Double = 0.8  // 0...1, the same settings row as the switch above
   var monitorDuringBreak: Bool = false
-  var keepScreenAwake: Bool = true
+  // 0.6.4 removed `keepScreenAwake` (保持屏幕常亮): the screen is always held while a focus counts.
+  // A blob stored by 0.6.3 or earlier still carries that key; the synthesized decoder ignores
+  // unknown keys, so the other settings load unchanged and the stale value is dropped on next write.
 
   private static let focusRange = 5...60
   private static let focusStep = 5

@@ -33,7 +33,7 @@ struct PostureLabApp: App {
     // persistence write, not for a per-run override.
     var stagedPomodoro = pomodoroSettings.settings
     #if DEBUG
-    // `-presetSettings focusMinutes=10,endSound=chime`: a debug-only list of the eleven settable
+    // `-presetSettings focusMinutes=10,endSound=chime`: a debug-only list of the ten settable
     // pomodoro settings, for the acceptance run that has to photograph every row before and after a
     // change. It is staged like every other launch-argument override, so nothing it names becomes the
     // saved setting, and it is applied before the single-value arguments below, which therefore still
@@ -167,7 +167,7 @@ struct PostureLabApp: App {
 
   #if DEBUG
   /// `-presetSettings focusMinutes=10,shortBreakMinutes=1,monitorDuringBreak=1,endSound=chime`: the
-  /// eleven settable pomodoro settings as one comma-separated launch argument, so the acceptance can
+  /// ten settable pomodoro settings as one comma-separated launch argument, so the acceptance can
   /// put any of them on screen without tapping through the settings screen.
   ///
   /// Every value goes through `PomodoroSettings.clamped()`, the same gate the settings screen writes
@@ -176,7 +176,7 @@ struct PostureLabApp: App {
   ///
   /// The keys are the settable property names: `focusMinutes`, `shortBreakMinutes`,
   /// `longBreakMinutes`, `focusPerLongBreak`, `dailyGoal`, `postureVoiceEnabled`,
-  /// `monitorDuringBreak`, `keepScreenAwake`, `autoStartBreak`, `autoStartFocus` and `endSound`.
+  /// `monitorDuringBreak`, `autoStartBreak`, `autoStartFocus` and `endSound`.
   /// Integers read as integers, booleans as `1`/`0`/`true`/`false`, and `endSound` as
   /// `soft`/`chime`/`none`. An unknown key, a malformed pair or an unparsable value is ignored.
   ///
@@ -226,8 +226,6 @@ struct PostureLabApp: App {
         if let flag = presetFlag(value) {
           staged.monitorDuringBreak = gate(flag, \.monitorDuringBreak)
         }
-      case "keepScreenAwake":
-        if let flag = presetFlag(value) { staged.keepScreenAwake = gate(flag, \.keepScreenAwake) }
       case "autoStartBreak":
         if let flag = presetFlag(value) { staged.autoStartBreak = gate(flag, \.autoStartBreak) }
       case "autoStartFocus":

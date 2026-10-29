@@ -114,7 +114,7 @@ final class SettingsInputEdgeUITests: XCTestCase {
     return raw
   }
 
-  /// Puts the eleven pomodoro rows back to their defaults so each case starts from 25 minutes.
+  /// Puts the ten pomodoro rows back to their defaults so each case starts from 25 minutes.
   private func resetDefaults() {
     let reset = app.first(.button, labelled: "恢复默认设置")
     for _ in 0..<8 where !(reset.exists && reset.isHittable) {

@@ -25,7 +25,6 @@ private final class ScreenRig {
   let application = FakeApplication()
   let idleTimer: IdleTimerController
   var engine: PomodoroEngine
-  var keepScreenAwake = true
   var sceneActive = true
   private(set) var focusOpen = false
 
@@ -52,8 +51,7 @@ private final class ScreenRig {
   /// Evaluates and applies the policy from the current state, exactly as the controller does on every
   /// state change.
   func sync() {
-    idleTimer.update(IdleTimerPolicy(keepScreenAwake: keepScreenAwake,
-                                     pomodoro: engine,
+    idleTimer.update(IdleTimerPolicy(pomodoro: engine,
                                      focusOpen: focusOpen,
                                      isSceneActive: sceneActive))
   }
@@ -106,15 +104,11 @@ final class IdleTimerTests: XCTestCase {
   // MARK: - The pure policy
 
   func testThePolicyHoldsTheScreenOnlyForACountingFocusOnAnActiveScene() {
-    for keep in [true, false] {
-      for counting in [true, false] {
-        for active in [true, false] {
-          let policy = IdleTimerPolicy(keepScreenAwake: keep,
-                                       isFocusCounting: counting,
-                                       isSceneActive: active)
-          XCTAssertEqual(policy.disablesIdleTimer, keep && counting && active,
-                         "keep=\(keep) counting=\(counting) active=\(active)")
-        }
+    for counting in [true, false] {
+      for active in [true, false] {
+        let policy = IdleTimerPolicy(isFocusCounting: counting, isSceneActive: active)
+        XCTAssertEqual(policy.disablesIdleTimer, counting && active,
+                       "counting=\(counting) active=\(active)")
       }
     }
   }
@@ -125,7 +119,7 @@ final class IdleTimerTests: XCTestCase {
     // `UIApplication.shared` here and crashed writing through the nil on every launch.
     var application: FakeApplication?
     let idleTimer = IdleTimerController(application: { application })
-    let counting = IdleTimerPolicy(keepScreenAwake: true, isFocusCounting: true, isSceneActive: true)
+    let counting = IdleTimerPolicy(isFocusCounting: true, isSceneActive: true)
 
     XCTAssertFalse(idleTimer.update(counting), "wrote before there was an application")
     XCTAssertEqual(idleTimer.policy, counting)
@@ -142,8 +136,8 @@ final class IdleTimerTests: XCTestCase {
   func testTheControllerWritesOnlyWhenTheAnswerChanges() {
     let application = FakeApplication()
     let idleTimer = IdleTimerController(application: application)
-    let counting = IdleTimerPolicy(keepScreenAwake: true, isFocusCounting: true, isSceneActive: true)
-    let parked = IdleTimerPolicy(keepScreenAwake: true, isFocusCounting: false, isSceneActive: true)
+    let counting = IdleTimerPolicy(isFocusCounting: true, isSceneActive: true)
+    let parked = IdleTimerPolicy(isFocusCounting: false, isSceneActive: true)
 
     XCTAssertTrue(idleTimer.update(counting))
     XCTAssertEqual(application.writes, [true])
@@ -294,17 +288,49 @@ final class IdleTimerTests: XCTestCase {
   }
 
   @MainActor
-  func testTheKeepScreenAwakeSwitchOffKeepsTheScreenOffMidFocus() {
+  func testACountingFocusAlwaysHoldsTheScreenWithNoSwitchToTurnItOff() {
+    // 0.6.4 removed 保持屏幕常亮: holding the screen is not a preference, so a counting focus on an
+    // active scene always holds it, and nothing in the settings can say otherwise.
     let rig = ScreenRig()
-    rig.keepScreenAwake = false
     rig.command(.start)
     rig.feed(10)
     XCTAssertTrue(rig.engine.isRunning)
-    XCTAssertFalse(rig.screenHeld)
-
-    // Flipped back on from the settings page while the focus counts.
-    rig.keepScreenAwake = true
-    rig.sync()
     XCTAssertTrue(rig.screenHeld)
+    XCTAssertFalse(Mirror(reflecting: PomodoroSettings()).children
+                    .contains { $0.label == "keepScreenAwake" },
+                   "the keepScreenAwake setting is back")
+  }
+
+  func testSettingsStoredBy063WithKeepScreenAwakeStillLoad() throws {
+    // A 0.6.3 blob carries keepScreenAwake=false; it must load, keep every other value and drop the key.
+    let suite = "IdleTimerTests.migration.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = """
+    {"focusMinutes":30,"shortBreakMinutes":7,"longBreakMinutes":20,"focusPerLongBreak":3,
+     "autoStartBreak":false,"autoStartFocus":true,"dailyGoal":6,"endSound":"chime",
+     "postureVoiceEnabled":false,"postureVoiceVolume":0.5,"monitorDuringBreak":true,
+     "keepScreenAwake":false}
+    """
+    defaults.set(Data(legacy.utf8), forKey: "pomodoro.settings")
+
+    let store = PomodoroSettingsStore(defaults: defaults)
+    var expected = PomodoroSettings()
+    expected.focusMinutes = 30
+    expected.shortBreakMinutes = 7
+    expected.longBreakMinutes = 20
+    expected.focusPerLongBreak = 3
+    expected.autoStartBreak = false
+    expected.autoStartFocus = true
+    expected.dailyGoal = 6
+    expected.endSound = .chime
+    expected.postureVoiceEnabled = false
+    expected.postureVoiceVolume = 0.5
+    expected.monitorDuringBreak = true
+    XCTAssertEqual(store.settings, expected, "a 0.6.3 blob fell back to defaults or lost a value")
+
+    store.settings.dailyGoal = 5
+    let rewritten = try XCTUnwrap(defaults.data(forKey: "pomodoro.settings"))
+    XCTAssertFalse(String(decoding: rewritten, as: UTF8.self).contains("keepScreenAwake"))
   }
 }

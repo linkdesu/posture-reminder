@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The eleven pomodoro settings of the domain spec (`GLOSSARY.md`), in the order of its table, plus
+/// The ten pomodoro settings of the domain spec (`GLOSSARY.md`), in the order of its table, plus
 /// the monitoring section (sensitivity and the avatar switch) and the debug section (debug mode and
 /// the experimental-posture switch).
 ///
@@ -117,13 +117,6 @@ struct PomodoroSettingsView: View {
           }
         }
 
-        Section("屏幕") {
-          Toggle(isOn: $settingsStore.settings.keepScreenAwake) {
-            settingLabel(title: "屏幕常亮",
-                         subtitle: "阅读时不让屏幕自动变暗")
-          }
-        }
-
         Section("调试") {
           // The same app-level switch the overlay reads. Off by default in a release build, so the
           // child never sees joint data or an experimental posture unless a parent turns it on; a
@@ -163,7 +156,7 @@ struct PomodoroSettingsView: View {
         Button("恢复", role: .destructive) { settingsStore.reset() }
         Button("取消", role: .cancel) {}
       } message: {
-        Text("十一项番茄钟设置都会回到默认值；灵敏度、形象模式与调试开关不受影响。")
+        Text("十项番茄钟设置都会回到默认值；灵敏度、形象模式与调试开关不受影响。")
       }
     }
   }

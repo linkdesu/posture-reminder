@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-/// Holds the eleven pomodoro settings and keeps them across relaunches.
+/// Holds the ten pomodoro settings and keeps them across relaunches.
 ///
 /// Same shape as `Settings`: the published value is written through `clamped()` and read back in
 /// `init`, so the settings screen and storage share one gate; a missing or corrupt stored blob

@@ -1,6 +1,6 @@
 import XCTest
 
-/// The settings sections a parent needs beyond the eleven pomodoro rows: sensitivity, the avatar
+/// The settings sections a parent needs beyond the ten pomodoro rows: sensitivity, the avatar
 /// switch, and — inside the debug section — the experimental-posture switch.
 ///
 /// Each check is made on the page's own controls, and each change is put back the way it was found so

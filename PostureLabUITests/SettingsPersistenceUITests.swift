@@ -3,7 +3,7 @@ import XCTest
 /// AC2: every setting on the settings page can be changed, and is still there after the app is killed
 /// and started again.
 ///
-/// One table drives all of it. `settings` below names each of the eleven rows of the settings spec
+/// One table drives all of it. `settings` below names each of the ten rows of the settings spec
 /// in `GLOSSARY.md`, in the order the page draws them, says how to read the value it shows and how
 /// to change it through the control the page itself draws — so a twelfth setting is one line
 /// there, and the two passes below do not change. Each setting is photographed before and after
@@ -30,7 +30,7 @@ final class SettingsPersistenceUITests: XCTestCase {
   /// The three sounds the 结束提示音 picker offers, in the order the page lists them.
   private static let endSounds = ["柔和铃声", "铃声", "静音"]
 
-  /// The eleven settings of the domain spec (`GLOSSARY.md`). 姿态语音提醒 and its volume are one row
+  /// The ten settings of the domain spec (`GLOSSARY.md`). 姿态语音提醒 and its volume are one row
   /// of that spec — "开/关；音量" — so they are one case here too and are read and changed together.
   private var settings: [Setting] {
     [
@@ -63,10 +63,7 @@ final class SettingsPersistenceUITests: XCTestCase {
               change: { self.changeVoiceRow() }),
       Setting(name: "monitorDuringBreak",
               read: { self.switchValue(of: "休息时是否监测姿态") },
-              change: { self.flip("休息时是否监测姿态") }),
-      Setting(name: "keepScreenAwake",
-              read: { self.switchValue(of: "屏幕常亮") },
-              change: { self.flip("屏幕常亮") })
+              change: { self.flip("休息时是否监测姿态") })
     ]
   }
 
@@ -89,6 +86,12 @@ final class SettingsPersistenceUITests: XCTestCase {
       attachScreenshot(of: app, named: "\(stem)-after")
       expected[setting.name] = after
     }
+
+    // 0.6.4 removed 保持屏幕常亮: the last row walked sits just above where it used to be, so a
+    // returning switch would be built and found here.
+    XCTAssertFalse(app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "屏幕常亮"))
+                     .firstMatch.exists,
+                   "the 屏幕常亮 switch is back on the settings page")
 
     // Give the preferences daemon a beat to take the last write, so what is being tested is a value
     // that reached storage rather than one still in flight, and then kill the process.
