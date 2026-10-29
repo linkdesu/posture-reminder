@@ -21,3 +21,14 @@
 - 深度版显示名改为「PostureLab 深度版」，Bundle ID 改为 `me.xieal.posturelab.depth`，与 0.3 的 `me.xieal.posturelab` 并存，避免覆盖验收机上的旧版本。
 - 深度朝向（俯仰/滚转）来自头部区域的最小二乘平面，精度低于 ARKit 脸位姿；「手到脸」不可用。这些限制必须写进评估报告，而不是被指标表掩盖。
 - 隐私边界回到 ADR-0005 的原始条款，并由仓库内的静态自检（`rg 'VNDetectHumanBodyPose|AVCaptureVideoPreviewLayer|capturedImage|AVCaptureVideoDataOutput'`）持续证明。
+
+## 实测记录：`AVCaptureVideoDataOutput` 是否必需（2026-10-29）
+
+本轮尝试按「临时去掉 `videoOutput` → 真机构建/安装/启动 → 抓深度流日志」验证第 2 条里的会话启动假设。**实测未完成**，原因如下：
+
+- 设备 iPhone 13（`00008110-001271181AD3801E`）连接正常，Debug 构建与安装成功（`xcodebuild ... -allowProvisioningUpdates build` → `BUILD SUCCEEDED`；`devicectl device install app` → `App installed`）。
+- 探针在 `DepthCaptureSource.start()` 记录 `AVCaptureDevice.authorizationStatus`，得到 `start auth=0`（`notDetermined`）：App 停在系统相机授权弹窗，`requestAccess` 回调未执行，`configure()` 与 `session.startRunning()` 都没有跑到。
+- 尝试用临时 XCUITest 点击「允许」以自动授权，但真机 UI 测试 runner 签名失败（`No Accounts`；`me.xieal.posturelab.depth.uitests.xctrunner` 无匹配开发档案；`-allowProvisioningUpdates -allowProvisioningDeviceRegistration` 均无效）。
+- 没有绕过授权、没有改系统配置、没有用推断代替实测。`DepthCaptureSource` 已恢复为保留 `videoOutput` 的原实现。
+
+**结论**：第 2 条仍然成立且按保守方式实现（保留 output、不装 delegate、不读缓冲区）；「去掉该 output 是否仍能出深度」待下一次有人可点授权、或 UI 测试 runner 具备开发档案时按 `tmp/verify/r12-adr0007-probe/README.md` 的步骤复测。证据：`tmp/verify/r12-adr0007-probe/`（`probe.txt`、`console-A.txt`、`README.md`）。
