@@ -58,6 +58,10 @@ FORBIDDEN_SUFFIXES = {
     ".mp4", ".mov", ".m4v", ".avi", ".h264", ".hevc",
     ".dng", ".raw", ".bin", ".exr", ".pfm", ".npy", ".npz", ".tflite", ".mlmodel",
 }
+# The app's own bundle id ends in ".depth"; iOS names saved-state, Metal-cache and SplashBoard
+# paths after it, so it is cut out before the name hints run (r16: every system file tripped
+# "depth"). A file the app itself names "depth-…" or "frame-…" is still caught.
+BUNDLE_IDS = ("me.xieal.posturelab.depth", "me.xieal.posturelab")
 FORBIDDEN_HINTS = ("depth", "raw", "capture", "frame", "rgb", "camera", "photo", "video", "faceframe")
 
 
@@ -129,6 +133,8 @@ def main():
             findings.append(f"{rel}: unexpected file type")
 
         lowered = rel.lower()
+        for bundle in BUNDLE_IDS:
+            lowered = lowered.replace(bundle, "<bundle>")
         if any(hint in lowered for hint in FORBIDDEN_HINTS):
             findings.append(f"{rel}: name suggests raw imagery or sensor data")
 
