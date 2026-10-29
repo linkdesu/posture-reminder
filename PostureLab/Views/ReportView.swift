@@ -204,8 +204,8 @@ struct ReportView: View {
       }
   }
 
-  /// `legendOrder` covers the postures and the non-posture bands (absence, pause and
-  /// "detecting"); 良好 is a state the report also draws, so it ranks ahead of them and a good day
+  /// `legendOrder` covers the postures and the non-posture bands (absence, pause, "detecting"
+  /// and "no data"); 良好 is a state the report also draws, so it ranks ahead of them and a good day
   /// reads top-down.
   private func legendRank(of kind: String, in order: [String]) -> Int {
     if kind == PostureStatus.good.rawValue { return -1 }
@@ -413,12 +413,14 @@ struct ReportView: View {
   }
 
   /// The name of a segment kind, read back through the one state vocabulary the domain logs, so a
-  /// kind added there needs no second table here. The two non-posture bands are the exception by
-  /// design: neither pause nor "detecting" is a `PostureStatus` at all, so each gets its one fixed
-  /// label. Everything else — including an unknown kind — keeps falling through to the domain.
+  /// kind added there needs no second table here. The non-posture bands are the exception by
+  /// design: none of pause, "detecting" or "no data" is a `PostureStatus` at all, so each gets its
+  /// one fixed label. Everything else — including an unknown kind — keeps falling through to the
+  /// domain.
   private static func displayName(for kind: String) -> String {
     if kind == PosturePalette.pausedKind { return "暂停" }
     if kind == PosturePalette.detectingKind { return "识别中" }
+    if kind == PosturePalette.noDataKind { return "无数据" }
     return PostureStatus(rawValue: kind)?.displayName ?? kind
   }
 

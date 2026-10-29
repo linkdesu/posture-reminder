@@ -239,4 +239,30 @@ final class PomodoroHistoryTests: XCTestCase {
     XCTAssertEqual(day.goodRatio, 48.6 / 58.6, accuracy: 1e-9,
                    "the wait is not in the ratio's denominator")
   }
+
+  /// v0.6.1: a stretch with no sample is drawn but never scored, and — the point of the fix — it
+  /// takes the seconds away from the posture that preceded it instead of letting that posture carry
+  /// the report visit. 9.6 s good / (9.6 good + 20 near) is the whole ratio; the 30 s of no data
+  /// is in neither the numerator nor the denominator.
+  func testNoDataBandIsDrawnButNotScoredAsPosture() {
+    let base = date(2026, 10, 21, hour: 9)
+    let near = PostureKind.near.rawValue
+    let segments = [
+      segment(PostureSegment.detectingKind, from: base, start: 0, end: 0.4),
+      segment(PostureStatus.good.rawValue, from: base, start: 0.4, end: 10),
+      segment(PostureSegment.noDataKind, from: base, start: 10, end: 40),
+      segment(near, from: base, start: 40, end: 60),
+    ]
+    let entry = record(startedAt: base, focusedSeconds: 60, segments: segments)
+
+    let day = PomodoroHistory.day([entry], on: base, calendar: calendar)
+
+    XCTAssertEqual(day.segments, segments)
+    XCTAssertEqual(seconds(day, near), 20, accuracy: 1e-9)
+    XCTAssertNil(day.postureSeconds[PostureSegment.noDataKind])
+    XCTAssertEqual(day.postureSeconds.values.reduce(0, +), 20, accuracy: 1e-9,
+                   "no_data must not add seconds to any posture")
+    XCTAssertEqual(day.goodRatio, 9.6 / 29.6, accuracy: 1e-6,
+                   "the gap is not in the ratio's denominator, and its seconds are not good posture")
+  }
 }

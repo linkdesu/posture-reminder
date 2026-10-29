@@ -22,6 +22,12 @@ struct PostureSegment: Equatable, Codable {
   /// of its own, never part of the first posture, and the aggregation neither scores it nor counts it
   /// in the good-posture ratio.
   static let detectingKind = "detecting"
+  /// The「无数据」band (v0.6.1): a stretch after the focus's first sample in which no sample arrived
+  /// at all — the report screen held the camera down, or the depth stream simply stopped. It is not a
+  /// posture: whatever was classified last must not be credited with time nobody measured. Drawn in
+  /// the same pale grey as `detecting`, and scored by neither the posture statistics nor the
+  /// good-posture ratio.
+  static let noDataKind = "no_data"
   /// The pause band (B2): wall time the focus did not count. Not a posture, and not a `state` value.
   static let pausedKind = "paused"
 }

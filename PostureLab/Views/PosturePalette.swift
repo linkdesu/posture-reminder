@@ -7,9 +7,9 @@ import SwiftUI
 /// importing a drawing framework.
 ///
 /// Keys are `PostureKind.rawValue`, plus `PostureStatus.noPerson.rawValue` for the absence
-/// segment and `pausedKind`/`detectingKind` for the two bands a report timeline has to draw that
-/// are neither postures nor absences. Warm to cool, and deliberately far apart in hue so adjacent
-/// timeline segments stay distinguishable.
+/// segment and `pausedKind`/`detectingKind`/`noDataKind` for the bands a report timeline has to
+/// draw that are neither postures nor absences. Warm to cool, and deliberately far apart in hue so
+/// adjacent timeline segments stay distinguishable.
 enum PosturePalette {
   /// The segment kind a report draws for a pause (PRD v0.5.1 B2). A pause is a band for time the
   /// child was not being measured, not a posture: the domain never classifies it, and the report
@@ -23,6 +23,12 @@ enum PosturePalette {
   /// stays out of the bad-posture tally and out of the good ratio's denominator. The engine, the
   /// timeline and the legend share this one spelling.
   static let detectingKind = PostureSegment.detectingKind
+
+  /// The segment kind a report draws for "no data" (v0.6.1): a stretch after the focus's first
+  /// sample in which no sample arrived at all. It is drawn in the same pale grey as `detecting` —
+  /// both say "the camera did not answer" — but stays a row of its own so a stalled stream inside a
+  /// focus is not read as the startup wait. Never scored, never in the good ratio's denominator.
+  static let noDataKind = PostureSegment.noDataKind
 
   static let colors: [String: Color] = [
     // Good posture is the band's substance, so it is solid; "nobody here" is the empty state, so
@@ -41,12 +47,19 @@ enum PosturePalette {
     // A pause is neither a posture nor an absence, so it is a neutral mid grey: clearly darker than
     // the pale absence grey and clearly lighter and less green than the solid good-posture sage.
     PosturePalette.pausedKind: Color(.sRGB, red: 0.60, green: 0.60, blue: 0.62, opacity: 1),
-    // "Detecting" is the palest and coolest of the three neutrals: it is the emptiest band of all,
+    // "Detecting" is the palest and coolest of the neutrals: it is the emptiest band of all,
     // since nothing has been judged yet. Three greys, three meanings, in descending darkness —
     // pause (0.60) is time taken out of the countdown, absence (0.80) is a measured "nobody here",
     // detecting (0.90) is the short wait before the first sample.
-    PosturePalette.detectingKind: Color(.sRGB, red: 0.90, green: 0.91, blue: 0.93, opacity: 1),
+    PosturePalette.detectingKind: PosturePalette.detectingKindColor,
+    // v0.6.1: a stalled stream after the first sample says exactly what detecting says — the camera
+    // has no answer — so it shares the same pale grey instead of adding a fourth neutral nobody
+    // could tell apart. The legend still lists it separately when a day contains it.
+    PosturePalette.noDataKind: PosturePalette.detectingKindColor,
   ]
+
+  /// The one pale grey the two "the camera did not answer" bands share: `detecting` and `no_data`.
+  private static let detectingKindColor = Color(.sRGB, red: 0.90, green: 0.91, blue: 0.93, opacity: 1)
 
   /// The calm colour for a segment whose posture has no entry, so a caller never has to unwrap.
   static let calm = Color(.sRGB, red: 0.44, green: 0.49, blue: 0.58, opacity: 1)
@@ -56,11 +69,12 @@ enum PosturePalette {
   }
 
   /// The states a legend lists, good posture first so a good day reads top-down, then the postures
-  /// in the order the domain ranks them, then the bands that are not postures: absence, pause, and
-  /// finally "detecting" — the wait before the first sample, the least interesting row of all.
+  /// in the order the domain ranks them, then the bands that are not postures: absence, pause,
+  /// "detecting" — the wait before the first sample — and finally "no data", a stalled stream
+  /// inside the focus.
   static var legendOrder: [String] {
     [PostureStatus.good.rawValue]
       + PostureKind.allCases.map(\.rawValue)
-      + [PostureStatus.noPerson.rawValue, pausedKind, detectingKind]
+      + [PostureStatus.noPerson.rawValue, pausedKind, detectingKind, noDataKind]
   }
 }

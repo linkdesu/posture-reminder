@@ -107,10 +107,11 @@ enum PomodoroHistory {
         // Every segment reaches the timeline, the non-posture bands included; only the ones the
         // domain vocabulary recognises feed the figures below.
         segments.append(segment)
-        // `detecting` (the wait before the first sample) and `paused` are not `PostureStatus`
-        // values, so they fail this parse and are skipped whole: neither adds to the bad-posture
-        // tally, to `postureSeconds`, nor to the denominator of the good ratio. They are still in
-        // `segments`, which is what lets the band draw them without the day being scored for them.
+        // `detecting` (the wait before the first sample), `no_data` (a stalled stream) and
+        // `paused` are not `PostureStatus` values, so they fail this parse and are skipped whole:
+        // none adds to the bad-posture tally, to `postureSeconds`, nor to the denominator of the
+        // good ratio. They are still in `segments`, which is what lets the band draw them without
+        // the day being scored for them.
         guard let status = PostureStatus(rawValue: segment.kind) else { continue }
         switch status {
         case .good:
@@ -136,9 +137,10 @@ enum PomodoroHistory {
 
   /// Good seconds and the seconds that carried posture data at all: `no_person` is excluded from
   /// the denominator because absence is not a posture the child could have held, and every kind the
-  /// domain vocabulary does not recognise — `detecting` (the wait before the first sample) and
-  /// `paused` — is excluded for the same reason by the parse below. Keeping them out is what makes
-  /// the ratio a share of measured postures rather than of the whole focus.
+  /// domain vocabulary does not recognise — `detecting` (the wait before the first sample),
+  /// `no_data` (a stalled stream) and `paused` — is excluded for the same reason by the parse
+  /// below. Keeping them out is what makes the ratio a share of measured postures rather than of
+  /// the whole focus.
   private static func ratioComponents(_ segments: [PostureSegment]) -> (good: Double, data: Double) {
     var good = 0.0
     var data = 0.0
