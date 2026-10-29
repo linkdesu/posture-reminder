@@ -84,7 +84,7 @@ Doctor 失败时先修复环境（解锁真机、重新 boot、重新 install）
 
 每次启动都记录 `launch-args.txt`、`provenance.json`、截图、`Documents/` 与 `sandbox-audit.json`。详细特性入口见 `features/`。
 
-XCUITest 只用于模拟器无法用 launch argument 表达的真实点击（例如设置页 11 项参数逐项修改、手动输入数字与杀进程重启持久化）：
+XCUITest 只用于模拟器无法用 launch argument 表达的真实点击（例如设置页 10 项参数逐项修改、手动输入数字与杀进程重启持久化）：
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
