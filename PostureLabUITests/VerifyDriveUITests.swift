@@ -1,6 +1,6 @@
 import XCTest
 
-/// `verify.py drive settings-scroll | settings-toggle | upgrade-063` 的 XCUITest 底层。
+/// `verify.py drive settings-scroll | settings-toggle | upgrade-063 | abandon-count` 的 XCUITest 底层。
 ///
 /// 全量测试里它们也照常跑（legacy 用例没有旧版 App 时跳过）。证据是 `.keepAlways` 附件：
 /// verify.py 用 `xcresulttool export attachments` 导出截图与文本，再自己从模拟器读回
@@ -83,6 +83,49 @@ final class VerifyDriveUITests: XCTestCase {
     XCTAssertEqual(after, "0", "屏幕常亮 is still on")
     RunLoop.current.run(until: Date().addingTimeInterval(1.5))
     app.terminate()
+  }
+
+  /// 真点「开始专注」→ 跑几秒 →真点「离开」提前结束，读主页「今天 x/目标」前后两次：
+  /// 提前结束的专注不算完成，计数不能加一。历史里是否落了 abandoned 记录由 verify.py 读回。
+  func testDriveAbandonDoesNotCountToday() throws {
+    app = XCUIApplication()
+    app.launchArguments = PomodoroLaunch.parkedPreview(scenario: "pomodoroDay", minutes: 1)
+    app.launch()
+    let start = app.first(.button, labelled: "开始专注")
+    XCTAssertTrue(start.waitForExistence(timeout: 30), "the child's screen never parked on 开始专注")
+    let goal = app.first(.any, labelStartingWith: "今日目标")
+    XCTAssertTrue(goal.waitForExistence(timeout: 10), "no 今天 x/目标 line on the home screen")
+    let before = todayCount(goal.label)
+    attachScreenshot(of: app, named: "drive-abandon-before")
+
+    start.tap()
+    XCTAssertTrue(app.first(.button, labelled: "暂停").waitForExistence(timeout: 10),
+                  "开始专注 did not start the focus")
+    let end = app.first(.button, labelled: "离开")
+    XCTAssertTrue(end.waitForExistence(timeout: 5), "a started focus has no 离开 button")
+    RunLoop.current.run(until: Date().addingTimeInterval(5))
+    attachScreenshot(of: app, named: "drive-abandon-running")
+    end.tap()
+    let endTapped = start.waitForExistence(timeout: 10)
+    let reset = endTapped && !app.first(.button, labelled: "离开").exists
+    // 给计数一点时间：如果错算成完成，标签会在这几秒里变。
+    RunLoop.current.run(until: Date().addingTimeInterval(3))
+    let after = todayCount(app.first(.any, labelStartingWith: "今日目标").label)
+    attachScreenshot(of: app, named: "drive-abandon-after")
+    attachText("drive-abandon-values",
+               "before=\(before.done.map(String.init) ?? "nil")\nafter=\(after.done.map(String.init) ?? "nil")\n"
+               + "goal=\(after.goal.map(String.init) ?? "nil")\nendTapped=\(endTapped)\nreset=\(reset)\n")
+    XCTAssertTrue(endTapped, "离开 left no parked focus to start again")
+    XCTAssertNotNil(before.done, "could not read 今天 x/目标 before the focus")
+    XCTAssertEqual(before.done, after.done, "ending a focus early with 离开 changed 今天 x/目标")
+    RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+    app.terminate()
+  }
+
+  /// 「今日目标 0 个，共 6 个」→ (0, 6)。
+  private func todayCount(_ label: String) -> (done: Int?, goal: Int?) {
+    let numbers = label.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+    return (numbers.first, numbers.count > 1 ? numbers[1] : nil)
   }
 
   // MARK: - Helpers

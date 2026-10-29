@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""verify.py 自测（不碰模拟器）：分批 evidence / down 只判本批跑过的场景。
+"""verify.py 自测（不碰模拟器）：分批 evidence / down 只判本批跑过的场景；离开计数的判定。
 
   python3 .omp/skills/verify-posture-lab/scripts/test_verify.py
 """
@@ -91,6 +91,32 @@ class Batch(unittest.TestCase):
         self.save()
         verify.command_evidence(self.ns())
         self.assertEqual(verify.command_down(self.ns()), 1)  # 缺 mid-focus.png
+
+
+class AbandonJudge(unittest.TestCase):
+    def test_unchanged_count_passes(self):
+        ok, _ = verify.judge_abandon_count(
+            {"before": "0", "after": "0", "goal": "6", "endTapped": "true", "reset": "true"},
+            (0, 6), (0, 6))
+        self.assertTrue(ok)
+
+    def test_increment_fails(self):
+        ok, why = verify.judge_abandon_count(
+            {"before": "0", "after": "1", "goal": "6", "endTapped": "true", "reset": "true"},
+            (0, 6), (1, 6))
+        self.assertFalse(ok, why)
+
+    def test_ocr_disagreeing_with_ui_fails(self):
+        ok, _ = verify.judge_abandon_count(
+            {"before": "0", "after": "0", "goal": "6", "endTapped": "true", "reset": "true"},
+            (0, 6), (1, 6))
+        self.assertFalse(ok)
+
+    def test_end_not_tapped_fails(self):
+        ok, _ = verify.judge_abandon_count(
+            {"before": "0", "after": "0", "goal": "6", "endTapped": "false", "reset": "true"},
+            (0, 6), (0, 6))
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":

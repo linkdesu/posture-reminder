@@ -120,6 +120,7 @@ Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环�
 | 场景 | 做什么 | 判据（`scenarios/<场景>/*.json`） |
 |---|---|---|
 | `break-count` | `pomodoroDay` 1 分钟专注，在 20 s（专注中）、75 s（休息中）、135 s（下一段专注）截图并 OCR | 「今天 x/目标」依次为 0 → **1**（休息中已加一）→ 1（不重复加） |
+| `abandon-count` | XCUITest `VerifyDriveUITests/testDriveAbandonDoesNotCountToday`：停驻在 1 分钟专注上，**真点**「开始专注」，跑 5 s 后**真点**「离开」提前结束，读主页「今日目标」标签前后两次，并对前后截图 OCR「今天 x/目标」；再从 `Documents/pomodoro-history.json` 读回记录 | 界面与 OCR 计数前后相等（不加一）；历史里至少一条 `abandoned`、没有 `completed`（`abandon-count.json.ok`） |
 | `settings-scroll` | XCUITest `VerifyDriveUITests/testDriveSettingsScrollCountsTenSettings`：逐项滚到并数出番茄钟 10 项，滚到下半屏截图 | `count=10`、无「屏幕常亮」行，`drive-settings-bottom.png` 存在 |
 | `settings-toggle` | XCUITest 真点一次「自动开始休息」，再从 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist` 读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
 | `upgrade-063` | 构建 0.6.3（`c9d5f42`，缓存在 `verify-builds/posture-lab/legacy-063`）→ 装上 → XCUITest 在 **0.6.3 的界面上真点**「屏幕常亮」关掉 → 读回存储 `keepScreenAwake=false` → 覆盖安装冻结新版 → 设置页无常亮行、旧 key 存活、专注 `focus_start` 为 true | `upgrade.json.ok` |
