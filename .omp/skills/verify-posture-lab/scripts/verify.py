@@ -578,9 +578,10 @@ def plist_value(plist: Path, key: str) -> str:
 
 
 def next_run_id(slug: str) -> str:
-    """slug 已经是 r<N>-xxx 就原样用；否则取 tmp/verify 下最大的 N 加一。"""
+    """slug 已经是 r<N>-xxx 就原样用；tl- 开头（TL 自测 smoke）原样用、不占 r 序号；
+    否则取 tmp/verify 下最大的 N 加一。"""
     import re
-    if re.match(r"^r\d+-", slug):
+    if re.match(r"^r\d+-", slug) or slug.startswith("tl-"):
         return slug
     numbers = [int(m.group(1)) for p in RUNS.iterdir() if (m := re.match(r"^r(\d+)-", p.name))] \
         if RUNS.exists() else []
@@ -612,8 +613,78 @@ def ocr(binary: Path, image: Path) -> list[str]:
     return lines
 
 
+# 本次 preflight 的现场，供退出清理用（正常退出、失败、中断都走 finally）。
+PREFLIGHT_CTX: dict = {}
+
+
+def booted_round_sims(exclude: str = "") -> list[dict]:
+    """处于 Booted 的 pl-r* 模拟器（别的轮次留下的）；pr-tl-* 等不在匹配范围内。"""
+    data = json.loads(sh_out(["xcrun", "simctl", "list", "-j", "devices"], check=False) or "{}")
+    found = []
+    for devices in data.get("devices", {}).values():
+        for d in devices:
+            if d.get("state") == "Booted" and d.get("name", "").startswith("pl-r") and d["udid"] != exclude:
+                found.append({"name": d["name"], "udid": d["udid"]})
+    return found
+
+
+def delete_sim(udid: str) -> bool:
+    sh(["xcrun", "simctl", "shutdown", udid], check=False)
+    return sh(["xcrun", "simctl", "delete", udid], check=False).returncode == 0
+
+
+def preflight_cleanup(run_id: str, udid: str, keep: bool) -> dict:
+    """keep 为真（--keep-sim 且预检通过）才留下本轮模拟器给 up/drive；其余一律关闭并删除。"""
+    if not udid:
+        return {"action": "none"}
+    if keep:
+        return {"action": "kept", "udid": udid}
+    ok = delete_sim(udid)
+    return {"action": "deleted" if ok else "delete-failed", "udid": udid}
+
+
 def command_preflight(args) -> int:
+    import signal
+
+    def on_signal(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, on_signal)
+    PREFLIGHT_CTX.clear()
+    code = 1
+    try:
+        code = _preflight(args)
+        return code
+    except KeyboardInterrupt:
+        code = 130
+        print("ABORT 收到中断信号")
+        return code
+    finally:
+        run_id = PREFLIGHT_CTX.get("run_id")
+        udid = PREFLIGHT_CTX.get("udid", "")
+        keep = bool(getattr(args, "keep_sim", False)) and code == 0
+        cleanup = preflight_cleanup(run_id or "", udid, keep)
+        print(f"simCleanup: {cleanup}")
+        if run_id:
+            path = run_dir(run_id) / "preflight.json"
+            if path.exists():
+                data = json.loads(path.read_text())
+                data["simCleanup"] = cleanup
+                if code != 0:
+                    data["ok"] = False
+                path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            if state_file(run_id).exists():
+                st = json.loads(state_file(run_id).read_text())
+                st["simDeleted"] = cleanup.get("action") == "deleted"
+                write_state(run_id, st)
+
+
+def _preflight(args) -> int:
     run_id = args.run or next_run_id(args.slug)
+    PREFLIGHT_CTX["run_id"] = run_id
+    if os.environ.get("PL_PREFLIGHT_RUNFILE"):
+        Path(os.environ["PL_PREFLIGHT_RUNFILE"]).write_text(run_id + "\n")
     rd = run_dir(run_id)
     rd.mkdir(parents=True, exist_ok=True)
     pf_dir = rd / "preflight"
@@ -683,8 +754,23 @@ def command_preflight(args) -> int:
     result["frozen"]["buildDir"] = str(base)
     record("snapshot", (src / "PostureLab.xcodeproj").exists(), f"{tarball} -> {src}")
 
+    # 0. 别的轮次留下、仍在 Booted 的 pl-r* 模拟器：ENV-BLOCKED，只列出，不自动删。
+    others = booted_round_sims()
+    result["frozen"]["otherBootedRoundSims"] = others
+    if not record("noOtherBootedRoundSims", not others,
+                  {"booted": others} if others else "没有其他轮次的 pl-r* 模拟器在 Booted"):
+        result["envBlocked"] = True
+        return abort("ENV-BLOCKED：还有其他轮次的 pl-r* 模拟器处于 Booted（不自动删，请人工处理）")
+
     # 4. 本轮专属模拟器。
     udid = create_sim(run_id)
+    PREFLIGHT_CTX["udid"] = udid
+    if udid:
+        # 先落盘 UDID，Python 被强杀时 shell 的 trap 也能找到并删掉它。
+        st = json.loads(state_file(run_id).read_text()) if state_file(run_id).exists() else {
+            "runId": run_id, "target": "sim", "bundleId": BUNDLE, "checks": {}}
+        st.update({"udid": udid, "deviceId": udid, "simCreatedByPreflight": True})
+        write_state(run_id, st)
     if not record("simulatorCreated", bool(udid), udid or "simctl create 失败"):
         return abort("建模拟器失败")
     result["frozen"].update({"udid": udid, "deviceId": udid, "simCreatedByPreflight": True,
@@ -771,10 +857,14 @@ def command_preflight(args) -> int:
     record("evidence:debugLogField", bool(fields) and fields.get("keys") == len(LOG_KEYS)
            and bool(fields.get("lastEvent")) and fields.get("remaining_seconds") is not None, fields)
     idle_logs = sorted(docs.glob("debug/idle-*.jsonl")) if docs.exists() else []
-    idle_rows = [json.loads(l) for p in idle_logs for l in p.read_text().splitlines() if l.strip()]
+    # 每次启动（每个进程）各写一个 idle-<启动时刻>.jsonl；preflight 在同一容器里启动了两次
+    # （无参启动查弹窗 + 短用例），所以按文件分开列，不要把两次启动的行混成一串。
+    by_file = {p.name: [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+               for p in idle_logs}
+    idle_rows = [r for rows in by_file.values() for r in rows]
     record("evidence:idleTimerField",
            any(isinstance(r.get("idle_timer_disabled"), bool) for r in idle_rows),
-           {"rows": idle_rows[:4]})
+           {"files": by_file})
     terminate_sim(udid)
 
     # 6（收尾）. 预检本身不允许制造崩溃。
@@ -782,6 +872,24 @@ def command_preflight(args) -> int:
     new = sorted(set(after) - set(baseline))
     record("noNewCrash", not new, {"new": new})
     return finish()
+
+
+def command_preflight_cleanup(args) -> int:
+    """shell trap 的兜底：本轮模拟器没被明确保留（simCleanup.action != kept）就关闭并删除。幂等。"""
+    if not state_file(args.run).exists():
+        return 0
+    st = json.loads(state_file(args.run).read_text())
+    udid = st.get("udid", "")
+    pf = run_dir(args.run) / "preflight.json"
+    action = json.loads(pf.read_text()).get("simCleanup", {}).get("action") if pf.exists() else None
+    if not udid or not st.get("simCreatedByPreflight") or action == "kept":
+        return 0
+    exists = udid in sh_out(["xcrun", "simctl", "list", "devices"], check=False)
+    if exists:
+        print(f"trap: 删除本轮模拟器 {udid}：{'ok' if delete_sim(udid) else 'failed'}")
+    st["simDeleted"] = True
+    write_state(args.run, st)
+    return 0
 
 
 def main() -> int:
@@ -805,13 +913,18 @@ def main() -> int:
     pf.add_argument("--version", required=True)
     pf.add_argument("--build", required=True)
     pf.add_argument("--slug", required=True)
-    pf.add_argument("--run", default=None, help="默认 r<下一个N>-<slug>；slug 本身是 r<N>-xxx 时直接用")
+    pf.add_argument("--run", default=None, help="默认 r<下一个N>-<slug>；slug 本身是 r<N>-xxx 或 tl-xxx 时直接用")
     pf.add_argument("--min-free-gb", type=int, default=20)
+    pf.add_argument("--keep-sim", action="store_true",
+                    help="预检通过时保留本轮模拟器给 up/drive；默认（只跑预检/dry-run）跑完即关闭并删除")
+    pc = sub.add_parser("preflight-cleanup", help="shell trap 兜底：删除本轮未保留的模拟器")
+    pc.add_argument("--run", required=True)
     args = parser.parse_args()
     if args.command == "up" and args.run is None:
         parser.error("up 需要 --run <run-id>")
     return {
         "preflight": command_preflight,
+        "preflight-cleanup": command_preflight_cleanup,
         "up": command_up,
         "doctor": command_doctor,
         "drive": command_drive,
