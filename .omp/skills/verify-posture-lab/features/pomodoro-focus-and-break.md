@@ -7,7 +7,7 @@
 - `focus-main`：`pomodoro_main` 展示倒计时、阶段名与第几个番茄。
 - `focus-start`：点击「开始专注」启动专注阶段；停驻时即已显示摄像头预览与 3D 点云（截图 `AC-parked-before-start`）。
 - `focus-pause-resume`：专注中点击「暂停」停表，再次点击「继续」恢复。
-- `focus-leave`：已开始（运行或暂停中）时显示「离开」按钮；点「离开」提前结束本轮、倒计时重置、历史记为 `abandoned`（`focusedSeconds = elapsed − pausedSeconds`），不进入休息阶段；停驻或点「离开」重置后不再显示。文案唯一来源 `PomodoroCopy.endFocusEarly`，UI 不出现「放弃」。
+- `focus-leave`：已开始（运行或暂停中）时显示「离开」按钮；点「离开」提前结束本轮、倒计时重置、历史记为 `abandoned`（`focusedSeconds = elapsed − pausedSeconds`），不进入休息阶段；停驻或点「离开」重置后不再显示。文案唯一来源 `PomodoroCopy.endFocusEarly`，UI 不出现「放弃」；「离开」只指这个按钮，人不在镜头前叫「无人」（`paused`/`resumed`，见 `docs/qa-log-schema.md`）。
 - `focus-phases`：专注结束进入短休息；累计达到 `focusPerLongBreak` 后进入长休息。
 - `focus-daily-goal`：主页显示「今天 x/目标」，目标来自 `dailyGoal`。
 - `focus-cues`：结束提示音 `soft`/`chime` 写入 `cue_played`；设置页的试听不写。
@@ -34,7 +34,7 @@ Preconditions：
 - **读提示音。** `cue_played` 的 `message` 为 `end_soft` / `end_chime`；`endSound=none` 时没有任何 `cue_played`。
 - **手动暂停与恢复。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" -only-testing:PostureLabUITests/ManualPauseUITests test`；测试会点击真实「暂停」并检查倒计时冻结与时间轴灰带。
 - **今日目标。** 主页截图 `mid-focus.png` 应显示「今天 x/目标」；`pomodoro_tick` 与 `pomodoro-history.json` 的完成数应与之对账。
-- **「休息」按钮与提前结束。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" -only-testing:PostureLabUITests/PomodoroControlsUITests test`：停驻时不显示「离开」、开始后显示「离开」，点「离开」后倒计时重置为整轮且没有「跳过休息」（截图 `AC-ended-early-reset`）；点「开始专注」胶囊的边缘也能开始（截图 `AC-start-whole-capsule`）。文案唯一来源是 `PomodoroCopy.endFocusEarly`，归档状态仍是 `abandoned`。
+- **「离开」按钮与提前结束。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" -only-testing:PostureLabUITests/PomodoroControlsUITests test`：停驻时不显示「离开」、开始后显示「离开」，点「离开」后倒计时重置为整轮且没有「跳过休息」（截图 `AC-ended-early-reset`）；点「开始专注」胶囊的边缘也能开始（截图 `AC-start-whole-capsule`）。文案唯一来源是 `PomodoroCopy.endFocusEarly`，归档状态仍是 `abandoned`。
 - **停驻前证据。** DEBUG 构建可用 `-scenario headDown -holdStart 1 -focusMinutes 5 -debug 0` 让脚本场景保持第一个专注停驻（`-holdStart 1` 为 DEBUG 专用启动参数）：开始专注前就有摄像头预览（真机）与 3D 点云（模拟器 BodyRig 场景），且没有「离开」按钮；截图 `AC-parked-before-start`。
 - **Stage 证据。** 每个场景目录保留 `launch-args.txt`、`provenance.json`、截图、`Documents/`；`verify.py evidence --run <run-id>` 会重跑 `verify-acceptance.py --ac1`。
 
