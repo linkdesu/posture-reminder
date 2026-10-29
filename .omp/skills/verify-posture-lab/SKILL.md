@@ -120,10 +120,12 @@ Doctor 失败时，环境异常标 ENV-BLOCKED 或 BLOCKED，禁止临场修环�
 | 场景 | 做什么 | 判据（`scenarios/<场景>/*.json`） |
 |---|---|---|
 | `break-count` | `pomodoroDay` 1 分钟专注，在 20 s（专注中）、75 s（休息中）、135 s（下一段专注）截图并 OCR | 「今天 x/目标」依次为 0 → **1**（休息中已加一）→ 1（不重复加） |
-| `abandon-count` | XCUITest `VerifyDriveUITests/testDriveAbandonDoesNotCountToday`：停驻在 1 分钟专注上，**真点**「开始专注」，跑 5 s 后**真点**「离开」提前结束，读主页「今日目标」标签前后两次，并对前后截图 OCR「今天 x/目标」；再从 `Documents/pomodoro-history.json` 读回记录 | 界面与 OCR 计数前后相等（不加一）；历史里至少一条 `abandoned`、没有 `completed`（`abandon-count.json.ok`） |
+| `abandon-count` | XCUITest `VerifyDriveUITests/testDriveAbandonDoesNotCountToday`：停驻在 1 分钟专注上，**真点**「开始专注」，跑 5 s 后**真点**「离开」提前结束，读主页「今日目标」标签前后两次，并对前后截图 OCR「今天 x/目标」；再从 `Documents/pomodoro-history.json` 读回记录 | 界面与 OCR 计数前后相等（不加一）；分母 goal 在界面与前后截图里一致且等于设置的每日目标（未设置时为默认 4）；历史里至少一条 `abandoned`、没有 `completed`（`abandon-count.json.ok`） |
 | `settings-scroll` | XCUITest `VerifyDriveUITests/testDriveSettingsScrollCountsTenSettings`：逐项滚到并数出番茄钟 10 项，滚到下半屏截图 | `count=10`、无「屏幕常亮」行，`drive-settings-bottom.png` 存在 |
 | `settings-toggle` | XCUITest 真点一次「自动开始休息」，再从 App 数据容器的 `Library/Preferences/me.xieal.posturelab.depth.plist` 读回 `pomodoro.settings` | 界面值变了，**存储里的 `autoStartBreak` 也变了**且与界面一致 |
 | `upgrade-063` | 构建 0.6.3（`c9d5f42`，缓存在 `verify-builds/posture-lab/legacy-063`）→ 装上 → XCUITest 在 **0.6.3 的界面上真点**「屏幕常亮」关掉 → 读回存储 `keepScreenAwake=false` → 覆盖安装冻结新版 → 设置页无常亮行、旧 key 存活、专注 `focus_start` 为 true | `upgrade.json.ok` |
+
+XCUITest 驱动的场景（`abandon-count`、`settings-scroll`、`settings-toggle`、`upgrade-063`）跑完后同样在场景目录留下 `launch-args.txt`（用例里的启动参数）、`provenance.json`（`driver=xcuitest`、用例名、已装版本、容器路径、`sandboxAuditExit`）和 `sandbox-audit.json` / `sandbox-audit.txt`，作为运行时沙盒审计（AC14/AC19）的证据。
 
 XCUITest 入口用 preflight 的 `build-for-testing` 产物跑 `xcodebuild test-without-building -xctestrun …`，截图与文本是 `.keepAlways` 附件，`verify.py` 用 `xcresulttool export attachments` 导出到场景目录。升级场景会从 `.xctestrun` 里去掉被测 App，免得 xcodebuild 用新版覆盖已装的 0.6.3。不再直接写 plist 伪造旧版设置。
 
@@ -168,7 +170,7 @@ tmp/verify/<run-id>/
     └── verification/*.txt
 ```
 
-**分批运行**：`evidence` 只判本批真跑过的核心场景（`pomodoro-focus`、`posture-voice`、`pause`、`report`、`settings`，以 `state.json` 的记录或场景目录里的 `provenance.json` 为准），没跑的列在 `verification.json.skipped`，不算失败；本批跑过的 `drive:*` / `case:*` 判定一并汇总进 `results`。一个场景都没跑时 `ok=false`。
+**分批运行**：`evidence` 只判本批真跑过的核心场景（`pomodoro-focus`、`posture-voice`、`pause`、`report`、`settings`，以 `state.json` 的记录或场景目录里的 `provenance.json` 为准），没跑的列在 `verification.json.skipped`，不算失败；`ran` 列出本批真跑过的全部场景：核心场景名，加上 `drive:<场景>` 与 `case:<用例>`；本批跑过的 `drive:*` / `case:*` 判定一并汇总进 `results`。一个场景都没跑时 `ok=false`。
 
 证据标准：
 
@@ -199,7 +201,7 @@ ls tmp/verify/r9-skill-smoke/launch/pomodoro_main.png
 
 - `scripts/verify.py`：本技能的唯一编排器，子命令 `preflight`、`preflight-cleanup`、`up`、`doctor`、`drive [场景]`、`case`、`list-cases`、`png`、`ascii`、`evidence`、`down`。
 - 仓库 `scripts/test_audit_sandbox.py`：`audit-sandbox.py` 的自测（系统文件白名单不误报、真违规 exit 1）。
-- `scripts/test_verify.py`：`verify.py` 的自测（不碰模拟器）：分批 `evidence` / `down` 只判本批场景、`abandon-count` 的判定。
+- `.omp/skills/verify-posture-lab/scripts/test_verify.py`（与 `verify.py` 同目录，不在仓库 `scripts/` 下；运行 `python3 .omp/skills/verify-posture-lab/scripts/test_verify.py`）：`verify.py` 的自测（不碰模拟器）：分批 `evidence` / `down` 只判本批场景、`abandon-count` 的判定（含分母）、XCUITest 场景的 provenance / 沙盒审计产物、`ran` 字段。
 - 仓库 `scripts/test_verify_session.py`：`verify-session.py` AC6 的自测：多番茄日志按 `session_started` 分段、每个 `session_ended` 只和本段样本比对；没有 `session_ended` 的短日志记 SKIP（`--expect-summary` 时 FAIL）；数字真错仍 FAIL。
 - `scripts/ocr.swift`：Vision OCR，preflight 用 `swiftc` 编译到本轮构建目录后使用。
 - 仓库 `scripts/verify-preflight.sh`：preflight 的包装，参数依次是目标 SHA、预期版本号、预期 build 号、轮次 slug。

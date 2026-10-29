@@ -52,6 +52,7 @@ class Batch(unittest.TestCase):
         self.assertTrue(summary["ok"], summary)
         self.assertEqual(set(summary["skipped"]), set(verify.CORE_SCENARIOS))
         self.assertNotIn("pomodoro-focus:log", summary["results"])
+        self.assertEqual(summary["ran"], ["drive:break-count", "drive:settings-toggle"])
         self.assertEqual(verify.command_down(self.ns()), 0)
 
     def test_settings_only_batch_judges_settings(self):
@@ -75,6 +76,45 @@ class Batch(unittest.TestCase):
         summary = json.loads((self.rd / "verification.json").read_text())
         self.assertFalse(summary["results"]["pause:log"])
 
+    def test_ran_lists_core_drive_and_case(self):
+        sdir = self.rd / "scenarios" / "settings"
+        sdir.mkdir(parents=True)
+        (sdir / "provenance.json").write_text("{}")
+        (sdir / "settings.png").write_bytes(b"x")
+        (sdir / "sandbox-audit.json").write_text("{}")
+        self.state["checks"]["drive:abandon-count"] = {"ok": True}
+        self.state["checks"]["case:ac6-week"] = {"ok": True}
+        self.state["checks"]["launch"] = {"ok": True}  # 非场景检查不进 ran
+        self.save()
+        self.assertEqual(verify.command_evidence(self.ns()), 0)
+        summary = json.loads((self.rd / "verification.json").read_text())
+        self.assertEqual(summary["ran"], ["settings", "case:ac6-week", "drive:abandon-count"])
+
+    def test_xcuitest_scenario_leaves_provenance_and_sandbox_audit(self):
+        container = Path(self.tmp.name) / "container"
+        container.mkdir()
+        verify.sh = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, str(container) + "\n", "")
+        saved = verify.audit_sandbox, verify.installed_version
+        def fake_audit(c, dest):
+            dest.write_text("{}")
+            return subprocess.CompletedProcess([], 0, "PASS\n", "")
+        verify.audit_sandbox = fake_audit
+        verify.installed_version = lambda sim: ("0.6.7", "13")
+        try:
+            out = self.rd / "scenarios" / "abandon-count"
+            out.mkdir(parents=True)
+            verify.xcuitest_provenance(self.run_id, "SIM", out, "testDriveAbandonDoesNotCountToday",
+                                       {"exit": 0, "skipped": False, "xcresult": "x.xcresult"})
+        finally:
+            verify.audit_sandbox, verify.installed_version = saved
+        self.assertIn("-holdStart 1", (out / "launch-args.txt").read_text())
+        self.assertTrue((out / "sandbox-audit.json").exists())
+        prov = json.loads((out / "provenance.json").read_text())
+        self.assertEqual(prov["driver"], "xcuitest")
+        self.assertEqual(prov["sandboxAuditExit"], 0)
+        self.assertEqual(prov["container"], str(container))
+        self.assertEqual(prov["installed"], "0.6.7 (13)")
+
     def test_failed_drive_check_fails_evidence(self):
         self.state["checks"]["drive:abandon-count"] = {"ok": False}
         self.save()
@@ -94,6 +134,30 @@ class Batch(unittest.TestCase):
 
 
 class AbandonJudge(unittest.TestCase):
+    UI = {"before": "0", "after": "0", "goal": "4", "endTapped": "true", "reset": "true"}
+
+    def test_goal_matching_settings_passes(self):
+        ok, why = verify.judge_abandon_count(self.UI, (0, 4), (0, 4), 4)
+        self.assertTrue(ok, why)
+
+    def test_goal_differs_from_settings_fails(self):
+        ok, why = verify.judge_abandon_count(self.UI, (0, 4), (0, 4), 6)
+        self.assertFalse(ok)
+        self.assertIn("每日目标", why)
+
+    def test_goal_changed_across_abandon_fails(self):
+        ok, why = verify.judge_abandon_count(self.UI, (0, 4), (0, 5), 4)
+        self.assertFalse(ok)
+        self.assertIn("分母", why)
+
+    def test_ui_goal_disagreeing_with_ocr_fails(self):
+        ok, _ = verify.judge_abandon_count(dict(self.UI, goal="6"), (0, 4), (0, 4))
+        self.assertFalse(ok)
+
+    def test_missing_goal_fails(self):
+        ok, _ = verify.judge_abandon_count(dict(self.UI, goal="nil"), (0, 4), (0, 4))
+        self.assertFalse(ok)
+
     def test_unchanged_count_passes(self):
         ok, _ = verify.judge_abandon_count(
             {"before": "0", "after": "0", "goal": "6", "endTapped": "true", "reset": "true"},
