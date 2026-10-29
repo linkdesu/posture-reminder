@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-/// 把每条事件写成一行 JSONL，并给关键页面存截图。
+/// 把每条事件写成一行 JSONL；页面截图只留在内存里，绝不落盘。
 final class FileDebugLogger: DebugLogging {
   var isEnabled: Bool
 
@@ -11,8 +11,9 @@ final class FileDebugLogger: DebugLogging {
       .appendingPathComponent("debug", isDirectory: true)
   }
 
-  /// 沙盒 Documents/debug/screenshots/
-  var screenshotDirectory: URL
+  /// 最近一张页面截图的像素，只留在内存里。ADR-0005 的隐私边界不允许容器内出现任何图像文件，
+  /// 因此截图不再写盘；保留最后一次渲染结果，调试叠加层可以在内存里查看它。
+  private(set) var latestScreenshot: UIImage?
 
   /// 本次会话的日志文件，`enabled` 为假时是 nil。
   private(set) var logFileURL: URL?
@@ -41,7 +42,6 @@ final class FileDebugLogger: DebugLogging {
   init(enabled: Bool = false, directory: URL = FileDebugLogger.defaultDirectory) {
     isEnabled = enabled
     self.directory = directory
-    screenshotDirectory = directory.appendingPathComponent("screenshots", isDirectory: true)
     if enabled {
       UIDevice.current.isBatteryMonitoringEnabled = true
       openLogFile()
@@ -108,18 +108,17 @@ final class FileDebugLogger: DebugLogging {
     }
   }
 
+  /// Renders the current screen into memory and nowhere else: no file, no share sheet, no cache
+  /// directory. `name` is kept for the callers that describe the screen; the image is not stored
+  /// per screen because nothing reads the older ones.
   private func capture(_ name: String) {
     guard let window = keyWindow else { return }
 
     let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
-    let image = renderer.image { _ in
+    latestScreenshot = renderer.image { _ in
       window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
     }
-    guard let png = image.pngData() else { return }
-
-    let url = screenshotDirectory.appendingPathComponent("\(name).png")
-    try? FileManager.default.createDirectory(at: screenshotDirectory, withIntermediateDirectories: true)
-    try? png.write(to: url, options: .atomic)
+    _ = name
   }
 
   /// Prefer the active scene's key window, but fall back to the foremost scene's first

@@ -21,13 +21,13 @@ Checks:
   AC5  an absence pause appears and its seconds are excluded from the total
   AC6  the five summary numbers in session_ended match the samples
   AC11 no reminder at all (--expect-no-reminders)
-  AC13 a view_mode line reports the overlay on, and the monitoring screenshot
-       exists when --expect-overlay is given
+  AC13 a view_mode line reports the overlay on when --expect-overlay is given
   AC17 --expect-feature-over / --expect-feature-under read the features lines'
        feature_values and fail loudly when there is no features line to read
   AC18 at least one features line exists, carries highlighted_feature, and
        highlights the requested feature
-  P2   the seven screenshot files exist next to the log
+  P2   no image file sits next to the log: debug screenshots are memory-only
+       (ADR-0005), so a PNG in the app's Documents/ is a privacy failure
 
 Every new check fails when its subject is absent: no features or view_mode line
 is a failure, never a quiet pass.
@@ -41,15 +41,10 @@ import os
 import sys
 
 REQUIRED_KEYS = ["ts", "event", "state", "screen", "distance_cm", "pitch_deg"]
-SCREENSHOTS = [
-    "home",
-    "calibration",
-    "calibration_result",
-    "monitoring",
-    "summary",
-    "settings",
-    "reminder",
-]
+IMAGE_SUFFIXES = {
+    ".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".gif",
+    ".webp", ".mp4", ".mov", ".m4v", ".dng", ".raw",
+}
 SUMMARY_FIELDS = {
     "total_seconds": "total",
     "good_seconds": "good",
@@ -392,17 +387,17 @@ def check_summary(rows):
     return ok
 
 
-def check_screenshots(log_path, rows):
-    directory = os.path.join(os.path.dirname(os.path.abspath(log_path)), "screenshots")
-    # The reminder shot can only exist in a run where a level-1 reminder actually fired.
-    wanted = list(SCREENSHOTS)
-    if not any(row.get("event") == "reminder" and row.get("level") == 1 for row in rows):
-        wanted.remove("reminder")
-    missing = [name for name in wanted if not os.path.exists(os.path.join(directory, f"{name}.png"))]
-    if missing:
-        print(f"P2 FAIL: {directory} is missing {', '.join(missing)}.png")
+def check_no_images(log_path):
+    documents = os.path.dirname(os.path.dirname(os.path.abspath(log_path)))
+    images = []
+    for base, _dirs, files in os.walk(documents):
+        for name in files:
+            if os.path.splitext(name)[1].lower() in IMAGE_SUFFIXES:
+                images.append(os.path.relpath(os.path.join(base, name), documents))
+    if images:
+        print(f"P2 FAIL: {documents} holds image file(s): {', '.join(sorted(images))}")
         return False
-    print(f"P2 PASS: all {len(wanted)} expected screenshots present in {directory}")
+    print(f"P2 PASS: no image file under {documents}; debug screenshots stay in memory")
     return True
 
 
@@ -501,11 +496,12 @@ def check_view_mode(rows, mode, expect_overlay):
     return True
 
 
-def check_overlay_evidence(log_path, rows):
-    """AC13: the overlay is on in the log and the monitoring screenshot exists.
+def check_overlay_evidence(rows):
+    """AC13: the log reports the overlay on.
 
-    Whether the overlay is *visibly drawn* in the PNG is a human check, not something
-    this script can read out of the file.
+    Whether the overlay is *visibly drawn* is a human check on the screen, not something
+    this script can read out of the file — and the app no longer writes a screenshot to
+    read it from (ADR-0005).
     """
     lines = event_lines(rows, "view_mode")
     if not lines:
@@ -514,12 +510,8 @@ def check_overlay_evidence(log_path, rows):
     if not any(row.get("overlay_on") is True for row in lines):
         print("AC13 FAIL: no view_mode line reports overlay_on true")
         return False
-    shot = os.path.join(os.path.dirname(os.path.abspath(log_path)), "screenshots", "monitoring.png")
-    if not os.path.exists(shot):
-        print(f"AC13 FAIL: {shot} is missing")
-        return False
-    print(f"AC13 PASS: a view_mode line reports overlay_on true and {shot} exists")
-    print("AC13 HUMAN: whether the overlay is visibly drawn in the PNG is a human check")
+    print("AC13 PASS: a view_mode line reports overlay_on true")
+    print("AC13 HUMAN: whether the overlay is visibly drawn is a human check on the screen itself")
     return True
 
 
@@ -686,9 +678,6 @@ def main():
     parser.add_argument("--expect-no-reminders-during-pause", action="store_true")
     parser.add_argument("--expect-not-good-after-resume", action="store_true")
     parser.add_argument("--expect-posture-stats", action="store_true")
-    # A pomodoro run never visits the reading flow's screens, so demanding its five screenshots
-    # there fails a session that is fine on the substance.
-    parser.add_argument("--no-screenshots", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -734,8 +723,7 @@ def main():
             results.append(extra)
     results.append(check_timing(rows, args))
     results.append(check_summary(rows))
-    if not args.no_screenshots:
-        results.append(check_screenshots(args.log, rows))
+    results.append(check_no_images(args.log))
 
     if args.expect_feature_over:
         results.append(check_feature_over(rows, args.expect_feature_over))
@@ -748,7 +736,7 @@ def main():
     if args.expect_view_mode:
         results.append(check_view_mode(rows, args.expect_view_mode, args.expect_overlay))
     if args.expect_overlay:
-        results.append(check_overlay_evidence(args.log, rows))
+        results.append(check_overlay_evidence(rows))
 
     print("\nRESULT:", "PASS" if all(results) else "FAIL")
     return 0 if all(results) else 1

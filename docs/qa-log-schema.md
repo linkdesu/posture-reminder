@@ -16,7 +16,7 @@
 位于应用沙盒的 `Documents/` 下：
 
 - `Documents/debug/session-<ISO8601>.jsonl`——每次启动一个 JSONL 文件。文件名是启动时间的 ISO8601 表示并去掉冒号，例如 `2026-10-17T01:23:45Z` 启动会产出 `session-2026-10-17T012345Z.jsonl`。每次新运行写一个新文件；`run-scenarios.sh` 选取最新的那个。
-- `Documents/debug/screenshots/<name>.png`——运行展示过的每个界面一张 PNG，另加提醒/高亮证据截图；名称见下文“截图”一节。
+- 应用容器内**没有任何图像文件**（v0.5 起）：页面截图只在内存里渲染，供调试时查看，不写 PNG。留档截图由验收脚本用 `simctl io screenshot` / 外部命令从设备侧拍摄，它们不在 App 容器里。
 
 日志器只在调试模式开启时工作（`FileDebugLogger.isEnabled`）；关闭时不写任何文件。
 
@@ -33,7 +33,7 @@ xcrun devicectl device copy from \
   --destination <local-round-directory>
 ```
 
-这会把 `Documents/`——包括 `debug/session-*.jsonl` 与 `debug/screenshots/`——取到本轮目录。模拟器中的等价命令是 `xcrun simctl get_app_container <sim-id> me.xieal.posturelab.depth data`。`scripts/run-scenarios.sh` 两者都会做，然后把最新的 `session-*.jsonl` 交给 `scripts/verify-session.py`。
+这会把 `Documents/`——包括 `debug/session-*.jsonl` 与 `pomodoro-history.json`——取到本轮目录（容器内没有截图目录）。模拟器中的等价命令是 `xcrun simctl get_app_container <sim-id> me.xieal.posturelab.depth data`。`scripts/run-scenarios.sh` 两者都会做，然后把最新的 `session-*.jsonl` 交给 `scripts/verify-session.py`。
 
 ## 行格式与完整键集
 
@@ -266,11 +266,11 @@ head_down_count = 1         head_down_remind_count = 1
 
 ## 截图
 
-`Documents/debug/screenshots/` 为运行到达过的每个 `screen_shown` 名称保存一张 PNG：
+v0.5 起应用不写任何图像文件：`FileDebugLogger.screenshot(_:)` 只把最近一帧渲染到内存，从不落盘（ADR-0005 的隐私边界）。因此：
 
-- `pomodoro_main`（应用启动页）、`pomodoro_settings`，以及 `report_day` / `report_week` / `report_month`（每个统计范围一个名称）。
-
-只有到达过对应界面，名称才存在；设置页通过 `-settings 1` 到达，统计页通过 `-report day|week|month` 到达。`reminder` 与 `highlight` 曾是旧阅读流程直接捕获的证据截图，已随该流程退役。
+- 容器里只有 `session-*.jsonl`、`pomodoro-history.json` 与偏好文件；`scripts/verify-session.py` 的 P2 与 `scripts/audit-sandbox.py` 都会把任何 PNG/JPG/MP4 判为失败。
+- 验收留档截图由 `scripts/capture-screens.sh`、`scripts/run-acceptance.sh` 与 `.omp/skills/verify-posture-lab/scripts/verify.py` 用 `xcrun simctl io screenshot` 从设备侧拍摄，保存在证据目录，不属于 App 容器。
+- 旧阅读流程的 `home`/`calibration`/`monitoring`/`summary`/`settings` 截图名称已随该流程退役（ADR-0006）；`reminder`、`highlight` 同理。
 
 ## 哪个键回答哪条验收标准
 
@@ -283,4 +283,4 @@ head_down_count = 1         head_down_remind_count = 1
 | 音频 | `speech_played` 行（`alert_type` + `level`）；语音开关关闭时完全没有这类行。阶段结束提示音只写 `cue_played`（`end_soft` / `end_chime`），静音时没有。 |
 | 暂停 | `paused` / `resumed` 行；暂停期间倒计时冻结，暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴带。 |
 | 体态提醒 | `reminder` 行带 `t`、`alert_type`、`level`（1 与 2）与 `breach_seconds`；实验级体态永不发声。 |
-| 隐私 | 没有任何网络键或远端地址；`Documents/` 下没有 RGB 图像，只有 JSONL、截图与番茄钟历史。 |
+| 隐私 | 没有任何网络键或远端地址；`Documents/` 下没有任何图像文件，只有 JSONL 与番茄钟历史（截图只在内存，ADR-0005）。 |
