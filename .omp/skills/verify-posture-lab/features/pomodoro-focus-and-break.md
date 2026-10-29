@@ -9,7 +9,7 @@
 - `focus-pause-resume`：专注中点击「暂停」停表，再次点击「继续」恢复。
 - `focus-leave`：已开始（运行或暂停中）时显示「离开」按钮；点「离开」提前结束本轮、倒计时重置、历史记为 `abandoned`（`focusedSeconds = elapsed − pausedSeconds`），不进入休息阶段；停驻或点「离开」重置后不再显示。文案唯一来源 `PomodoroCopy.endFocusEarly`，UI 不出现「放弃」；「离开」只指这个按钮，人不在镜头前叫「无人」（`paused`/`resumed`，见 `docs/qa-log-schema.md`）。
 - `focus-phases`：专注结束进入短休息；累计达到 `focusPerLongBreak` 后进入长休息。
-- `focus-daily-goal`：主页显示「今天 x/目标」，目标来自 `dailyGoal`。
+- `focus-daily-goal`：主页显示「今天 x/目标」，目标来自 `dailyGoal`。**0.6.7 起专注倒计时归零那一刻就加一**（休息中已是新值），不等休息结束；「离开」/被打断的专注不加；下一阶段开始（记录落盘）时不重复加。
 - `focus-cues`：结束提示音 `soft`/`chime` 写入 `cue_played`；设置页的试听不写。
 
 ## How to get to it (user POV)
@@ -32,9 +32,10 @@ Preconditions：
 - **读倒计时。** 打开 `tmp/verify/<run-id>/scenarios/pomodoro-focus/Documents/debug/session-*.jsonl`，确认 `pomodoro_tick` 每秒一行，`remaining_seconds` 随 `ts` 间隔下降，`phase` 在 `focus` / `shortBreak` / `longBreak` 之间流转。
 - **读完成与休息。** 70 秒时第一个专注完成；130 秒时休息结束，`pomodoro-history.json` 至少 1 条 `completed` 记录；70 秒日志快照 `session-at-70.jsonl` 用于历史对账。
 - **读提示音。** `cue_played` 的 `message` 为 `end_soft` / `end_chime`；`endSound=none` 时没有任何 `cue_played`。
-- **手动暂停与恢复。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" -only-testing:PostureLabUITests/ManualPauseUITests test`；测试会点击真实「暂停」并检查倒计时冻结与时间轴灰带。
-- **今日目标。** 主页截图 `mid-focus.png` 应显示「今天 x/目标」；`pomodoro_tick` 与 `pomodoro-history.json` 的完成数应与之对账。
-- **「离开」按钮与提前结束。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,id=C12DA589-2444-4F2E-A943-4D6BAFB02BF1" -only-testing:PostureLabUITests/PomodoroControlsUITests test`：停驻时不显示「离开」、开始后显示「离开」，点「离开」后倒计时重置为整轮且没有「跳过休息」（截图 `AC-ended-early-reset`）；点「开始专注」胶囊的边缘也能开始（截图 `AC-start-whole-capsule`）。文案唯一来源是 `PomodoroCopy.endFocusEarly`，归档状态仍是 `abandoned`。
+- **手动暂停与恢复。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,name=pl-verify" -only-testing:PostureLabUITests/ManualPauseUITests test`；测试会点击真实「暂停」并检查倒计时冻结与时间轴灰带。
+- **今日目标（归零即加一）。** `verify.py drive --run <run-id> break-count`：20 s 专注中「今天 0/N」、75 s 休息中「今天 **1**/N」、135 s 下一段专注仍「今天 1/N」，判据见 `scenarios/break-count/break-count.json`。
+- **今日目标（对账）。** 主页截图 `mid-focus.png` 应显示「今天 x/目标」；`pomodoro_tick` 与 `pomodoro-history.json` 的完成数应与之对账。
+- **「离开」按钮与提前结束。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,name=pl-verify" -only-testing:PostureLabUITests/PomodoroControlsUITests test`：停驻时不显示「离开」、开始后显示「离开」，点「离开」后倒计时重置为整轮且没有「跳过休息」（截图 `AC-ended-early-reset`）；点「开始专注」胶囊的边缘也能开始（截图 `AC-start-whole-capsule`）。文案唯一来源是 `PomodoroCopy.endFocusEarly`，归档状态仍是 `abandoned`。
 - **停驻前证据。** DEBUG 构建可用 `-scenario headDown -holdStart 1 -focusMinutes 5 -debug 0` 让脚本场景保持第一个专注停驻（`-holdStart 1` 为 DEBUG 专用启动参数）：开始专注前就有 3D 点云（模拟器 BodyRig 场景；无人体时为矢量轮廓），且没有「离开」按钮；截图 `AC-parked-before-start`。
 - **Stage 证据。** 每个场景目录保留 `launch-args.txt`、`provenance.json`、截图、`Documents/`；`verify.py evidence --run <run-id>` 会重跑 `verify-acceptance.py --ac1`。
 
@@ -72,3 +73,17 @@ Preconditions：
 | 专注中切后台再回来 | 专注计时中按 Home（`simctl launch` 其他 App 或真机上滑）→ 再切回 PostureLab | `background false` → `foreground true` |
 | 休息中切后台再回来 | 休息计时中切后台 → 切回 | `background false` → `foreground false` |
 | 首页切后台再回来 | 未点「开始」时切后台 → 切回 | `background false` → `foreground false` |
+
+## 扩展用例（`verify.py case`，r16 沉淀）
+
+| 用例 | 覆盖 |
+|---|---|
+| `ac12-manual-pause` → `ac12-manual-report` | `-autopause 10:10` 走孩子点「暂停/继续」同一路径；AC5 对账、`paused` 段、统计页「暂停」灰段；常亮 `pause`/`resume` |
+| `no-person-occlusion` → `no-person-occlusion-report` | 无人自动暂停记 `no_person`，统计页「不在画面」 |
+| `pause-clean` | `pauseWhileBreach` 跑满 35 s 再取证，AC5 PASS |
+| `ac14-end-chime` / `ac14-end-none` | 结束音开 1 条 `cue_played end_chime` / 关 0 条 |
+| `ac14-goal` / `ac14-goal-report` | `dailyGoal=6` 驱动主页分母与统计页「未达成」 |
+| `idle-focus` | 专注中后台→`false`、前台→`true`，专注结束→`false`，休息中前台→`false` |
+| `full-day-detecting` | 三番茄一天（含 `-firstSampleDelay 1.4` 识别中段）：AC1/AC5/AC7 |
+
+`*-report` 用例沿用前一个用例的沙盒，要一起跑：`verify.py case --run <run-id> ac12-manual-pause ac12-manual-report`。

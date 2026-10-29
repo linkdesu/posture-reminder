@@ -1,13 +1,13 @@
 #!/bin/sh
 # 验证预检：QA 启动 omp 前运行；任何一项不过就非零退出，不开跑。
-# 用法：scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug> [--keep-sim]
-# 例：  scripts/verify-preflight.sh 1a2b3c4 0.6.5 11 r16-v065-sim --keep-sim
+# 用法：scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮次slug>
+# 例：  scripts/verify-preflight.sh 1a2b3c4 0.6.7 13 r17-v067-sim
 # 结果：tmp/verify/<run-id>/preflight.json。slug 是 r<N>-xxx 或 tl-xxx 时直接用作目录名。
-# 本轮专用模拟器：默认（只跑预检 / dry-run）跑完即关闭并删除；--keep-sim 时仅在预检通过后保留给
-# up/drive。正常退出、失败、收到 INT/TERM/HUP 都会经 trap 兜底清理。
+# 只用固定模拟器 pl-verify（每轮复用，不新建、不删除）。开跑前有多台或非 pl-verify 的模拟器在
+# Booted 就 ENV-BLOCKED。预检结束（通过、失败、INT/TERM/HUP）都只把 pl-verify 关机，up 再开。
 set -u
-if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
-  echo "用法：$0 <目标SHA> <预期版本号> <预期build号> <轮次slug> [--keep-sim]" >&2
+if [ "$#" -ne 4 ]; then
+  echo "用法：$0 <目标SHA> <预期版本号> <预期build号> <轮次slug>" >&2
   exit 2
 fi
 cd "$(dirname "$0")/.."
@@ -27,6 +27,4 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-KEEP=""
-if [ "${5:-}" = "--keep-sim" ]; then KEEP="--keep-sim"; fi
-python3 "$VERIFY" preflight --sha "$1" --version "$2" --build "$3" --slug "$4" $KEEP
+python3 "$VERIFY" preflight --sha "$1" --version "$2" --build "$3" --slug "$4"

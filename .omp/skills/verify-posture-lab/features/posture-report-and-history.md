@@ -39,3 +39,7 @@ Preconditions：
 - `-seedHistory 30` 会先清空再写入固定种子；它只用于截图，不是持久化证明。持久化必须用“杀进程、不重装、重开”。
 - 统计页三个 scope 是三个 `screen` 名；截图文件名不要互相覆盖。
 - 清空历史不可恢复；验证时先备份 `pomodoro-history.json` 到证据目录，再执行。
+
+## 扩展用例（`verify.py case`）
+
+- `ac6-week` / `ac6-month`：`-seedHistory 30 -report week|month`，与 seed 输入逐项复算（日视图与重启持久化由 `drive` 的 `report` 场景覆盖）。
