@@ -47,7 +47,7 @@ enum PostureStatus: Equatable {
   var displayName: String {
     switch self {
     case .good: return "良好"
-    case .noPerson: return "无人"
+    case .noPerson: return "不在画面"
     case .posture(let kind): return kind.displayName
     }
   }

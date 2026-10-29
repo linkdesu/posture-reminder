@@ -44,6 +44,7 @@
 		B370D27AF06F42C9ED0FC4B9 /* PomodoroStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */; };
 		B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */; };
 		B90C2CED7EA810A6FC0FBC6A /* end_soft.wav in Resources */ = {isa = PBXBuildFile; fileRef = D7B37DC421C94D509CA43F7C /* end_soft.wav */; };
+		C4ED1E93986E15951CC41E39 /* ReportCopyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */; };
 		C64D63145339A974597D094B /* chin_rest.wav in Resources */ = {isa = PBXBuildFile; fileRef = A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */; };
 		C76487803E453EB4019A121C /* near.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7E37082B9C3154D095C46336 /* near.wav */; };
 		C963277798D4975B291D662B /* PomodoroHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */; };
@@ -92,6 +93,7 @@
 		16AEB838486856F512DE30ED /* Sensitivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sensitivity.swift; sourceTree = "<group>"; };
 		16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDebugLogger.swift; sourceTree = "<group>"; };
 		20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettings.swift; sourceTree = "<group>"; };
+		21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCopyUITests.swift; sourceTree = "<group>"; };
 		2CCEDA4B1120052F9A58B05F /* SettingsSectionsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionsUITests.swift; sourceTree = "<group>"; };
 		2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugOverlayView.swift; sourceTree = "<group>"; };
 		2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -296,6 +298,7 @@
 			children = (
 				63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */,
 				E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */,
+				21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */,
 				3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */,
 				69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */,
 				2CCEDA4B1120052F9A58B05F /* SettingsSectionsUITests.swift */,
@@ -474,6 +477,7 @@
 			files = (
 				057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */,
 				F67598A50D6C2423066C12D4 /* PomodoroControlsUITests.swift in Sources */,
+				C4ED1E93986E15951CC41E39 /* ReportCopyUITests.swift in Sources */,
 				E85CDE8DF9C31E8BB8141418 /* SettingsInputUITests.swift in Sources */,
 				E198A08B21E3EAC5EDA03D2E /* SettingsPersistenceUITests.swift in Sources */,
 				1BE10E6867153AEAC4467D60 /* SettingsSectionsUITests.swift in Sources */,
