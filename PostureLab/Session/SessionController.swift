@@ -379,6 +379,15 @@ final class SessionController: ObservableObject {
     sample.t = pomodoroClockOffset + rawSample.t
     pomodoroLastT = sample.t
 
+    // A scripted run ends with its script, not with a tap. Checked before the timer can open the
+    // focus that follows the last break: the script's final tick would otherwise be credited to a
+    // fourth pomodoro nobody asked for, and the parent would see a zero-second record.
+    if let scenario = simulatedScenario,
+       rawSample.t + SimulatedSampleSource.tickInterval >= scenario.duration {
+      finishPomodoroRun()
+      return
+    }
+
     // The timer always gets the sample - it is the clock - while the posture engine gets it only
     // while posture is monitored. A manual pause is the hard gate (ADR-0003) and stops the feed; an
     // absence pause does not, because the engine is what times the three-second no-person rule and
@@ -420,11 +429,6 @@ final class SessionController: ObservableObject {
     applyDebugAutoPauseIfDue(at: sample.t)
     #endif
 
-    // A scripted run ends with its script, not with a tap. The script position is the source's own
-    // clock, so the shared offset never triggers this early.
-    if let scenario = simulatedScenario, rawSample.t >= scenario.duration {
-      finishPomodoroRun()
-    }
   }
 
   #if DEBUG
@@ -543,6 +547,7 @@ final class SessionController: ObservableObject {
   /// the break that follows.
   private func syncPomodoroFocus() {
     guard let pomodoro, pomodoro.record.id != pomodoroRecordID else { return }
+    let firstFocusOfRun = !pomodoroStarted
     pomodoroRecordID = pomodoro.record.id
     pomodoroFocusOpen = true
     pomodoroStarted = true
@@ -553,6 +558,21 @@ final class SessionController: ObservableObject {
     flushPomodoroPending()  // the pomodoro before this one is settled, skipped break and all
     logPomodoroFocusStarted()
     startPomodoroInput()
+    if firstFocusOfRun, isSimulating {
+      // AC7: a scripted run anchors its script on the focus it records. The script clock starts with
+      // the source, while a scripted run parks for a beat before pressing 开始, so without this the
+      // script's first fifteen good seconds begin 1.4 s before the focus does and the timeline's
+      // head is short by exactly that beat. From here on the script's t = 0 is the focus.
+      rebaseSimulatedClock()
+    }
+  }
+
+  /// Restarts the scripted source's own clock at its zero and keeps the shared clock monotonic: the
+  /// source's next tick lands one sample after the start command rather than repeating its time.
+  private func rebaseSimulatedClock() {
+    guard let source = inputSource as? SimulatedSampleSource else { return }
+    pomodoroClockOffset = pomodoroLastT + SimulatedSampleSource.tickInterval
+    source.restartClock()
   }
 
   private func handlePomodoroEvent(_ event: PomodoroEvent, at t: TimeInterval) {

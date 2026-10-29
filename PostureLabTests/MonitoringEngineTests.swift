@@ -857,4 +857,30 @@ final class MonitoringEngineTests: XCTestCase {
     let afterUserChange = Settings(defaults: defaults)
     XCTAssertEqual(afterUserChange.sensitivity, .low)
   }
+
+  /// AC7's corpus-side invariant: the `pomodoroDay` script, played at the source's 10 Hz rate from
+  /// its own zero, is fifteen seconds of good sitting, thirty of the cycle's posture, then fifteen
+  /// more of good. A scripted run anchors the script clock on the focus it records (see
+  /// `SessionController.rebaseSimulatedClock`), so this is the timeline the parent sees per focus.
+  func testPomodoroDayScriptReplaysAsFifteenThirtyFifteen() {
+    var engine = MonitoringEngine(config: .forSensitivity(.medium),
+                                  baselineDistanceCM: 40,
+                                  baselinePitchDeg: 0)
+    var runs: [(kind: PostureStatus, start: TimeInterval, end: TimeInterval)] = []
+    var current: (kind: PostureStatus, start: TimeInterval) = (.good, 0)
+    for index in 0...600 {
+      let t = Double(index) / 10
+      for event in engine.ingest(Scenario.pomodoroDay.sample(at: t)) {
+        guard case .statusChanged(let status, let at, _, _) = event else { continue }
+        runs.append((current.kind, current.start, at))
+        current = (status, at)
+      }
+    }
+    runs.append((current.kind, current.start, 60))
+
+    XCTAssertEqual(runs.map(\.kind), [.good, .posture(.near), .good])
+    XCTAssertEqual(runs[0].end - runs[0].start, 15, accuracy: 0.2)
+    XCTAssertEqual(runs[1].end - runs[1].start, 30, accuracy: 0.2)
+    XCTAssertEqual(runs[2].end - runs[2].start, 15, accuracy: 0.2)
+  }
 }

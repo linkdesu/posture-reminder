@@ -8,7 +8,8 @@ final class SimulatedSampleSource: SampleSource {
   private var timer: Timer?
   private var t: TimeInterval = 0
 
-  private static let tickInterval: TimeInterval = 0.1
+  /// One tick of the source clock; the shared pomodoro clock keeps it in step after a restart.
+  static let tickInterval: TimeInterval = 0.1
 
   init(scenario: Scenario) {
     self.scenario = scenario
@@ -21,6 +22,13 @@ final class SimulatedSampleSource: SampleSource {
     timer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
       self?.emitFrame()
     }
+  }
+
+  /// Puts the script back at its zero without a frame of its own. A scripted run anchors its script
+  /// on the focus being recorded (AC7), so the controller restarts the clock at 开始 and the next
+  /// timer tick is script time 0.
+  func restartClock() {
+    t = 0
   }
 
   func stop() {
