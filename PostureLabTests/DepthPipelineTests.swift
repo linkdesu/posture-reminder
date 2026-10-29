@@ -148,6 +148,53 @@ final class DepthPipelineTests: XCTestCase {
                    DepthCloud.points(mask: mask, image: image))
   }
 
+  func testDownsamplingKeepsTheSilhouetteBoundary() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: 120)
+
+    XCTAssertLessThanOrEqual(cloud.count, 120)
+    XCTAssertGreaterThan(cloud.count, 40, "a downsampled body is still a body, not a scatter")
+    // 轮廓的四个极值都要有点：少了任何一个，人形就缺一块。
+    XCTAssertTrue(cloud.contains { $0.y < 0.35 }, "the top of the head is missing")
+    XCTAssertTrue(cloud.contains { $0.x < 0.45 }, "the left edge is missing")
+    XCTAssertTrue(cloud.contains { $0.x > 0.55 }, "the right edge is missing")
+    XCTAssertTrue(cloud.contains { $0.y > 0.75 }, "the bottom of the torso is missing")
+  }
+
+  func testDownsamplingPrefersBoundaryCells() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let maxPoints = 60
+    // 与 DepthCloud 同一条格距公式：预算够宽时轮廓格点先入场，内部格点只能拿剩下的。
+    let step = max(1, Int((Double(mask.count) / Double(maxPoints)).squareRoot().rounded(.up)))
+    let boundary = latticeCells(mask: mask, step: step).filter { isBoundary(mask, x: $0.0, y: $0.1) }
+    XCTAssertGreaterThanOrEqual(boundary.count, 4, "the fixture's silhouette has a boundary")
+
+    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: maxPoints)
+    for cell in boundary {
+      let position = mask.normalized(x: cell.0, y: cell.1)
+      XCTAssertTrue(cloud.contains { $0.x == position.x && $0.y == position.y },
+                    "boundary cell \(cell) lost its budget to the interior")
+    }
+  }
+
+  /// 与 `DepthCloud` 相同的锚点与步长，供测试核对哪些格点落在轮廓上。
+  private func latticeCells(mask: BodyMask, step: Int) -> [(Int, Int)] {
+    var cells: [(Int, Int)] = []
+    for y in stride(from: mask.minY, through: mask.maxY, by: step) {
+      for x in stride(from: mask.minX, through: mask.maxX, by: step) where mask.contains(x: x, y: y) {
+        cells.append((x, y))
+      }
+    }
+    return cells
+  }
+
+  private func isBoundary(_ mask: BodyMask, x: Int, y: Int) -> Bool {
+    !mask.contains(x: x - 1, y: y) || !mask.contains(x: x + 1, y: y)
+      || !mask.contains(x: x, y: y - 1) || !mask.contains(x: x, y: y + 1)
+  }
+
   // MARK: - Coarse grid
 
   func testDownsampleKeepsTheBodyCellsAndBlanksTheWall() throws {

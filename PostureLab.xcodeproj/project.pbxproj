@@ -10,6 +10,7 @@
 		010322E1DA15346F23E7942F /* DepthCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */; };
 		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
 		07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */; };
+		09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */; };
 		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
 		0FF0E9104E69A80ACF39D554 /* JointDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE9B6B183743022B7C91425 /* JointDebugLog.swift */; };
 		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
@@ -34,6 +35,7 @@
 		5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34CF188A7BF03E96664807B /* MonitoringEngine.swift */; };
 		602F3A38199CB0D092D5EDE0 /* ReminderPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D597B6333310C45A83D6402 /* ReminderPlayer.swift */; };
 		615F29CABD4A4D803D1CC61E /* PomodoroSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */; };
+		66F3893B5FC0E50A80A5CF10 /* DebugLogLineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */; };
 		6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */; };
 		6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */; };
 		727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040D7563C8041E76DE061B4A /* PerfMonitor.swift */; };
@@ -77,6 +79,7 @@
 		E1EED948404432FC29BC5370 /* SessionSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01417FF66BD4502D7D8F0556 /* SessionSummary.swift */; };
 		E609AA18A2598BCC08E87DF5 /* SettingsInputEdgeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27B58076E95CF62CD4BFA447 /* SettingsInputEdgeUITests.swift */; };
 		E85CDE8DF9C31E8BB8141418 /* SettingsInputUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */; };
+		F1C5459630BE5A04F9DB3F1D /* CloudMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */; };
 		F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */; };
 		F67598A50D6C2423066C12D4 /* PomodoroControlsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */; };
 		FB901494F5245F4A74E4B11B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 86098F7CD1ECFE6933A9E192 /* README.md */; };
@@ -114,6 +117,7 @@
 		2CCEDA4B1120052F9A58B05F /* SettingsSectionsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionsUITests.swift; sourceTree = "<group>"; };
 		2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugOverlayView.swift; sourceTree = "<group>"; };
 		2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudMotionTests.swift; sourceTree = "<group>"; };
 		3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectAllNumberField.swift; sourceTree = "<group>"; };
 		3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInputUITests.swift; sourceTree = "<group>"; };
 		46C067C01A1CB047E992E32D /* PostureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureFeature.swift; sourceTree = "<group>"; };
@@ -131,8 +135,10 @@
 		63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualPauseUITests.swift; sourceTree = "<group>"; };
 		69901B3D5C223A77CD1EBE1F /* head_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_tilt.wav; sourceTree = "<group>"; };
 		69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPersistenceUITests.swift; sourceTree = "<group>"; };
+		6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogLineTests.swift; sourceTree = "<group>"; };
 		6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureKind.swift; sourceTree = "<group>"; };
 		6DECA819287056EFAF59B08B /* BodyCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCloud.swift; sourceTree = "<group>"; };
+		7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudMotion.swift; sourceTree = "<group>"; };
 		7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLineFile.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
 		811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsStore.swift; sourceTree = "<group>"; };
@@ -252,6 +258,8 @@
 		6F2E163F30CCEF5BACB20012 /* PostureLabTests */ = {
 			isa = PBXGroup;
 			children = (
+				3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */,
+				6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */,
 				0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */,
 				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
@@ -295,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				922487CB54BBCDE0E210C1FC /* BodyPoint.swift */,
+				7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */,
 				4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */,
 				9CFA23C3C324FA26BBF795CE /* DepthCamera.swift */,
 				C80056FD012C04927DA0997E /* DepthCloud.swift */,
@@ -481,6 +490,7 @@
 				193EE240EA99D8DB936FEBCE /* BodyCloud.swift in Sources */,
 				E05DCDD71A5B8B4F81ACFDCF /* BodyPoint.swift in Sources */,
 				9628B624A31AC72209E46D2B /* BodyRig.swift in Sources */,
+				F1C5459630BE5A04F9DB3F1D /* CloudMotion.swift in Sources */,
 				6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */,
 				5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */,
 				4D0EF23AB4D0D5063528375A /* DebugOverlayView.swift in Sources */,
@@ -547,6 +557,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */,
+				66F3893B5FC0E50A80A5CF10 /* DebugLogLineTests.swift in Sources */,
 				6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */,
 				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,

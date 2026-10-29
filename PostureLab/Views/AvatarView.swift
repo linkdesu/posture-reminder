@@ -30,15 +30,24 @@ enum PoseProjection {
 /// farther one shrunk and dimmed, and each point's radius follows its own perspective. A geometry
 /// without a cloud (a scripted rig) falls back to `BodyCloud`, which derives volumes from the joints.
 ///
+/// The canvas renders asynchronously, at most `frameInterval` apart, and every point is batched into
+/// one of `bandCount` depth bands, so a frame is at most twelve fills instead of one per point and
+/// none of that work runs on the main thread. Between the 10 Hz samples `CloudMotion` moves each
+/// point from the last sample to the current one on the display clock, so the body glides instead of
+/// stepping.
+///
 /// The parts the dominant posture blames take that posture's colour from `PosturePalette`, exactly as
 /// they do in the report. With no body at all the view draws a vector silhouette — a head, shoulders
 /// and a torso in outline — so the ground is never a blank warning and never a camera picture.
 ///
 /// It never renders an image, never touches a camera and never writes to disk; RGB is not an input it
-/// can even express. Pure, so the same geometry draws the same cloud twice.
+/// can even express.
 struct AvatarView: View {
   private let geometry: PoseGeometry?
   private let assessment: PostureAssessment?
+
+  /// The last two samples, so the canvas can draw the frame between them.
+  @State private var motion = CloudMotion()
 
   init(geometry: PoseGeometry?, assessment: PostureAssessment?) {
     self.geometry = geometry
@@ -46,88 +55,111 @@ struct AvatarView: View {
   }
 
   var body: some View {
-    Canvas(opaque: true, rendersAsynchronously: false) { context, size in
-      #if DEBUG
-      // 一帧一次；`rendersAsynchronously` 打开后这个闭包不在主线程，计数由 PerfMonitor 加锁。
-      PerfMonitor.shared.recordFrame()
-      #endif
-      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+    TimelineView(.animation(minimumInterval: Self.frameInterval, paused: !hasBody)) { timeline in
+      Canvas(opaque: true, rendersAsynchronously: true) { context, size in
+        #if DEBUG
+        // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数由 PerfMonitor 加锁。
+        PerfMonitor.shared.recordFrame()
+        #endif
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
 
-      guard let geometry, !geometry.joints.isEmpty else {
-        drawSilhouette(in: &context, size: size)
-        return
+        guard let geometry, !geometry.joints.isEmpty else {
+          drawSilhouette(in: &context, size: size)
+          return
+        }
+        // 第一个样本到达前 `motion` 还是空的，直接用当前样本，不从空白插值。
+        let points = motion.to.isEmpty
+          ? geometry.cloud
+          : motion.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
+        let cloud = points.isEmpty ? BodyCloud.points(for: geometry.joints) : points
+        guard !cloud.isEmpty else {
+          drawSilhouette(in: &context, size: size)
+          return
+        }
+        draw(cloud, geometry: geometry, in: &context, size: size)
       }
-      draw(geometry, in: &context, size: size)
     }
     .allowsHitTesting(false)
+    // 新的样本进来时只记下它和时刻，插值本身发生在画布里，主线程不做逐点计算。
+    .onChange(of: geometry) { _, newValue in
+      motion.push(newValue?.cloud ?? [], at: Date().timeIntervalSinceReferenceDate)
+    }
+  }
+
+  private var hasBody: Bool {
+    !(geometry?.joints.isEmpty ?? true)
   }
 
   // MARK: - Composition
 
-  private func draw(_ geometry: PoseGeometry, in context: inout GraphicsContext, size: CGSize) {
+  private func draw(_ points: [BodyPoint],
+                    geometry: PoseGeometry,
+                    in context: inout GraphicsContext,
+                    size: CGSize) {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
 
-    let points = geometry.cloud.isEmpty ? BodyCloud.points(for: geometry.joints) : geometry.cloud
-    guard !points.isEmpty else {
-      drawSilhouette(in: &context, size: size)
-      return
+    // The projection is affine, so the cloud's centre can be projected once and every point then
+    // only moves by its own perspective: no per-point CGPoint array, no sort.
+    var centreX = 0.0
+    var centreY = 0.0
+    var depthSum = 0.0
+    var nearZ = Double.greatestFiniteMagnitude
+    var farZ = -Double.greatestFiniteMagnitude
+    for point in points {
+      centreX += point.x
+      centreY += point.y
+      depthSum += point.z
+      nearZ = min(nearZ, point.z)
+      farZ = max(farZ, point.z)
     }
-
-    // The base projection puts every point where the matching joint goes, so the body stays in the
-    // middle of the canvas — roughly a third of its width and a third of its height, well inside the
-    // central region a figure should occupy — and the cloud and the debug skeleton share one frame
-    // of reference. Perspective then only moves a point by how far its depth is from the body's
-    // mean.
-    let positions = points.map { PoseProjection.point(CGPoint(x: $0.x, y: $0.y), in: rect) }
-    var centre = CGPoint.zero
-    for position in positions {
-      centre.x += position.x
-      centre.y += position.y
-    }
-    centre.x /= CGFloat(points.count)
-    centre.y /= CGFloat(points.count)
-
-    let depths = points.map(\.z)
-    let nearZ = depths.min() ?? 0
-    let farZ = depths.max() ?? 0
-    let meanZ = depths.reduce(0, +) / Double(points.count)
+    let count = Double(points.count)
+    centreX /= count
+    centreY /= count
+    let meanZ = depthSum / count
     let span = farZ - nearZ
+    let centre = PoseProjection.point(CGPoint(x: centreX, y: centreY), in: rect)
 
     let dominant = assessment?.dominant
-    let blamedJoints = Self.alertJoints(for: dominant)
     let alertInk = Self.alertInk(for: dominant)
-    let alertPositions = Self.positions(of: blamedJoints, in: geometry.joints)
+    let alertPositions = Self.positions(of: Self.alertJoints(for: dominant), in: geometry.joints)
     let alertRadiusSquared = Self.alertRadius * Self.alertRadius
 
-    // Far to near, so nearer points sit on top. Ties break on index, keeping the render
-    // deterministic even though `sort` is not stable.
-    let order = points.indices.sorted { lhs, rhs in
-      points[lhs].z != points[rhs].z ? points[lhs].z > points[rhs].z : lhs < rhs
-    }
-
     let baseRadius = min(rect.width, rect.height) * Self.particleRadiusScale
+    // One path per depth band, filled once: twelve fills for a whole body instead of one per point.
+    var bands = [Path](repeating: Path(), count: Self.bandCount)
+    var alertBands = [Path](repeating: Path(), count: Self.bandCount)
 
-    for index in order {
-      let point = points[index]
+    for point in points {
       let nearness = Self.nearness(of: point.z, maximum: farZ, span: span)
       let perspective = CGFloat(Self.perspective(z: point.z, reference: meanZ))
       let radius = baseRadius * perspective * CGFloat(0.80 + 0.50 * nearness)
-      let position = CGPoint(x: centre.x + (positions[index].x - centre.x) * perspective,
-                             y: centre.y + (positions[index].y - centre.y) * perspective)
+      let projected = PoseProjection.point(CGPoint(x: point.x, y: point.y), in: rect)
+      let position = CGPoint(x: centre.x + (projected.x - centre.x) * perspective,
+                             y: centre.y + (projected.y - centre.y) * perspective)
       let dot = CGRect(x: position.x - radius,
                        y: position.y - radius,
                        width: radius * 2,
                        height: radius * 2)
-      let opacity = Self.particleMinOpacity + Self.particleMaxOpacity * nearness
-
-      if let alertInk, Self.isAlert(point,
-                                    joints: alertPositions,
-                                    radiusSquared: alertRadiusSquared) {
-        context.fill(Path(ellipseIn: dot), with: .color(alertInk.opacity(opacity)))
+      let band = min(Self.bandCount - 1, Int(nearness * Double(Self.bandCount)))
+      if alertInk != nil,
+         Self.isAlert(point, joints: alertPositions, radiusSquared: alertRadiusSquared) {
+        alertBands[band].addEllipse(in: dot)
       } else {
+        bands[band].addEllipse(in: dot)
+      }
+    }
+
+    // Far to near, so nearer points sit on top even though they are batched.
+    for band in 0..<Self.bandCount {
+      let nearness = (Double(band) + 0.5) / Double(Self.bandCount)
+      let opacity = Self.particleMinOpacity + Self.particleMaxOpacity * nearness
+      if !bands[band].isEmpty {
         let ink = Self.farInk.mixed(with: Self.nearInk, nearness)
-        context.fill(Path(ellipseIn: dot), with: .color(ink.color(opacity: opacity)))
+        context.fill(bands[band], with: .color(ink.color(opacity: opacity)))
+      }
+      if let alertInk, !alertBands[band].isEmpty {
+        context.fill(alertBands[band], with: .color(alertInk.opacity(opacity)))
       }
     }
   }
@@ -262,6 +294,11 @@ private struct Ink {
 
 private extension AvatarView {
   static let headJoints: [JointID] = [.nose, .leftEye, .rightEye, .leftEar, .rightEar]
+
+  /// 画布的最短刷新间隔：30 fps 上限，够看出连续动作，又给关节推算和判定留出余量。
+  static let frameInterval: TimeInterval = 1.0 / 30.0
+  /// 深度分档数。每档一条路径一次填充，所以一帧最多 `bandCount × 2` 次填充。
+  static let bandCount = 6
 
   /// The cloud's depth ramp, far to near: a dark slate brightening to a near white, so depth reads
   /// from brightness and size without competing with the palette.
