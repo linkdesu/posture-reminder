@@ -148,7 +148,7 @@ xcrun devicectl device copy from \
 
 `good`、`no_person`，加上八个体态 rawValue：`desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 
-这十个值来自 `PostureStatus`（`good`、`no_person` 或 `posture(kind)`），其 rawValue 与 `PostureKind` 完全一致——只有一套体态词汇，不是两套。`no_person` 就是中文的「无人」：连续 3 秒没有可测量的人脸，界面与时间轴都写作「无人」。
+这十个值来自 `PostureStatus`（`good`、`no_person` 或 `posture(kind)`），其 rawValue 与 `PostureKind` 完全一致——只有一套体态词汇，不是两套。`no_person` 就是中文的「无人」：连续 3 秒没有可测量的人脸。中文文档与验收口径叫「无人」，面向家长的统计页/历史图例写作「不在画面」。
 
 ### `screen`
 
@@ -210,16 +210,16 @@ xcrun devicectl device copy from \
 
 `PomodoroRecord` 与 `PomodoroOutcome` 是**历史词汇，不是日志键**。JSONL 日志没有 `outcome` 字段：`completed`、`abandoned` 与 `interrupted` 存放在 `Documents/pomodoro-history.json`，统计页从 outcome 为 `completed` 的记录计算 `completedPomodoros`。同样，`PostureSegment.kind` 使用 `state` 词汇，并额外允许 `paused` 表示暂停带；`paused` 是时间轴取值，永远不是 `state` 取值。`EndSound` 是设置项（`soft` / `chime` / `none`），不是键；它决定提示音片段是否开始，从而决定是否存在 `cue_played` 行。
 
-## 中文术语 ↔ 日志事件映射
+## 中文术语 ↔ UI 文案 ↔ 日志事件映射
 
-界面上的中文词和日志/历史里的英文键不是一一同名，读日志时按这张表换算；英文事件名与键名本轮未改：
+中文文档/验收口径、界面文案与日志/历史里的英文键不是一一同名，读日志时按这张表换算；英文事件名与键名本轮未改：
 
-| 中文术语 | 界面 / 历史里的样子 | 日志与历史证据 | 不要误读成 |
+| 中文术语（文档/验收） | UI 文案 | 日志与历史证据 | 不要误读成 |
 |---|---|---|---|
-| 离开（提前结束按钮） | 专注控制行的「离开」按钮 | 关闭专注时写一条 `session_ended` 汇总；该番茄在 `Documents/pomodoro-history.json` 记 `"outcome": "abandoned"` | 不是 `paused` / `resumed`，也没有 `abandon` 这个 JSONL 事件名 |
-| 无人（人不在镜头前） | 界面与时间轴显示「无人」，倒计时冻结 | `status_changed` 行 `state: "no_person"`；连续 3 秒无人写 `paused`，人脸回来写 `resumed` | 不是「离开」按钮，也不是 `abandoned` |
+| 离开 | 专注控制行按钮「离开」 | 无同名 JSONL 事件；关闭专注时写一条 `session_ended` 汇总，该番茄在 `Documents/pomodoro-history.json` 记 `"outcome": "abandoned"` | 不是 `paused` / `resumed`，也没有 `abandon` 这个 JSONL 事件名 |
+| 无人 | 统计页/历史图例写「不在画面」 | `status_changed` 行 `state: "no_person"`；连续 3 秒无人写 `paused`，人脸回来写 `resumed` | 不是「离开」按钮，也不是 `abandoned` |
 | 超时中断（无人超过 300 秒） | 专注结束，停在停驻状态 | 结束时那条 `session_ended`；历史 `"outcome": "interrupted"` | 历史里不会出现 `abandoned` |
-| 手动暂停（点「暂停」） | 倒计时冻结，按钮回到「开始专注」 | 没有 `paused` / `resumed` 行——这两个事件只表示无人；暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴段 | 不是 `no_person`，也不是 `abandoned` |
+| 手动暂停 | 按钮「暂停」；暂停后按钮回到「开始专注」 | 没有 `paused` / `resumed` 行——这两个事件只表示无人；暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴段 | 不是 `no_person`，也不是 `abandoned` |
 
 一句话：**按钮「离开」只落到历史的 `abandoned`；absence 只落到 `paused` / `resumed` 与 `state: "no_person"`。** 两者的英文键都不叫对方的名字。
 
