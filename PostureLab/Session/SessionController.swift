@@ -14,6 +14,10 @@ struct PomodoroSnapshot: Equatable {
   var focusIndex: Int
   /// Pomodoros completed today, off the persisted history.
   var completedToday: Int
+  /// Whether this focus has been started and not closed yet. It is what separates a parked focus
+  /// (before 开始专注, or after 休息 reset it) from one in flight: only a started focus has
+  /// something to end early.
+  var focusStarted: Bool
 }
 
 /// Which report the parent report screen shows; the in-page segmented control binds to this.
@@ -714,7 +718,8 @@ final class SessionController: ObservableObject {
                                     isRunning: pomodoro.isRunning,
                                     remainingSeconds: pomodoro.remainingSeconds,
                                     focusIndex: pomodoro.focusIndex,
-                                    completedToday: pomodoroCompletedTodayCount)
+                                    completedToday: pomodoroCompletedTodayCount,
+                                    focusStarted: pomodoroFocusOpen)
     if snapshot != pomodoroSnapshot { pomodoroSnapshot = snapshot }
   }
 

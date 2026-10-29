@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// The child's pomodoro screen: the point-cloud likeness fills the ground, the countdown and the
-/// phase sit quietly over the empty space above it, and the three controls wait at the bottom.
+/// The child's pomodoro screen: the camera preview and the point-cloud likeness fill the ground
+/// from launch — before 开始专注 is pressed — the countdown and the phase sit quietly over the empty
+/// space above them, and the controls wait at the bottom.
 ///
 /// Nothing here can interrupt. A breaching posture never changes the layout, never takes over the
 /// screen and never stops the clock — it only tints the part of the avatar that is in trouble, which
 /// `AvatarView` already does. There is no edge border, no flashing, no panel and no modal; the
 /// pre-recorded voice and the parent report are where a posture is actually raised.
+///
+/// With debug mode on, `DebugOverlayView` names every joint and shows the arithmetic behind every
+/// feature, so the numbers on screen can be traced to the body they came from.
 ///
 /// The only navigation is the pair of icons at the top trailing edge: the report page (`chart.bar`)
 /// and the settings page (`gearshape`). They carry no text, so a child who is not looking for them
@@ -27,10 +31,24 @@ struct PomodoroView: View {
       Color.black
         .ignoresSafeArea()
 
+      // The live camera is the ground as soon as the app opens. A scripted run has no camera, so
+      // there the point cloud keeps the plain black ground the rig's figures were drawn for.
+      if !controller.isSimulating {
+        CameraPreview(session: controller.cameraSession)
+          .ignoresSafeArea()
+          .opacity(0.55)
+        // A quiet scrim so the cloud and its labels stay legible over a bright room.
+        Color.black.opacity(0.25)
+          .ignoresSafeArea()
+          .allowsHitTesting(false)
+      }
+
       // The likeness is the ground of the screen, not a card inside a layout. It also draws the
       // quiet placeholder while there is no geometry yet, so the ground never turns into a blank
       // warning.
-      AvatarView(geometry: controller.latestGeometry, assessment: childAssessment)
+      AvatarView(geometry: controller.latestGeometry,
+                 assessment: childAssessment,
+                 drawsGround: controller.isSimulating)
         .ignoresSafeArea()
         // When the overlay is up it is inset for the controls and the likeness takes the same frame,
         // so the skeleton stays on the body. See `controlsClearance`.
@@ -81,11 +99,10 @@ struct PomodoroView: View {
     return filtered
   }
 
-  /// A focus in flight is the only time there is fresh joint data to show.
-  private var showsDebugOverlay: Bool {
-    guard settings.debugEnabled, let snapshot = controller.pomodoroSnapshot else { return false }
-    return snapshot.phase == .focus && snapshot.isRunning
-  }
+  /// Debug mode is the only gate. The skeleton and the formula table are the parent's view of the
+  /// measurement, and they are useful before the first focus too — that is where Link checks which
+  /// joint every number comes from. The overlay draws nothing until there is geometry to draw.
+  private var showsDebugOverlay: Bool { settings.debugEnabled }
 
   // MARK: - Session
 
@@ -137,12 +154,16 @@ struct PomodoroView: View {
           Text("开始专注")
             .font(.title3.weight(.semibold))
             .foregroundStyle(.white.opacity(0.9))
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .padding(.vertical, 18)
+            // The whole capsule is the button. Without this the hit area is the text glyphs only,
+            // because a plain button style draws no shape of its own.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(.white.opacity(0.06), in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+        .accessibilityLabel("开始专注")
       }
 
       HStack(spacing: 16) {
@@ -152,9 +173,11 @@ struct PomodoroView: View {
           secondary("开始") { controller.pomodoroCommand(.start) }
         }
 
-        // A break is not a pomodoro in flight; abandoning belongs to the focus clock only.
-        if snapshot.phase == .focus {
-          secondary("放弃") { controller.pomodoroCommand(.abandon) }
+        // Only a started focus has something to end early; a parked one has no record to abandon.
+        // The outcome is still `abandoned` everywhere it is logged or stored — this is the label
+        // only, and it lives in `PomodoroCopy` so a rename is one line.
+        if snapshot.focusStarted {
+          secondary(PomodoroCopy.endFocusEarly) { controller.pomodoroCommand(.abandon) }
         }
 
         if snapshot.phase != .focus {
@@ -171,7 +194,9 @@ struct PomodoroView: View {
         .foregroundStyle(.white.opacity(0.72))
         .padding(.horizontal, 20)
         .padding(.vertical, 11)
-        .contentShape(Capsule())
+        // The capsule is the tap target, and it is never smaller than a fingertip.
+        .frame(minWidth: 88, minHeight: 44)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
