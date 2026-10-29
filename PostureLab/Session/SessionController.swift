@@ -120,12 +120,17 @@ final class SessionController: ObservableObject {
   private var viewModeObservers: Set<AnyCancellable> = []
   private var pomodoroObservers: Set<AnyCancellable> = []
 
-  /// The timer. Its only clock is the sample stream, which is what makes it and the posture engine
-  /// share one clock.
+  /// The timer. Since v0.6 its clock is the wall clock, which is what makes the countdown - and the
+  /// focus's `startedAt` - independent of the sample stream.
   private var pomodoro: PomodoroEngine?
-  /// Epoch seconds of the timer's sample-time zero. Posture segments are stamped on the same origin,
-  /// so a record and its segments land on the same spot of the report's time axis.
-  private var pomodoroEpochOrigin: TimeInterval = 0
+  /// Unix epoch seconds: the wall clock the countdown, the focus's `startedAt` and the posture
+  /// timeline all read (v0.6). Injected so a test can drive it; the sample stream is presence, not
+  /// time.
+  private let now: () -> TimeInterval
+  /// The countdown's own timer. Before v0.6 the countdown only moved when a sample arrived, which
+  /// made the timer a function of the camera; the ticker is what lets it run - and what lets the
+  /// 「识别中」段 have a length - even while the first sample is still missing.
+  private var pomodoroTicker: Timer?
   /// The last sample time both engines saw, and the offset that keeps that clock monotonic: a source
   /// restarts its own clock at zero, and the child's screen gives the depth sensor up when the parent
   /// opens the report, so the controller maintains the shared clock rather than trusting the source.
@@ -143,9 +148,9 @@ final class SessionController: ObservableObject {
   /// Whether the run ever started a focus, and whether it is over.
   private var pomodoroStarted = false
   private var pomodoroRunFinished = false
-  /// The focus's posture timeline: the segments already closed and the one still open.
-  private var pomodoroSegments: [PostureSegment] = []
-  private var pomodoroOpenSegment: (kind: String, start: TimeInterval)?
+  /// The focus's posture timeline, assembled by the pure `FocusTimeline`: the segments already closed
+  /// plus the band still open, including the「识别中」段 between the tap and the first sample.
+  private var pomodoroTimeline = FocusTimeline()
   /// A closed pomodoro waiting to be written. It waits one beat so a skipped break, which the engine
   /// reports after the completion, still lands on the record it belongs to.
   private var pomodoroPending: PomodoroRecord?
@@ -160,18 +165,23 @@ final class SessionController: ObservableObject {
   /// `-holdStart 1`: a scripted run that keeps its first focus parked, for the evidence that the
   /// point cloud and the silhouette are on screen before 开始专注. Debug builds only.
   var debugHoldStart = false
+  /// `-firstSampleDelay 1.4`: the scripted camera stays silent this many seconds after the focus
+  /// starts, so a run reproduces a late first sample and writes a real「识别中」段. Debug builds only.
+  var debugFirstSampleDelay: TimeInterval = 0
   #endif
 
   init(settings: Settings,
        logger: DebugLogging,
        scenarios: [Scenario] = [],
        pomodoroStore: PomodoroStore = PomodoroStore(),
-       pomodoroSettings: PomodoroSettingsStore = PomodoroSettingsStore()) {
+       pomodoroSettings: PomodoroSettingsStore = PomodoroSettingsStore(),
+       now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
     self.settings = settings
     self.logger = logger
     self.scenarios = scenarios
     self.pomodoroStore = pomodoroStore
     self.pomodoroSettings = pomodoroSettings
+    self.now = now
     player = ReminderPlayer(settings: settings, logger: logger)
 
     // Both switches change the visible layers, so each logs a `view_mode` line while a session runs.
@@ -355,20 +365,44 @@ final class SessionController: ObservableObject {
   // MARK: - Pomodoro run
 
   private func startPomodoroTimer() {
-    let startedAt = Date()
-    pomodoroEpochOrigin = startedAt.timeIntervalSince1970
-    let engine = PomodoroEngine(settings: pomodoroSettings.settings, startedAt: startedAt)
+    let engine = PomodoroEngine(settings: pomodoroSettings.settings, now: now)
     pomodoro = engine
     // The engine's first record is not a focus in flight, so its id is adopted without opening one.
     pomodoroRecordID = engine.record.id
     pomodoroFocusOpen = false
-    pomodoroSegments = []
-    pomodoroOpenSegment = nil
+    pomodoroTimeline = FocusTimeline()
     pomodoroPending = nil
     // A fresh timer runs on a fresh clock, so the first second of it is due again.
     pomodoroTickSecond = nil
     // Nothing is in flight on a fresh timer, and no pause decision survives from the run before.
     pomodoroPauseApplied = false
+    startPomodoroTicker()
+  }
+
+  /// The ticker behind the wall-clock countdown: four times a second is enough for a countdown
+  /// shown in whole seconds and cheap enough to leave running through every phase. It never touches
+  /// presence - only a sample can do that - so a tick can neither start nor end an absence.
+  private func startPomodoroTicker() {
+    guard pomodoroTicker == nil else { return }
+    let timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.pomodoroTick() }
+    }
+    pomodoroTicker = timer
+  }
+
+  /// One tick of the wall clock: the countdown moves even with no sample, and a phase that ends
+  /// here is reported exactly as one ended by a sample.
+  private func pomodoroTick() {
+    guard !pomodoroRunFinished, var pomodoro,
+          pomodoro.isRunning || pomodoroFocusOpen else { return }
+    let t = now()
+    let events = pomodoro.tick()
+    self.pomodoro = pomodoro
+    syncPomodoroFocus()
+    for event in events { handlePomodoroEvent(event, at: t) }
+    syncPomodoroPause()
+    logPomodoroTickIfDue(at: t)
+    refreshPomodoroSnapshot()
   }
 
   /// One tick of a pomodoro run: one shared clock, the posture engine while posture is monitored,
@@ -408,7 +442,8 @@ final class SessionController: ObservableObject {
     let events = pomodoro.ingest(sample)
     self.pomodoro = pomodoro
     syncPomodoroFocus()
-    for event in events { handlePomodoroEvent(event, at: sample.t) }
+    let clock = now()
+    for event in events { handlePomodoroEvent(event, at: clock) }
     syncPomodoroPause()
     // An absence still feeds the engine, so its own no-face frame must not become the avatar's
     // subject: the child is not there, and the last frame is dropped exactly as before.
@@ -418,9 +453,9 @@ final class SessionController: ObservableObject {
     }
     // After the events, so a phase that ended on this sample is reported as the phase the countdown
     // has already moved on to.
-    logPomodoroTickIfDue(at: sample.t)
+    logPomodoroTickIfDue(at: clock)
 
-    if monitoring, pomodoroFocusOpen { accumulatePomodoroSegment(at: sample.t) }
+    if monitoring, pomodoroFocusOpen { accumulatePomodoroSegment(at: clock) }
     refreshPomodoroSnapshot()
 
     #if DEBUG
@@ -551,11 +586,13 @@ final class SessionController: ObservableObject {
     pomodoroRecordID = pomodoro.record.id
     pomodoroFocusOpen = true
     pomodoroStarted = true
-    pomodoroSegments = []
-    pomodoroOpenSegment = nil
+    pomodoroTimeline = FocusTimeline()
     engine = nil
     latestAssessment = nil
     flushPomodoroPending()  // the pomodoro before this one is settled, skipped break and all
+    // The focus's timeline starts at the tap, not at its first sample: the gap in between is the
+    // 「识别中」段, and it is measured on the same wall clock as the countdown.
+    pomodoroTimeline.started(at: now())
     logPomodoroFocusStarted()
     startPomodoroInput()
     if firstFocusOfRun, isSimulating {
@@ -572,6 +609,11 @@ final class SessionController: ObservableObject {
   private func rebaseSimulatedClock() {
     guard let source = inputSource as? SimulatedSampleSource else { return }
     pomodoroClockOffset = pomodoroLastT + SimulatedSampleSource.tickInterval
+    #if DEBUG
+    // Read here rather than in `makeSource`: the source exists before the launch arguments are
+    // applied, and the delay belongs to the restart, which is the focus's own start.
+    source.warmupAfterRestart = debugFirstSampleDelay
+    #endif
     source.restartClock()
   }
 
@@ -621,10 +663,12 @@ final class SessionController: ObservableObject {
   /// Closes the focus: the timeline ends at `t` and the record takes the segments, the reminders and
   /// the real focus time with it.
   private func closePomodoroFocus(record: PomodoroRecord, at t: TimeInterval) {
-    closePomodoroSegment(at: t)
+    // A focus that never saw a sample still has a「识别中」段, and it ends here so the timeline adds
+    // up to the plan instead of dropping the gap.
+    logDetectingSegment(pomodoroTimeline.finished(at: t))
 
     var finished = record
-    finished.postureSegments = pomodoroSegments
+    finished.postureSegments = pomodoroTimeline.segments
     finished.reminderCounts = pomodoroReminderCounts()
     pomodoroPending = finished
     pomodoroFocusOpen = false
@@ -650,39 +694,29 @@ final class SessionController: ObservableObject {
   }
 
   /// The parent-facing timeline, and the thing this wiring has to get right: every status change
-  /// closes the open segment at the current sample time and opens the next one, so a child who sits
-  /// well writes a `"good"` segment like any other posture. Emitting only the bad postures would
+  /// closes the open segment at the current wall-clock instant and opens the next one, so a child who
+  /// sits well writes a `"good"` segment like any other posture. Emitting only the bad postures would
   /// leave the good-posture ratio at zero for ever, which reads as a charting bug when it is in fact
   /// a missing segment.
+  ///
+  /// The first posture sample of a focus is where the 「识别中」段 ends: from the 开始 tap until here
+  /// the timer was counting but nothing had been classified, and that stretch is a segment of its
+  /// own rather than part of whichever posture happens to come first.
   ///
   /// A paused focus writes `PosturePalette.pausedKind` instead: the time is not the child sitting in
   /// some posture, it is time the pomodoro did not count, and the band has to say so (B1 and B2).
   private func accumulatePomodoroSegment(at t: TimeInterval) {
     let kind: String? = pomodoroFocusPaused ? PosturePalette.pausedKind : engine?.status.rawValue
     guard let kind else { return }
-    guard let open = pomodoroOpenSegment else {
-      pomodoroOpenSegment = (kind: kind, start: t)
-      return
-    }
-    guard open.kind != kind else { return }
-    pomodoroSegments.append(PostureSegment(kind: open.kind,
-                                          start: pomodoroEpoch(open.start),
-                                          end: pomodoroEpoch(t)))
-    pomodoroOpenSegment = (kind: kind, start: t)
+    logDetectingSegment(pomodoroTimeline.observe(kind, at: t))
   }
 
-  /// Closes the segment in flight. A gap with nobody in frame reaches this the same way every other
-  /// status does: the engine reports `.no_person` and the segment is written as `"no_person"`.
-  private func closePomodoroSegment(at t: TimeInterval) {
-    guard let open = pomodoroOpenSegment else { return }
-    pomodoroSegments.append(PostureSegment(kind: open.kind,
-                                          start: pomodoroEpoch(open.start),
-                                          end: pomodoroEpoch(t)))
-    pomodoroOpenSegment = nil
+  /// The「识别中」段's one log line, written when the segment closes. `nil` when this sample closed
+  /// no such segment, so a focus writes exactly one line.
+  private func logDetectingSegment(_ segment: PostureSegment?) {
+    guard let segment else { return }
+    logger.log(.segment(kind: segment.kind, start: segment.start, end: segment.end))
   }
-
-  /// Sample time to epoch seconds, on the same origin as the timer's records.
-  private func pomodoroEpoch(_ t: TimeInterval) -> Double { pomodoroEpochOrigin + t }
 
   /// Writes the pomodoro that finished, once a skipped break can no longer change it.
   private func flushPomodoroPending() {
@@ -701,8 +735,8 @@ final class SessionController: ObservableObject {
       return
     }
     pomodoroRunFinished = true
-    let t = pomodoroLastT
-    let events = pomodoro.finish(at: t)
+    let t = now()
+    let events = pomodoro.finish()
     self.pomodoro = pomodoro
     for event in events { handlePomodoroEvent(event, at: t) }
     flushPomodoroPending()

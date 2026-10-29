@@ -30,6 +30,10 @@ enum MonitoringEvent: Equatable {
   /// claims a sound the device did not make. The cue's name rides in the log's existing `message`
   /// key rather than a key of its own.
   case cuePlayed(cue: String)
+  /// A focus timeline segment, written when the 「识别中」段 closes: the stretch from the 开始 tap to
+  /// the focus's first posture sample. Times are Unix epoch seconds, so they sit on the same axis as
+  /// the record's `startedAt`.
+  case segment(kind: String, start: TimeInterval, end: TimeInterval)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
   case sessionEnded(summary: SessionSummary)
@@ -88,6 +92,10 @@ struct LogRecord: Codable {
     case posture_stats
     case remaining_seconds
     case phase
+    case segment_kind
+    case segment_start
+    case segment_end
+    case segment_seconds
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -139,6 +147,13 @@ struct LogRecord: Codable {
   var remaining_seconds: Double?
   /// The pomodoro phase rawValue (`focus` / `shortBreak` / `longBreak`), on a `pomodoro_tick` line.
   var phase: String?
+  /// The timeline segment kind, on a `segment` line: `detecting` for the 识别中段.
+  var segment_kind: String?
+  /// The segment's start and end, Unix epoch milliseconds, on a `segment` line.
+  var segment_start: Int64?
+  var segment_end: Int64?
+  /// The segment's length in seconds, on a `segment` line.
+  var segment_seconds: Double?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -183,6 +198,10 @@ struct LogRecord: Codable {
     try container.encode(posture_stats, forKey: .posture_stats)
     try container.encode(remaining_seconds, forKey: .remaining_seconds)
     try container.encode(phase, forKey: .phase)
+    try container.encode(segment_kind, forKey: .segment_kind)
+    try container.encode(segment_start, forKey: .segment_start)
+    try container.encode(segment_end, forKey: .segment_end)
+    try container.encode(segment_seconds, forKey: .segment_seconds)
   }
 }
 
@@ -283,6 +302,13 @@ extension MonitoringEvent {
     case .cuePlayed(let cue):
       record.event = "cue_played"
       record.message = cue
+
+    case .segment(let kind, let start, let end):
+      record.event = "segment"
+      record.segment_kind = kind
+      record.segment_start = Int64((start * 1000).rounded())
+      record.segment_end = Int64((end * 1000).rounded())
+      record.segment_seconds = max(0, end - start)
 
     case .paused(let t):
       record.event = "paused"

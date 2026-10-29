@@ -27,16 +27,18 @@ enum PomodoroEvent: Equatable {
   case finishedAll
 }
 
-/// Pure pomodoro timer driven by the samples it is fed.
+/// Pure pomodoro timer.
 ///
-/// The only clock is `PostureSample.t` (ADR-0001): feeding 25 minutes of samples runs a 25-minute
-/// pomodoro, and no `Date` or dispatch time is read after construction. The countdown is anchored on
-/// a sample time rather than decremented tick by tick, so a replay lands on exactly the same
-/// remaining values, and a pause simply re-anchors.
+/// The clock is injected (v0.6): `now` returns Unix epoch seconds, so the countdown, the focus's
+/// `startedAt` and every record stamp come from the wall clock the child sees, not from the sample
+/// stream. A pomodoro therefore keeps time even while no posture sample has arrived - that gap is
+/// the timeline's「识别中」段. The countdown is anchored on an instant rather than decremented tick
+/// by tick, so advancing it twice over the same span lands on the same remaining value, and a pause
+/// simply re-anchors.
 ///
-/// The sample carries face presence too, so the same stream also decides how much of a focus the
-/// child was actually there for: a focus burns time only while a face is in frame (B1), and an
-/// absence past `absenceLimit` ends it (B5).
+/// Samples still decide how much of a focus the child was actually there for: a focus burns time
+/// only while a face is in frame (B1), and an absence past `absenceLimit` ends it (B5). The sample
+/// carries no time any more; it is a presence reading taken at `now()`.
 struct PomodoroEngine {
   /// A tick is 0.1 s; this only absorbs the drift of floating-point anchor subtraction, so a
   /// countdown never misses its end by one tick or ends a tick early.
@@ -45,9 +47,9 @@ struct PomodoroEngine {
   private static let absenceLimit: Double = 300
 
   private var settings: PomodoroSettings
-  /// Sample time zero in epoch seconds. Records and segments are stamped in epoch seconds while
-  /// samples count seconds from the start of the session.
-  private let epochOrigin: TimeInterval
+  /// Unix epoch seconds. The one clock of the engine: commands, samples and the controller's timer
+  /// all read it, which is what makes a countdown independent of the sample stream.
+  private let now: () -> TimeInterval
 
   private(set) var phase: PomodoroPhase
   private(set) var isRunning: Bool
@@ -81,16 +83,20 @@ struct PomodoroEngine {
   /// nothing yet. Remembered so a command that (re)starts a countdown can honour B1 without a
   /// sample of its own.
   private var facePresent: Bool? = nil
-  init(settings: PomodoroSettings, startedAt: Date = Date()) {
+  /// The clock the engine reads: Unix epoch seconds. Default reads the wall clock; tests inject a
+  /// fake one so a run is exact.
+  init(settings: PomodoroSettings,
+       now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
     let planned = Double(settings.focusMinutes * 60)
+    let startedAt = now()
     self.settings = settings
-    self.epochOrigin = startedAt.timeIntervalSince1970
+    self.now = now
     self.phase = .focus
     self.isRunning = false
     self.remainingSeconds = planned
     self.remainingAtAnchor = planned
     self.focusIndex = 1
-    self.record = PomodoroRecord(startedAt: startedAt.timeIntervalSince1970,
+    self.record = PomodoroRecord(startedAt: startedAt,
                                  plannedSeconds: planned,
                                  focusedSeconds: 0,
                                  pausedSeconds: 0,
@@ -109,9 +115,11 @@ struct PomodoroEngine {
     self.settings = settings
   }
 
-  /// Takes one tick of the sample clock. Time comes from `sample.t` alone.
+  /// Takes one presence reading. The time comes from the injected clock, not from the sample: a
+  /// sample says who is in frame, `now()` says when.
   mutating func ingest(_ sample: PostureSample) -> [PomodoroEvent] {
-    let dt = lastSampleT.map { sample.t - $0 } ?? 0
+    let t = now()
+    let dt = lastSampleT.map { t - $0 } ?? 0
 
     // A paused interval is the only thing that grows `pausedSeconds`: the focus clock is frozen, so
     // the time is credited to the pause instead of the focus. A manual pause stops the countdown; an
@@ -124,19 +132,35 @@ struct PomodoroEngine {
     facePresent = sample.facePresent
 
     var events: [PomodoroEvent]
-    if let since = absentSince, sample.t - since > Self.absenceLimit {
+    if let since = absentSince, t - since > Self.absenceLimit {
       // B5: the absence has outlived the limit, so this sample ends the focus rather than feeding
       // it. Checked first, and only while a focus is running, which is the whole scope of the rule.
-      events = interruptFocus(at: sample.t)
+      events = interruptFocus(at: t)
     } else {
-      applyPresence(at: sample.t)
-      events = advance(to: sample.t)
+      applyPresence(at: t)
+      events = advance(to: t)
     }
 
     if focusOpen {
       record.focusedSeconds = elapsedFocusSeconds
     }
-    lastSampleT = sample.t
+    lastSampleT = t
+    return events
+  }
+
+  /// Takes one tick of the injected clock without a presence reading: the countdown moves on
+  /// whether or not the camera has produced a sample, which is what makes the timer independent of
+  /// the sample stream and gives the「识别中」gap a running countdown. Presence is unchanged, so a
+  /// tick can never resolve an absence - only a sample can.
+  mutating func tick() -> [PomodoroEvent] {
+    let t = now()
+    let dt = lastSampleT.map { t - $0 } ?? 0
+    if focusOpen, !isRunning || absentSince != nil {
+      record.pausedSeconds += max(0, dt)
+    }
+    let events = advance(to: t)
+    if focusOpen { record.focusedSeconds = elapsedFocusSeconds }
+    lastSampleT = t
     return events
   }
 
@@ -169,8 +193,12 @@ struct PomodoroEngine {
 
   /// Ends the whole session (a scripted run reaching its end), closing a focus still in flight as
   /// abandoned so its actual focus time is not lost. A focus that never ran is not a record at all.
-  mutating func finish(at t: TimeInterval) -> [PomodoroEvent] {
+  mutating func finish() -> [PomodoroEvent] {
+    let t = now()
     var events = advance(to: t)
+    // The clock moved up to the finish instant, so the focus's real time is read here before the
+    // close decides whether the focus ran at all.
+    if focusOpen { record.focusedSeconds = elapsedFocusSeconds }
     // Only a focus that actually ran is closed. One that was merely waiting for its `.start` - the
     // focus `autoStartFocus` parks after every break, opened by a last-beat start as the script ran
     // out - never accrued a tick, so closing it would write a zero-second pomodoro the child never
@@ -200,7 +228,10 @@ struct PomodoroEngine {
     hasStarted = true
 
     if phase == .focus, !focusOpen {
-      openFocus(at: lastSampleT ?? 0)
+      // v0.6: the focus starts when the child taps 开始, not when a sample last arrived. The
+      // record's `startedAt` is therefore the tap's wall-clock instant even if the first posture
+      // sample is a second and a half later - that gap is the timeline's「识别中」段.
+      openFocus(at: now())
     }
     setCountdown(remainingSeconds, anchoredAt: resumeAnchor, running: true)
     applyPresence(at: resumeAnchor)
@@ -210,7 +241,7 @@ struct PomodoroEngine {
   private mutating func abandon() -> [PomodoroEvent] {
     guard focusOpen else { return [] }
     let actual = elapsedFocusSeconds
-    let finished = close(outcome: .abandoned, at: lastSampleT ?? 0, focusedSeconds: actual)
+    let finished = close(outcome: .abandoned, at: now(), focusedSeconds: actual)
     // B3: the abandoned countdown is spent, not inherited — the next start runs a whole focus
     // instead of the tail of this one. That is the same idle focus a break parks in.
     parkIdleFocus()
@@ -224,7 +255,7 @@ struct PomodoroEngine {
     record.skippedBreak = true
     let skipped = phase
     var events: [PomodoroEvent] = [.breakSkipped(from: skipped)]
-    events += enterNextFocus(at: lastSampleT ?? 0)
+    events += enterNextFocus(at: now())
     return events
   }
 
@@ -258,7 +289,7 @@ struct PomodoroEngine {
 
   /// The command that restarts a countdown carries no time (a command is not a sample), so it is
   /// anchored on the last sample seen; before the first sample the sample clock is still at zero.
-  private var resumeAnchor: TimeInterval { lastSampleT ?? 0 }
+  private var resumeAnchor: TimeInterval { now() }
 
   private mutating func setCountdown(_ seconds: Double,
                                      anchoredAt t: TimeInterval?,
@@ -340,7 +371,7 @@ struct PomodoroEngine {
   }
 
   private mutating func openFocus(at t: TimeInterval) {
-    record = PomodoroRecord(startedAt: epoch(t),
+    record = PomodoroRecord(startedAt: t,
                             plannedSeconds: Double(settings.focusMinutes * 60),
                             focusedSeconds: 0,
                             pausedSeconds: 0,
@@ -352,7 +383,7 @@ struct PomodoroEngine {
   private mutating func close(outcome: PomodoroOutcome,
                               at t: TimeInterval,
                               focusedSeconds: Double) -> PomodoroRecord {
-    record.endedAt = epoch(t)
+    record.endedAt = t
     record.outcome = outcome
     record.focusedSeconds = focusedSeconds
     focusOpen = false
@@ -368,5 +399,7 @@ struct PomodoroEngine {
     return min(record.plannedSeconds, max(0, record.plannedSeconds - remainingSeconds))
   }
 
-  private func epoch(_ t: TimeInterval) -> Double { epochOrigin + t }
+  /// Record stamps are already epoch seconds: the engine's clock is the epoch clock, so there is
+  /// no origin to add.
+  private func epoch(_ t: TimeInterval) -> Double { t }
 }

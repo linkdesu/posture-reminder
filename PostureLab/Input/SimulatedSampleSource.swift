@@ -7,6 +7,11 @@ final class SimulatedSampleSource: SampleSource {
   private let scenario: Scenario
   private var timer: Timer?
   private var t: TimeInterval = 0
+  /// Wall time, in seconds after the clock restarts, during which the scripted camera stays silent.
+  /// Debug-only reproduction of a sensor that answers late: the timer and the timeline run, no
+  /// posture sample arrives, so the focus writes a real「识别中」段 instead of a synthetic one.
+  var warmupAfterRestart: TimeInterval = 0
+  private var warmupRemaining: TimeInterval = 0
 
   /// One tick of the source clock; the shared pomodoro clock keeps it in step after a restart.
   static let tickInterval: TimeInterval = 0.1
@@ -29,6 +34,7 @@ final class SimulatedSampleSource: SampleSource {
   /// timer tick is script time 0.
   func restartClock() {
     t = 0
+    warmupRemaining = warmupAfterRestart
   }
 
   func stop() {
@@ -39,6 +45,11 @@ final class SimulatedSampleSource: SampleSource {
   /// Advances the nominal clock rather than reading the wall clock, so jitter in the
   /// timer never changes the timestamps the engine sees.
   private func emitFrame() {
+    if warmupRemaining > 0 {
+      warmupRemaining -= Self.tickInterval
+      t += Self.tickInterval
+      return
+    }
     onSample?(scenario.sample(at: t))
     t += Self.tickInterval
   }

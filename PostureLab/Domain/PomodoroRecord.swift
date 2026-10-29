@@ -17,6 +17,13 @@ struct PostureSegment: Equatable, Codable {
     self.start = start
     self.end = end
   }
+
+  /// The「识别中」band (v0.6): from the 开始 tap to the focus's first posture sample. It is a segment
+  /// of its own, never part of the first posture, and the aggregation neither scores it nor counts it
+  /// in the good-posture ratio.
+  static let detectingKind = "detecting"
+  /// The pause band (B2): wall time the focus did not count. Not a posture, and not a `state` value.
+  static let pausedKind = "paused"
 }
 
 enum PomodoroOutcome: String, Codable, Equatable {

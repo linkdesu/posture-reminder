@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
+		07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */; };
 		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
 		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
 		18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */; };
@@ -19,6 +20,7 @@
 		3971BFF07794B03E55994104 /* PomodoroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC66FD4FCBB2227E58111334 /* PomodoroView.swift */; };
 		3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */; };
 		3C23B092FFC5BA5A8E7DCFD1 /* DepthImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB57EB7282F576BBD9E46A21 /* DepthImage.swift */; };
+		3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */; };
 		3E296ABD3EFEFE6C5612823A /* DepthCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80056FD012C04927DA0997E /* DepthCloud.swift */; };
 		3F794173788051EE1734E791 /* PostureSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43C4382384E519C27CCCA4F /* PostureSample.swift */; };
 		3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */; };
@@ -128,9 +130,11 @@
 		6DECA819287056EFAF59B08B /* BodyCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCloud.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
 		811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsStore.swift; sourceTree = "<group>"; };
+		83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimelineTests.swift; sourceTree = "<group>"; };
 		86098F7CD1ECFE6933A9E192 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		86185D03144F3F6CCC9FEC18 /* SimulatedSampleSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatedSampleSource.swift; sourceTree = "<group>"; };
 		865D8839C4C8F659BB29252A /* SessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionController.swift; sourceTree = "<group>"; };
+		8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimeline.swift; sourceTree = "<group>"; };
 		8D89124CB90CB32D31F1777E /* PomodoroCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroCopy.swift; sourceTree = "<group>"; };
 		922487CB54BBCDE0E210C1FC /* BodyPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyPoint.swift; sourceTree = "<group>"; };
 		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
@@ -238,6 +242,7 @@
 			isa = PBXGroup;
 			children = (
 				0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */,
+				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
 				CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */,
 				4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */,
@@ -284,6 +289,7 @@
 				DB57EB7282F576BBD9E46A21 /* DepthImage.swift */,
 				DD7085F1683F29E97C684D94 /* DepthJointSource.swift */,
 				D17AA01C83295B94B30C2140 /* DepthSegmentation.swift */,
+				8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */,
 				5A6C1988FCE0B1B70AE84A94 /* JointSource.swift */,
 				E34CF188A7BF03E96664807B /* MonitoringEngine.swift */,
 				E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */,
@@ -471,6 +477,7 @@
 				B8734437B124F522989698C2 /* DepthJointSource.swift in Sources */,
 				CE36B3AD08D569B2197162CE /* DepthSegmentation.swift in Sources */,
 				20BCEFA0C1E130818EDA47EE /* FileDebugLogger.swift in Sources */,
+				3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */,
 				8C65F76A4BF512D746EDEFD1 /* JointSource.swift in Sources */,
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
@@ -525,6 +532,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */,
+				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,
 				AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */,
 				C963277798D4975B291D662B /* PomodoroHistoryTests.swift in Sources */,

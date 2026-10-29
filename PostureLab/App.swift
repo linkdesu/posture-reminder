@@ -87,6 +87,12 @@ struct PostureLabApp: App {
     // `-holdStart 1`: a debug-only way to keep a scripted run parked, so the screenshot before
     // 开始专注 shows the point cloud and offers no end button.
     controller.debugHoldStart = PostureLabApp.boolOverride("holdStart", from: defaults) ?? false
+    // `-firstSampleDelay 1.4`: the scripted camera stays silent for that many seconds after 开始, so a
+    // run realises a late first sample and the「识别中」段 is measured, not merely asserted in a test.
+    if let raw = defaults.string(forKey: "firstSampleDelay"),
+       let delay = TimeInterval(raw), delay > 0 {
+      controller.debugFirstSampleDelay = delay
+    }
     #endif
 
     // The child's screen is the app's only root. The two parent pages are reached by launch argument
