@@ -4,14 +4,14 @@ import XCTest
 ///
 /// Three rules are checked here, each on the screen itself rather than on a model:
 /// - before 开始专注 there is no way to end a focus, and the point cloud is already live;
-/// - once a focus is started the end button is there and reads 休息; pressing it ends the focus
+/// - once a focus is started the end button is there and reads 离开; pressing it ends the focus
 ///   early, resets the countdown and stays in the focus phase (no break);
 /// - 开始专注 answers a tap anywhere on its capsule, not only on the word.
 final class PomodoroControlsUITests: XCTestCase {
 
   /// The label of the end-the-focus button, written out here because a UI test cannot import the
   /// app's `PomodoroCopy`: if the copy changes, this constant changes with it.
-  private static let endFocusLabel = "休息"
+  private static let endFocusLabel = "离开"
 
   func testParkedScreenHidesTheEndButtonAndStartsWithoutABreak() throws {
     let app = launchApp(PomodoroLaunch.parkedPreview(minutes: 5))
@@ -28,17 +28,17 @@ final class PomodoroControlsUITests: XCTestCase {
     XCTAssertTrue(app.first(.button, labelled: "暂停").waitForExistence(timeout: 10),
                   "开始专注 did not start the focus")
     let end = app.first(.button, labelled: Self.endFocusLabel)
-    XCTAssertTrue(end.waitForExistence(timeout: 5), "a started focus has no 休息 button")
+    XCTAssertTrue(end.waitForExistence(timeout: 5), "a started focus has no 离开 button")
     XCTAssertTrue(wait(upTo: 10, for: { (self.countdownSeconds(in: app) ?? 300) < 300 }),
                   "the countdown never moved after 开始专注")
 
     end.tap()
-    // Ending early is not a completion and not a break: the screen is back at a parked focus with
+    // 离开 ends the round early: not a completion and not a break. the screen is back at a parked focus with
     // its full length, and the break controls never appear.
     XCTAssertTrue(app.first(.button, labelled: "开始专注").waitForExistence(timeout: 10),
-                  "休息 left no parked focus to start again")
+                  "离开 left no parked focus to start again")
     XCTAssertFalse(app.first(.button, labelled: Self.endFocusLabel).exists,
-                   "休息 stayed on screen after the focus ended")
+                   "离开 stayed on screen after the focus ended")
     XCTAssertFalse(app.first(.button, labelled: "跳过休息").exists,
                    "ending a focus early entered the break phase")
     let reset = try XCTUnwrap(countdownSeconds(in: app), "the countdown left the screen")

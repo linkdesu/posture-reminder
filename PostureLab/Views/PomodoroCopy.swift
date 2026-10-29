@@ -5,8 +5,8 @@ import Foundation
 ///
 /// The end-the-focus button used to read 放弃; the outcome it produces is still `abandoned` in the
 /// log, the history and `GLOSSARY.md`. Only the label the child sees changed, and it changed to a
-/// word the child uses for stopping early on purpose: 休息.
+/// word the child uses for leaving a focus early on purpose: 离开.
 enum PomodoroCopy {
   /// The secondary button that ends a started focus early (the `abandon` command).
-  static let endFocusEarly = "休息"
+  static let endFocusEarly = "离开"
 }

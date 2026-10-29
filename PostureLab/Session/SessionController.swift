@@ -15,7 +15,7 @@ struct PomodoroSnapshot: Equatable {
   /// Pomodoros completed today, off the persisted history.
   var completedToday: Int
   /// Whether this focus has been started and not closed yet. It is what separates a parked focus
-  /// (before 开始专注, or after 休息 reset it) from one in flight: only a started focus has
+  /// (before 开始专注, or after 离开 reset it) from one in flight: only a started focus has
   /// something to end early.
   var focusStarted: Bool
 }
@@ -292,7 +292,7 @@ final class SessionController: ObservableObject {
   private func autoStartParkedFocusIfSimulating() {
     #if DEBUG
     // The preview-evidence run keeps the first focus parked on purpose, so 开始专注 and the absence
-    // of 休息 can both be photographed.
+    // of 离开 can both be photographed.
     guard !debugHoldStart else { return }
     #endif
     guard isSimulating, !pomodoroRunFinished, let pomodoro else { return }
