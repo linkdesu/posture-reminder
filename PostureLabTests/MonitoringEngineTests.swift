@@ -193,7 +193,8 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertEqual(paused.count, 1)
     XCTAssertEqual(try XCTUnwrap(paused.first), 5.0, accuracy: 0.2)
     XCTAssertEqual(resumed.count, 1)
-    XCTAssertEqual(try XCTUnwrap(resumed.first), 12.0, accuracy: 0.2)
+    // 0.6.8 (17)：恢复需要连续在场 1 秒（去抖），所以 resumed 比回到画面晚约 1 秒。
+    XCTAssertEqual(try XCTUnwrap(resumed.first), 13.0, accuracy: 0.2)
     XCTAssertEqual(reminders(in: withAbsence.events).count, 0)
     XCTAssertFalse(withAbsence.engine.isPaused)
     XCTAssertEqual(withAbsence.engine.summary.totalSeconds, 4.0, accuracy: 0.05)
@@ -730,7 +731,8 @@ final class MonitoringEngineTests: XCTestCase {
     let fiveSecondGentle = try XCTUnwrap(fiveSecondFired.first)
     XCTAssertEqual(fiveSecondGentle.kind, .chinRest)
     XCTAssertEqual(fiveSecondGentle.level, .gentle)
-    XCTAssertEqual(fiveSecondGentle.t, 64.1, accuracy: 0.15)
+    // 去抖：恢复晚 1 秒，累计墙随之整体后移。
+    XCTAssertEqual(fiveSecondGentle.t, 65.2, accuracy: 0.2)
     // The accumulator only ever moves one tick at a time, so level 1 reads the 5 s wall plus the
     // tick that carries it over. A clock that back-filled the 57 s pause would report 62.0 s here
     // — the value in the tens this bound rejects — so the bound, not a literal, is what proves the
@@ -806,7 +808,7 @@ final class MonitoringEngineTests: XCTestCase {
     let gentle = try XCTUnwrap(fired.first)
     XCTAssertEqual(gentle.kind, .chinRest)
     XCTAssertEqual(gentle.level, .gentle)
-    XCTAssertEqual(gentle.t, 66.1, accuracy: 0.15)
+    XCTAssertEqual(gentle.t, 67.0, accuracy: 0.2)
     XCTAssertEqual(gentle.breachSeconds, 5.0, accuracy: 0.06)
     XCTAssertGreaterThan(gentle.t, 65.1)
     XCTAssertEqual(engine.episodeCount(for: .chinRest), 1)
@@ -848,7 +850,8 @@ final class MonitoringEngineTests: XCTestCase {
     XCTAssertNotEqual(engine.status, .good)
     XCTAssertTrue(events.contains { event in
       guard case .statusChanged(let to, let t, _, _) = event else { return false }
-      return to == .posture(.chinRest) && abs(t - 65.1) < 0.05
+      // 恢复去抖 1 秒：状态在 66.1 才翻回体态。
+      return to == .posture(.chinRest) && abs(t - 66.1) < 0.15
     })
   }
 
