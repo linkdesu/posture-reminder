@@ -56,6 +56,8 @@
 - `depth_nan`：NaN 读数占比（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；`depth_valid` 为 0 且 `depth_nan` 为 1 就是整帧 NaN——0.6.8 (15) 关掉深度滤波时真机每次都是这个样子，分割拿不到输入、点云恒为 0。排查「点云为什么是空的」先看这两列：`depth_valid≈1` = 没人，`depth_nan≈1` = 深度图不可用。
 - `nearest_m`：这一帧最近的深度读数，米；没有读数时为 `null`。
 - `degraded` / `cloud_emitted`：这一帧是否处于发热降级、点云是否推给了画布（降级时隔帧推）。
+- `depth_gap_ms` / `arrival_gap_ms`：与上一帧深度的呈现间隔、与上一帧的回调到达间隔（毫秒）。这两列是「深度链路本身有没有被挤」的第一手证据。
+- `vision_ms` / `vision_age_ms`：最近一次 Vision 推理耗时、那个结果距这一帧的年龄（毫秒）。Vision 与深度在两条串行队列上（`depthQueue` / `videoQueue`），若 Vision 挤占 CPU，会先看到 `vision_ms` 升高、`vision_age_ms` 变大、`depth_gap_ms` 跟着变成 66 ms。
 - `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。
 - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
 
@@ -205,6 +207,7 @@ xcrun devicectl device copy from \
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
 | `segment` | 一个专注内的非姿态时间轴段关闭：`detecting`（从孩子点击「开始」到该专注**第一个姿态样本**到达）或 `no_data`（v0.6.1：首样本之后样本流中断，直到下一个样本到达或专注结束）。这段墙钟时间不并入任何姿态段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的段不写行。只有 `detecting` 与 `no_data` 段产生这个事件；`good`、各体态、`no_person` 与 `paused` 段不写。 | `segment_kind`（`detecting` 或 `no_data`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
 | `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
+| `test_segment` | 仅 DEBUG 的分段测试模式（启动参数 `-segmentTest 1`）：语音依次提示「坐直 / 歪肩 / 低头」，每段 20 秒循环；每次切换写一行，`message` 是分段名，`ts` 就是切换的毫秒时刻。生产构建没有这个模式。 | `message` |
 | `log_header` | 日志第一行：构建身份（`message` = `0.6.8 (16) <commit>`）。键集仍是 45 个，身份放在 `message` 里，QA 的「每行同键集」契约不受影响。 | `message` |
 | `calibration_incomplete` | 校准没有完成（v0.6.8 (16)）：开头 3 秒里有效横滚样本少于 10 个。判定沿用标准直立基线，这一行用 `message` 写原因，绝不把「没校准」写成「校准过了」。 | `message` |
 | `thermal` | 发热降级开始或结束（v0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz，恢复时再写一行结束。降级期间 `thermal_state` 会同时在每行盖上（采样见下文），但只有翻转的那一行带 `thermal_degraded`。 | `thermal_degraded` |

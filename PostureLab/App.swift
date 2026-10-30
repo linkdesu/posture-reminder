@@ -92,6 +92,8 @@ struct PostureLabApp: App {
     // `-holdStart 1`: a debug-only way to keep a scripted run parked, so the screenshot before
     // 开始专注 shows the point cloud and offers no end button.
     controller.debugHoldStart = PostureLabApp.boolOverride("holdStart", from: defaults) ?? false
+    // `-segmentTest 1`: 分段测试模式（坐直 / 歪肩 / 低头 各 20 秒循环，切换写一行 test_segment）。
+    controller.debugSegmentTest = PostureLabApp.boolOverride("segmentTest", from: defaults) ?? false
     // `-firstSampleDelay 1.4`: the scripted camera stays silent for that many seconds after 开始, so a
     // run realises a late first sample and the「识别中」段 is measured, not merely asserted in a test.
     if let raw = defaults.string(forKey: "firstSampleDelay"),

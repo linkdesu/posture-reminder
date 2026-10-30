@@ -176,6 +176,14 @@ final class SessionController: ObservableObject {
   private var pomodoroCompletedTodayCount = 0
 
   #if DEBUG
+  /// `-segmentTest 1`：仅 DEBUG 的分段测试模式——语音依次提示「坐直 / 歪肩 / 低头」，每段 20 秒
+  /// 循环，切换时写一行 `test_segment`（`ts` 是毫秒时刻），供真机按姿势切段复盘。
+  var debugSegmentTest = false
+  private var segmentTestTimer: Timer?
+  private var segmentTestIndex = 0
+  private static let segmentTestPhases: [(name: String, kind: PostureKind)] = [
+    ("坐直", .near), ("歪肩", .shoulderTilt), ("低头", .headDown),
+  ]
   /// The timer's proof hook, armed from `-autopause` in `App.swift` before the first frame: the plan
   /// for this run, whether its pause has gone out yet, and whether the run has used it up.
   var debugAutoPause: DebugAutoPause?
@@ -244,6 +252,10 @@ final class SessionController: ObservableObject {
       self?.applyThermal(state: state, battery: battery, degraded: degraded)
     }
     thermal.start()
+    #if DEBUG
+    // 分段测试模式（`-segmentTest 1`）：启动即开始，与专注无关。
+    startSegmentTestIfNeeded()
+    #endif
     refreshPomodoroSnapshot()
     // The child's screen is the root, so the depth sensor starts with it: the point cloud and the
     // silhouette are the screen's ground, not something a focus has to turn on.
@@ -831,6 +843,32 @@ final class SessionController: ObservableObject {
     thermalDegraded = degraded
     logger.log(.thermal(degraded: degraded))
   }
+
+  #if DEBUG
+  /// 分段测试：启动时立刻进入第一段，之后每 20 秒切下一段并循环。语音走正常的二级播报路径，
+  /// 不写 `speech_played` 之外的额外状态，也不影响判定。
+  private func startSegmentTestIfNeeded() {
+    guard debugSegmentTest, segmentTestTimer == nil else { return }
+    let timer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.advanceSegmentTest() }
+    }
+    segmentTestTimer = timer
+    advanceSegmentTest()
+  }
+
+  private func advanceSegmentTest() {
+    let phase = Self.segmentTestPhases[segmentTestIndex % Self.segmentTestPhases.count]
+    segmentTestIndex += 1
+    logger.log(.testSegment(phase: phase.name))
+    player.play(kind: phase.kind, level: .voice)
+  }
+
+  private func stopSegmentTest() {
+    segmentTestTimer?.invalidate()
+    segmentTestTimer = nil
+    segmentTestIndex = 0
+  }
+  #endif
 
   private func startPomodoroInput() {
     // The depth sensor is the child's screen, not the focus's: it runs before the first 开始 so the
