@@ -61,7 +61,11 @@ def perf_rows(seconds: int, *, degraded_seconds: set[int] | None = None) -> list
         rows.append({"t": T0 + second * 1000, "frames": 30, "fps": 30.0,
                      "cloud_frames": 15 if degraded else 30,
                      "thermal_state": "serious" if degraded else "nominal",
-                     "battery_level": 0.8, "degraded": degraded, "window_s": 1.0})
+                     "battery_level": 0.8, "degraded": degraded, "window_s": 1.0,
+                     "sanity_eye_below_mouth": 0, "sanity_shoulder_above_ear": 0,
+                     "sanity_points_without_person": 0,
+                     "serious_seconds": 150 if degraded else 0,
+                     "degraded_seconds": 150 if degraded else 0})
     return rows
 
 
@@ -185,6 +189,21 @@ class DeviceLogsTests(unittest.TestCase):
         r = self.run_device_logs(**self.fixtures(joints=joints))
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("INSUFFICIENT_DATA shoulders-available-ratio", r.stdout)
+
+    def test_nobody_in_frame_is_insufficient_for_the_shoulder_ratio(self):
+        # build 16 的反例：无人会话里 good 窗口有 47 帧、双肩 0/47，被判 FAIL。现在必须是 INSUFFICIENT_DATA。
+        joints = joints_all(visible=False, detected=False)
+        r = self.run_device_logs(**self.fixtures(joints=joints))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA shoulders-available-ratio", r.stdout)
+
+    def test_eye_below_mouth_fails_the_figure_sanity_rule(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row["sanity_eye_below_mouth"] = 9
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL figure-sanity", r.stdout)
 
     def test_degraded_time_under_the_share_passes_when_the_session_is_long_enough(self):
         r = self.run_device_logs(**self.fixtures(
