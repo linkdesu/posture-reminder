@@ -201,9 +201,14 @@ tmp/verify/<run-id>/
 |---|---|---|
 | `upper-body-only` | `joints-*.jsonl` 的 `joints` 键集合与可见帧数 | ⊆ 鼻/双眼/双耳/颈/双肩；出现髋、root、肘、腕即 FAIL |
 | `shoulders-not-on-head` | `shoulders_invalidated` | 有可见双肩的帧里，作废帧数 = 0 |
-| `shoulders-available-ratio` | 未过期关节帧按 `status_changed` 窗口分组 | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50% |
+| `shoulders-available-ratio` | 未过期关节帧按窗口分组：坐直档优先用 DEBUG 分段测试模式（`-segmentTest 1`）写入的 `test_segment` 段标记当窗口，没有段标记时退回 `status_changed` 的 `good` 窗口并在 detail 里注明；歪头、低头两档仍按 `status_changed` | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50% |
 | `cloud-smooth` | `cloud-*.jsonl` 里未降级帧的相邻间隔，以及**有点云**（`points > 0`）的帧点数是否固定 | p95 ≤ 40 ms、最长 ≤ 200 ms、有点云的帧点数固定且 > 0（点数具体是多少不判，`CLOUD_POINT_BUDGET` 不再是判据；`points == 0` 的帧不参与固定性判断） |
 | `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
+
+坐直窗口的段标记来自真机上的 DEBUG 分段测试模式：`-segmentTest 1` 每 20 秒切一段（坐直 → 歪肩 →
+低头 → 离开）并在切换时写一行 `test_segment`（`message` 是段名，`ts` 是 epoch 毫秒），判定拿
+「坐直」这一段的起止当 `good` 档窗口。没有这个启动参数的会话没有段标记，坐直档退回
+`status_changed` 的 `good` 窗口，detail 里会写明这一档用的是段标记还是 `status_changed`。
 
 ### 数据充分性门槛（INSUFFICIENT_DATA 的判据）
 
@@ -221,9 +226,10 @@ tmp/verify/<run-id>/
 会话短于 600 秒、有人在画面的时段里可见关节帧过少。`cloud-smooth` 只读 `cloud-*.jsonl`：这个文件
 不存在就直接判数据不足（perf 的每秒汇总是趋势，不是逐帧证据）。
 
-自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（15 例，
+自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（17 例，
 覆盖三个状态：全合格、髋关节、肩在鼻上、间隔超限、降级 25%、没人入镜、点数全 0、短会话、
-可见帧过少、降级 10%、点数固定但不是 600、点数在帧之间变化、有点云帧过少）。
+可见帧过少、降级 10%、点数固定但不是 600、点数在帧之间变化、有点云帧过少、坐直段标记当窗口、
+没有段标记时退回 `status_changed`）。
 
 ## 验收结论模板
 

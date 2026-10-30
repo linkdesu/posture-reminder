@@ -1663,8 +1663,46 @@ def shoulder_windows(sessions: list[list[dict]]) -> list[dict]:
     return windows
 
 
-def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, str]:
-    """PASS / FAIL / INSUFFICIENT_DATA。每一档都需要足够的未过期帧，三档都没有就判数据不足。"""
+# DEBUG 分段测试模式（`-segmentTest 1`，见 PostureLab/Session/SessionController.swift 的
+# `segmentTestPhases`）写进 session 日志的段名：坐直 → 歪肩 → 低头 → 离开，每 20 秒切一段并循环。
+SEGMENT_TEST_STRAIGHT = "坐直"
+
+
+def segment_test_windows(sessions: list[list[dict]]) -> list[dict]:
+    """DEBUG 分段测试模式写入的 `test_segment` 段标记：从每个标记的 `ts` 到下一个标记的 `ts`。
+
+    最后一段的 `end` 取该 session 最后一个有效 `ts`。没有段标记（生产构建、或没开
+    `-segmentTest 1`）时返回空列表，调用方退回 `status_changed` 窗口。
+    """
+    windows: list[dict] = []
+    for rows in sessions:
+        marks: list[dict] = []
+        last_ts = None
+        for row in rows:
+            ts = row.get("ts")
+            if isinstance(ts, (int, float)):
+                last_ts = ts
+            if row.get("event") != "test_segment":
+                continue
+            name = row.get("message")
+            if not isinstance(ts, (int, float)) or not isinstance(name, str) or not name:
+                continue
+            marks.append({"name": name, "start": ts})
+        for index, mark in enumerate(marks):
+            end = marks[index + 1]["start"] if index + 1 < len(marks) else last_ts
+            windows.append({"name": mark["name"], "start": mark["start"],
+                            "end": end if isinstance(end, (int, float)) else mark["start"]})
+    return windows
+
+
+def judge_shoulder_ratio(joints: list[dict], windows: list[dict],
+                         segments: list[dict] | None = None) -> tuple[str, str]:
+    """PASS / FAIL / INSUFFICIENT_DATA。每一档都需要足够的未过期帧，三档都没有就判数据不足。
+
+    「坐直」（`good`）这一档优先用 DEBUG 分段测试模式的 `test_segment` 段标记当窗口：人工摆姿势
+    时 `status_changed` 未必及时翻成 `good`（提示音响起后人才会摆好），段标记才是「这一段是坐直」
+    的权威时刻。没有段标记时退回 `status_changed` 的 `good` 窗口，并在 detail 里注明。
+    """
     if not joints:
         return INSUFFICIENT, "没有 joints-*.jsonl，无法判双肩可用帧占比"
     usable = [row for row in joints if row.get("stale") is not True]
@@ -1675,22 +1713,30 @@ def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, 
         return INSUFFICIENT, (f"整轮只有 {len(visible_joint_frames(joints))} 帧可见关节"
                               f"（要求 ≥{MIN_VISIBLE_JOINT_FRAMES}），双肩占比没有证据")
 
+    straight = [w for w in (segments or []) if w.get("name") == SEGMENT_TEST_STRAIGHT]
     details: list[str] = []
     failed = False
     insufficient = False
     measured = 0
     for state, limit in SHOULDER_RATIO_LIMITS.items():
-        spans = [w for w in windows if w.get("state") == state]
+        source_note = ""
+        if state == "good" and straight:
+            spans = straight
+            source_note = f"；坐直窗口来自 test_segment 段标记（{len(straight)} 段）"
+        else:
+            spans = [w for w in windows if w.get("state") == state]
+            if state == "good":
+                source_note = "；坐直窗口沿用 status_changed（本轮没有 test_segment 段标记）"
         if not spans:
             insufficient = True
-            details.append(f"{state}: 本轮没有该状态时段（数据不足）")
+            details.append(f"{state}: 本轮没有该状态时段（数据不足）" + source_note)
             continue
         in_window = [row for row in usable
                      if any(w["start"] <= (row.get("t") or 0) <= (w["end"] or w["start"]) for w in spans)]
         if len(in_window) < MIN_VISIBLE_JOINT_FRAMES:
             insufficient = True
             details.append(f"{state}: 窗口内只有 {len(in_window)} 个未过期关节帧"
-                           f"（要求 ≥{MIN_VISIBLE_JOINT_FRAMES}，数据不足）")
+                           f"（要求 ≥{MIN_VISIBLE_JOINT_FRAMES}，数据不足）" + source_note)
             continue
         measured += 1
         available = sum(1 for row in in_window if row.get("shoulders_available") is True)
@@ -1698,7 +1744,7 @@ def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, 
         ok = ratio >= limit
         failed = failed or not ok
         details.append(f"{state}: {ratio:.1%}（{available}/{len(in_window)}，要求 ≥{limit:.0%}）"
-                       + ("" if ok else " ✗"))
+                       + ("" if ok else " ✗") + source_note)
     summary = "；".join(details) if details else "没有可判的状态窗口"
     if failed:
         return FAIL, summary
@@ -1893,7 +1939,8 @@ def command_device_logs(args) -> int:
         "upper-body-only": judge_upper_body_only(logs["joints"]),
         "shoulders-not-on-head": judge_shoulders_not_on_head(logs["joints"]),
         "shoulders-available-ratio": judge_shoulder_ratio(logs["joints"],
-                                                          shoulder_windows(logs["sessions"])),
+                                                          shoulder_windows(logs["sessions"]),
+                                                          segment_test_windows(logs["sessions"])),
         "cloud-smooth": judge_cloud_smooth(logs["cloud"]),
         "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
                                           logs["perf"], args.focus_seconds, seconds),
