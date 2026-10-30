@@ -89,6 +89,23 @@ def joints_all(seconds: int = DURATION, **kwargs) -> list[dict]:
     return [joint_row(T0 + index * 100, **kwargs) for index in range(seconds * 10)]
 
 
+def segment_rows(marks: list[tuple[int, str]]) -> list[dict]:
+    """DEBUG 分段测试模式（`-segmentTest 1`）写的段标记：`ts` 是 epoch 毫秒，`message` 是段名。"""
+    return [{"ts": T0 + second * 1000, "event": "test_segment", "message": name}
+            for second, name in marks]
+
+
+def joints_visible_in(seconds_windows: list[tuple[int, int]]) -> list[dict]:
+    """只在给定秒区间里关节可见的 10 Hz 关节流：用来把「段标记窗口」与「status_changed 窗口」
+    做成两个不同的分母。"""
+    rows = []
+    for index in range(DURATION * 10):
+        second = index / 10
+        visible = any(start <= second < end for start, end in seconds_windows)
+        rows.append(joint_row(T0 + index * 100, visible=visible))
+    return rows
+
+
 class DeviceLogsTests(unittest.TestCase):
     def run_device_logs(self, *, joints, sessions, perf, frames,
                         focus_seconds=DURATION):
@@ -237,6 +254,29 @@ class DeviceLogsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("INSUFFICIENT_DATA cloud-smooth", r.stdout)
         self.assertIn("有点云", r.stdout)
+
+    # --- shoulders-available-ratio：坐直窗口来自 test_segment 段标记 --------
+
+    # 段标记：300 s 起坐直 20 秒、320 起歪肩、340 起低头、360 起离开。
+    MARKS = [(300, "坐直"), (320, "歪肩"), (340, "低头"), (360, "离开")]
+    # 关节只在 300–320（坐直段）与两个体态窗口里可见：status_changed 的 good 窗口被这些空白帧
+    # 拉低到几十分之一，段标记窗口是 100%。
+    VISIBLE_ZONES = [(300, 320), (100, 130), (200, 230)]
+
+    def test_the_straight_segment_marker_is_the_window_for_the_good_state(self):
+        r = self.run_device_logs(**self.fixtures(
+            joints=joints_visible_in(self.VISIBLE_ZONES),
+            sessions=session_rows() + segment_rows(self.MARKS)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PASS shoulders-available-ratio", r.stdout)
+        self.assertIn("坐直窗口来自 test_segment 段标记", r.stdout)
+
+    def test_without_a_segment_marker_the_status_changed_window_still_applies(self):
+        r = self.run_device_logs(**self.fixtures(
+            joints=joints_visible_in(self.VISIBLE_ZONES)))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("FAIL shoulders-available-ratio", r.stdout)
+        self.assertIn("坐直窗口沿用 status_changed", r.stdout)
 
 
 if __name__ == "__main__":
