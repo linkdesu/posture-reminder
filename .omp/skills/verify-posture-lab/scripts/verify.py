@@ -1720,6 +1720,44 @@ def cloud_gaps_ms(frames: list[dict]) -> tuple[float, float, int]:
     return p95, gaps[-1], len(stamps)
 
 
+# 人形健全性：有人入镜时，眼睛低于嘴 / 双肩高于耳朵的累计帧数上限。
+FIGURE_SANITY_LIMIT = 5
+
+
+def judge_figure_sanity(perf: list[dict], detected: int) -> tuple[str, str]:
+    """人形健全性：读 perf 最后一行的累计计数。没人入镜时没有可判对象 → INSUFFICIENT_DATA。"""
+    if not perf:
+        return INSUFFICIENT, "没有 perf-*.jsonl"
+    last = perf[-1]
+    keys = ("sanity_eye_below_mouth", "sanity_shoulder_above_ear", "sanity_points_without_person")
+    if any(key not in last for key in keys):
+        return INSUFFICIENT, "perf 里没有健全性计数（0.6.8 (17) 起才有）"
+    eye_below = last.get("sanity_eye_below_mouth") or 0
+    shoulder_above = last.get("sanity_shoulder_above_ear") or 0
+    points_without = last.get("sanity_points_without_person") or 0
+    detail = (f"眼睛低于嘴 {eye_below} 帧、双肩高于耳 {shoulder_above} 帧、"
+              f"无人在场却画点 {points_without} 帧（上限 {FIGURE_SANITY_LIMIT}）")
+    if detected < MIN_DETECTED_FRAMES:
+        return INSUFFICIENT, detail + "；本轮没人入镜，没有可判对象"
+    if max(eye_below, shoulder_above, points_without) > FIGURE_SANITY_LIMIT:
+        return FAIL, detail
+    return PASS, detail
+
+
+def judge_thermal(perf: list[dict], seconds: float) -> tuple[str, str]:
+    """发热：如实记录 serious 及以上秒数与降级节流秒数（不设门槛，只作证据）。"""
+    if not perf:
+        return INSUFFICIENT, "没有 perf-*.jsonl"
+    last = perf[-1]
+    if "serious_seconds" not in last or "degraded_seconds" not in last:
+        return INSUFFICIENT, "perf 里没有发热秒数（0.6.8 (17) 起才有）"
+    serious = last.get("serious_seconds") or 0
+    degraded = last.get("degraded_seconds") or 0
+    share = serious / seconds if seconds > 0 else 0
+    return PASS, (f"serious ≥ {serious} 秒、降级节流 {degraded} 秒；"
+                  f"会话 {seconds:.0f} 秒，serious 占 {share:.0%}（仅记录，不设门槛）")
+
+
 def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
     if not frames:
         return INSUFFICIENT, "没有 cloud-*.jsonl（0.6.8 (15) 起才有逐帧原始记录）"
@@ -1835,6 +1873,7 @@ def command_device_logs(args) -> int:
     detected = sum(1 for row in logs["joints"] if row.get("detected") is True)
 
     checks = {
+        "figure-sanity": judge_figure_sanity(logs["perf"], detected),
         "upper-body-only": judge_upper_body_only(logs["joints"]),
         "shoulders-not-on-head": judge_shoulders_not_on_head(logs["joints"]),
         "shoulders-available-ratio": judge_shoulder_ratio(logs["joints"],
@@ -1842,6 +1881,7 @@ def command_device_logs(args) -> int:
         "cloud-smooth": judge_cloud_smooth(logs["cloud"]),
         "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
                                           logs["perf"], args.focus_seconds, seconds),
+        "thermal": judge_thermal(logs["perf"], seconds),
     }
     # 整轮没测到人：任何「没人体也成立」的规则都不能算通过，统一判数据不足。
     if detected < MIN_DETECTED_FRAMES:
@@ -1850,6 +1890,10 @@ def command_device_logs(args) -> int:
                                      "整轮没有可用的关节证据")
         checks["shoulders-not-on-head"] = (INSUFFICIENT,
                                            f"模型只在 {detected} 帧看到人，没有肩线可判")
+        # 0.6.8 (16) 的反例：无人会话里 good 窗口有 47 帧、双肩 0/47，被误判 FAIL。
+        # 没人入镜时「双肩可用占比」没有分母，只能判数据不足。
+        checks["shoulders-available-ratio"] = (INSUFFICIENT,
+                                               f"模型只在 {detected} 帧看到人，双肩占比没有可判的分母")
 
     statuses = [status for status, _detail in checks.values()]
     if FAIL in statuses:

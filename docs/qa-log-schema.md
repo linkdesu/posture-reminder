@@ -59,6 +59,8 @@
 - `depth_gap_ms` / `arrival_gap_ms`：与上一帧深度的呈现间隔、与上一帧的回调到达间隔（毫秒）。这两列是「深度链路本身有没有被挤」的第一手证据。
 - `vision_ms` / `vision_age_ms`：最近一次 Vision 推理耗时、那个结果距这一帧的年龄（毫秒）。Vision 与深度在两条串行队列上（`depthQueue` / `videoQueue`），若 Vision 挤占 CPU，会先看到 `vision_ms` 升高、`vision_age_ms` 变大、`depth_gap_ms` 跟着变成 66 ms。
 - `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。
+- `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17），每秒汇总文件里是**整场累计**）：人形健全性计数。
+- `serious_seconds` / `degraded_seconds`（v0.6.8 (17)，整场累计）：`serious` 及以上热状态的秒数与降级节流秒数；会话结束时另在标准输出打印 `[summary] serious=…s degraded=…s`。
 - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
 
 ### `joints-*.jsonl` 的键
@@ -77,7 +79,12 @@
 - `raw`：八个关节在门槛之前的原始分数；模型没报这个关节时为 `null`。它只用于看模型表现，不参与判定。
 - `joints`：过门槛后的置信度 `c` 与可见性 `v`；不可见关节 `c` 为 `null`。
 - `stale`：关节与深度帧的配对超过 150 ms 而过期，这一帧关节全部不可见。
+- `figure_points` / `figure_lines`（v0.6.8 (17)）：这一帧画出来的人形点（`name`、`x`、`y`、`c`）与连线名，连线只可能是 `ear_eye`、`eye_eye`、`eye_ear`、`neck_left_shoulder`、`neck_right_shoulder`。
+- `background_points` / `background_shift` / `outline_enabled`：背景深度轮廓的点数、按槽位配对的平均位移（归一化）、以及该设置当时是否开启。
+- `distance_valid` / `forward_valid`：距离与前倾这一帧有没有值（缺测时对应值为 null）。
 - `shoulders_available` / `shoulders_invalidated`：双肩是否可用、是否因为落在鼻点以上被整帧作废（真机要求作废帧数为 0）。
+
+`verify.py device-logs` 新增两条判定（v0.6.8 (17)）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 无人在场却画点的累计帧数超过 5 判 FAIL）与 `thermal`（如实记录 `serious_seconds` 与 `degraded_seconds`，不设门槛）；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。
 
 `0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
 
@@ -207,7 +214,7 @@ xcrun devicectl device copy from \
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
 | `segment` | 一个专注内的非姿态时间轴段关闭：`detecting`（从孩子点击「开始」到该专注**第一个姿态样本**到达）或 `no_data`（v0.6.1：首样本之后样本流中断，直到下一个样本到达或专注结束）。这段墙钟时间不并入任何姿态段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的段不写行。只有 `detecting` 与 `no_data` 段产生这个事件；`good`、各体态、`no_person` 与 `paused` 段不写。 | `segment_kind`（`detecting` 或 `no_data`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
 | `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
-| `test_segment` | 仅 DEBUG 的分段测试模式（启动参数 `-segmentTest 1`）：语音依次提示「坐直 / 歪肩 / 低头」，每段 20 秒循环；每次切换写一行，`message` 是分段名，`ts` 就是切换的毫秒时刻。生产构建没有这个模式。 | `message` |
+| `test_segment` | 仅 DEBUG 的分段测试模式（启动参数 `-segmentTest 1`）：语音依次提示「坐直 / 歪肩 / 低头 / 离开」，每段 20 秒循环（「离开」段用来抓无人暂停与恢复）；每次切换写一行，`message` 是分段名，`ts` 就是切换的毫秒时刻。生产构建没有这个模式。 | `message` |
 | `log_header` | 日志第一行：构建身份（`message` = `0.6.8 (16) <commit>`）。键集仍是 45 个，身份放在 `message` 里，QA 的「每行同键集」契约不受影响。 | `message` |
 | `calibration_incomplete` | 校准没有完成（v0.6.8 (16)）：开头 3 秒里有效横滚样本少于 10 个。判定沿用标准直立基线，这一行用 `message` 写原因，绝不把「没校准」写成「校准过了」。 | `message` |
 | `thermal` | 发热降级开始或结束（v0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz，恢复时再写一行结束。降级期间 `thermal_state` 会同时在每行盖上（采样见下文），但只有翻转的那一行带 `thermal_degraded`。 | `thermal_degraded` |
