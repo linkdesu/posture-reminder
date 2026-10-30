@@ -42,14 +42,16 @@
 
 ```json
 {"t":1793355411156,"frame_s":12.345,"arrival_s":12.351,"depth_ms":1.87,"segment_ms":8.80,
- "cloud_ms":0.20,"points":600,"mask_cells":1234,"depth_valid":0.970,"nearest_m":0.42,
- "degraded":false,"cloud_emitted":true,"render_ms":0.40,"render_latency_ms":21.50}
+ "cloud_ms":0.20,"points":600,"mask_cells":1234,"depth_valid":0.970,"depth_nan":0.000,
+ "nearest_m":0.42,"degraded":false,"cloud_emitted":true,"render_ms":0.40,
+ "render_latency_ms":21.50}
 ```
 
 - `t`：写行时的 epoch 毫秒（这一帧上屏后写，因此晚于帧自己的时刻）；`frame_s` 是深度帧自己的呈现时刻（会话时钟，秒），**判点云节奏用它**；`arrival_s` 是回调到达时刻，两者之差是排队时间。
 - `depth_ms` / `segment_ms` / `cloud_ms`：取深度、分割、点云三步各自的耗时。
 - `points`：这一帧实际生成的点数；`mask_cells`：分割遮罩格数（0 = 这一帧没分割出人体）。
-- `depth_valid`：有效深度读数占比（0...1）。**它接近 1 而 `mask_cells` 为 0，说明传感器正常、只是画面里没有比背景近 10 cm 的连通块；两者都接近 0 才是传感器问题。** 排查「点云为什么是空的」先看这两列。
+- `depth_valid`：有效深度读数占比（0...1）。**它接近 1 而 `mask_cells` 为 0，说明传感器正常、只是画面里没有比背景近 10 cm 的连通块。**
+- `depth_nan`：NaN 读数占比（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；`depth_valid` 为 0 且 `depth_nan` 为 1 就是整帧 NaN——0.6.8 (15) 关掉深度滤波时真机每次都是这个样子，分割拿不到输入、点云恒为 0。排查「点云为什么是空的」先看这两列：`depth_valid≈1` = 没人，`depth_nan≈1` = 深度图不可用。
 - `nearest_m`：这一帧最近的深度读数，米；没有读数时为 `null`。
 - `degraded` / `cloud_emitted`：这一帧是否处于发热降级、点云是否推给了画布（降级时隔帧推）。
 - `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**

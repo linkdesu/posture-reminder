@@ -48,6 +48,16 @@ struct DepthImage: Equatable {
     return Double(valid) / Double(metres.count)
   }
 
+  /// NaN 读数占整帧的比例（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；
+  /// 关掉深度滤波后整帧都可能是 NaN，那时分割拿不到任何输入、点云必然是空的（0.6.8 (15) 真机
+  /// 排查记录：depth_valid = 0、depth_nan = 1、点云 0 点）。
+  var nanFraction: Double {
+    guard !metres.isEmpty else { return 0 }
+    var nan = 0
+    for value in metres where !value.isFinite { nan += 1 }
+    return Double(nan) / Double(metres.count)
+  }
+
   /// The median of a rect's valid readings, or nil when the rect has none.
   func median(in rect: (minX: Int, minY: Int, maxX: Int, maxY: Int)) -> Float? {
     let minX = max(0, rect.minX)

@@ -92,6 +92,7 @@ final class DebugLogLineTests: XCTestCase {
                                  points: 600,
                                  maskCells: 1234,
                                  depthValid: 0.97,
+                                 depthNaN: 0.0,
                                  nearestM: 0.42,
                                  degraded: false,
                                  cloudEmitted: true)
@@ -106,6 +107,7 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["points"] as? Int, 600)
     XCTAssertEqual(values["mask_cells"] as? Int, 1234)
     XCTAssertEqual(values["depth_valid"] as? Double ?? 0, 0.97, accuracy: 0.001)
+    XCTAssertEqual(values["depth_nan"] as? Double ?? -1, 0, accuracy: 0.001)
     XCTAssertEqual(values["nearest_m"] as? Double ?? 0, 0.42, accuracy: 0.001)
     XCTAssertEqual(values["degraded"] as? Bool, false)
     XCTAssertEqual(values["cloud_emitted"] as? Bool, true)
@@ -117,7 +119,7 @@ final class DebugLogLineTests: XCTestCase {
     // 没有人体时画布暂停（TimelineView paused），这一帧从没上屏：两个渲染字段必须是 null，而不是 0。
     let record = FrameLog.Record(ts: 1, frameS: 1, arrivalS: 1.01, depthMS: 1, segmentMS: 1,
                                  cloudMS: 0, points: 0, maskCells: 0, depthValid: 0.99,
-                                 nearestM: 1.4, degraded: false, cloudEmitted: true)
+                                 depthNaN: 0.0, nearestM: 1.4, degraded: false, cloudEmitted: true)
     let values = try json(FrameLog.line(record, renderMS: nil, renderLatencyMS: nil))
     XCTAssertTrue(values["render_ms"] is NSNull)
     XCTAssertTrue(values["render_latency_ms"] is NSNull)
