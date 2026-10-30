@@ -1533,6 +1533,13 @@ DELIVERED_JOINTS = {
 # 068-2 的流畅门槛只按未降级时段判。
 CLOUD_P95_LIMIT_MS = 40.0
 CLOUD_MAX_GAP_MS = 200.0
+# issue #6 AC5 / AC7：抖动门槛，单位是屏宽比例（0.01 = 1%）。
+KEYPOINT_JITTER_LIMIT = 0.01
+CLOUD_JITTER_LIMIT = 0.02
+# issue #6 AC8：右肩可用帧低于这个占比时记录并上报（不改判定）。
+RIGHT_SHOULDER_LIMIT = 0.5
+# AC7 的「检测到脸时点云从不空白」至少要这么多帧检测到脸才算有证据（30 fps 下 1 秒）。
+MIN_FACE_FRAMES = 30
 # 068-1 的双肩可用帧占比下限。
 SHOULDER_RATIO_LIMITS = {"good": 0.80, "head_tilt": 0.50, "head_down": 0.50}
 # 068-3/068-4：10 分钟专注里降级时长不得超过 20%。
@@ -1839,6 +1846,90 @@ def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
     return PASS, detail
 
 
+def judge_jitter(perf: list[dict], key: str, limit: float, label: str) -> tuple[str, str]:
+    """滚动 10 秒 p95 的**最大值**与门槛比。
+
+    应用每秒写一行滚动 p95（静止帧才计入，见 `JitterMeter`）；取整场的最大值是最保守的读法：
+    只要这个上界不超过门槛，任何窗口的 p95 都不会超。没有一行带值（旧构建、或整轮孩子在动、
+    没有静止帧）就是数据不足——不能把「没有测量」读成「零抖动」。
+    """
+    values = [row[key] for row in perf if isinstance(row.get(key), (int, float))]
+    still_key = "keypoint_still_frames" if key == "keypoint_jitter_p95" else "cloud_still_frames"
+    still = max(((row.get(still_key) or 0) for row in perf), default=0)
+    if not values:
+        return INSUFFICIENT, (f"perf 里没有任何 {key}（0.6.8 (19) 起才有；也可能整轮没有静止帧），"
+                              f"{label}没有可判的测量")
+    worst = max(values)
+    detail = (f"滚动 10 秒 p95 最大值 {worst:.2%}（要求 ≤{limit:.0%}），"
+              f"{label}静止帧 {still} 帧、有值的秒 {len(values)} 行")
+    return (PASS if worst <= limit else FAIL), detail
+
+
+def judge_keypoint_jitter(perf: list[dict]) -> tuple[str, str]:
+    return judge_jitter(perf, "keypoint_jitter_p95", KEYPOINT_JITTER_LIMIT, "关键点")
+
+
+def judge_cloud_jitter(perf: list[dict]) -> tuple[str, str]:
+    return judge_jitter(perf, "cloud_jitter_p95", CLOUD_JITTER_LIMIT, "点云")
+
+
+def judge_cloud_not_blank(frames: list[dict]) -> tuple[str, str]:
+    """AC7：检测到脸时点云从不空白。
+
+    判的是两件事：这一帧深度有没有点云（`points > 0`），以及上屏后画面矩形里有没有画出点
+    （`visible_points > 0`）。只统计有脸的帧；上线后一帧空白就算失败——这正是 issue 要求
+    「任一项不达标则去掉点云」的那一项。
+    """
+    if not frames:
+        return INSUFFICIENT, "没有 cloud-*.jsonl，无法判点云是否空白"
+    faced = [row for row in frames if row.get("face_detected") is True]
+    if len(faced) < MIN_FACE_FRAMES:
+        return INSUFFICIENT, (f"只有 {len(faced)} 帧检测到脸（要求 ≥{MIN_FACE_FRAMES}），"
+                              "点云空白没有可判的对象")
+    empty = [row for row in faced
+             if isinstance(row.get("points"), (int, float)) and row["points"] <= 0]
+    onscreen = [row for row in faced if isinstance(row.get("visible_points"), (int, float))]
+    blank = [row for row in onscreen if row["visible_points"] <= 0]
+    detail = (f"检测到脸 {len(faced)} 帧：深度点云为空 {len(empty)} 帧、"
+              f"上屏后空白 {len(blank)}/{len(onscreen)} 帧（要求都是 0）")
+    if empty or blank:
+        return FAIL, detail
+    return PASS, detail
+
+
+def right_shoulder_report(perf: list[dict], joints: list[dict]) -> dict:
+    """AC8：右肩可用帧占比。只记录并上报，不当作通过/失败的门槛。
+
+    优先用 perf 最后一个累计值（`right_shoulder_frames` / `shoulder_frames`），没有时退回
+    joints 逐帧的可见性。低于 50% 时 `belowHalf` 为 true，调用方把这一条打印成 REPORT 并写进
+    verdict——issue 要的是「记录并上报」，不是改模型门槛。
+    """
+    right = total = 0
+    source = "perf"
+    if perf:
+        last = perf[-1]
+        right_value = last.get("right_shoulder_frames")
+        total_value = last.get("shoulder_frames")
+        if isinstance(right_value, (int, float)) and isinstance(total_value, (int, float)):
+            right, total = int(right_value), int(total_value)
+    if total <= 0:
+        source = "joints"
+        usable = [row for row in joints if row.get("stale") is not True]
+        total = len(usable)
+        right = sum(1 for row in usable
+                    if ((row.get("joints") or {}).get("rightShoulder") or {}).get("v") is True)
+    if total <= 0:
+        return {"measured": False, "source": source,
+                "detail": "没有可用的右肩帧（perf 与 joints 都没有数据），无法上报占比"}
+    share = right / total
+    below = share < RIGHT_SHOULDER_LIMIT
+    detail = (f"右肩可用 {right}/{total} 帧 = {share:.1%}（来源 {source}）"
+              + (f"，低于 {RIGHT_SHOULDER_LIMIT:.0%}，已记录在 perf 并上报" if below
+                 else f"，不低于 {RIGHT_SHOULDER_LIMIT:.0%}"))
+    return {"measured": True, "rightFrames": right, "frames": total,
+            "share": round(share, 4), "belowHalf": below, "source": source, "detail": detail}
+
+
 def degradation_periods(sessions: list[list[dict]], perf: list[dict]) -> list[dict]:
     """从 thermal 行配对切出降级时段；没有 thermal 行时用 perf 的 degraded 字段兜底。"""
     periods: list[dict] = []
@@ -1942,6 +2033,9 @@ def command_device_logs(args) -> int:
                                                           shoulder_windows(logs["sessions"]),
                                                           segment_test_windows(logs["sessions"])),
         "cloud-smooth": judge_cloud_smooth(logs["cloud"]),
+        "cloud-not-blank": judge_cloud_not_blank(logs["cloud"]),
+        "keypoint-jitter": judge_keypoint_jitter(logs["perf"]),
+        "cloud-jitter": judge_cloud_jitter(logs["perf"]),
         "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
                                           logs["perf"], args.focus_seconds, seconds),
         "thermal": judge_thermal(logs["perf"], seconds),
@@ -1966,16 +2060,20 @@ def command_device_logs(args) -> int:
     else:
         verdict_status, code = PASS, 0
 
+    shoulder_report = right_shoulder_report(logs["perf"], logs["joints"])
     verdict = {"when": now(), "runId": run_id, "device": device, "sourceDir": str(directory),
                "focusSeconds": args.focus_seconds, "sessionSeconds": round(seconds, 1),
                "detectedFrames": detected, "status": verdict_status,
                "degradationPeriods": degradation_periods(logs["sessions"], logs["perf"]),
+               "rightShoulder": shoulder_report,
                "checks": {name: {"status": status, "detail": detail}
                           for name, (status, detail) in checks.items()}}
     for name, (status, detail) in checks.items():
         print(f"{status} {name}: {detail}")
         check(state, f"device-logs:{name}", status == PASS,
               f"{status}：{detail}")
+    # AC8：右肩可用帧占比只记录并上报——不达标不等于这一轮失败，但必须出现在输出与 verdict 里。
+    print(f"REPORT right-shoulder: {shoulder_report['detail']}")
     write_json(out / "verdict.json", verdict)
     write_state(run_id, state)
     print(f"\n结论：{verdict_status}"
@@ -1984,8 +2082,8 @@ def command_device_logs(args) -> int:
              if verdict_status == INSUFFICIENT else "（有判定不达标）")
           + f"；证据 {out / 'verdict.json'}")
     # 模拟器测不到的项单列，提醒读者这几条只能真机验。
-    print("模拟器测不到的项：关节准确率（双肩可用帧占比、肩点在鼻上）、点云更新间隔、发热降级时长、"
-          "耗电、真实彩色帧隐私")
+    print("模拟器测不到的项：关节准确率（双肩可用帧占比、肩点在鼻上）、点云更新间隔、抖动 p95、"
+          "点云空白、发热降级时长、耗电、真实彩色帧隐私")
     return code
 
 

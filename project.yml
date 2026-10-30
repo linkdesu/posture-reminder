@@ -25,7 +25,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_NSCameraUsageDescription: "用于在本机识别坐姿，画面不会显示、保存或上传"
+        INFOPLIST_KEY_NSCameraUsageDescription: "画面只在手机内存里处理，用于识别坐姿；不保存、不上传，也不显示摄像头画面"
         INFOPLIST_KEY_CFBundleDisplayName: "PostureLab"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
