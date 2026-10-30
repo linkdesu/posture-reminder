@@ -6,6 +6,16 @@ options:
 targets:
   PostureLab:
     type: application
+    postBuildScripts:
+      # 把当前 commit 写进 bundle：日志第一行要能回答「这是哪个构建」。构建目录里跑 git 即可，
+      # 不在源文件里写死 hash。
+      - name: GitCommit
+        script: |
+          set -e
+          DEST="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GitCommit.txt"
+          git -C "${SRCROOT}" rev-parse --short HEAD > "${DEST}"
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitCommit.txt
     platform: iOS
     sources: [PostureLab]
     settings:
@@ -21,7 +31,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.6.8"
-        CURRENT_PROJECT_VERSION: "15"
+        CURRENT_PROJECT_VERSION: "16"
   PostureLabTests:
     type: bundle.unit-test
     platform: iOS

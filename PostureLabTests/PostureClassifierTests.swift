@@ -64,7 +64,7 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertEqual(uprightBaseline.pitchDeg, 0.0, accuracy: 0.0001)
     XCTAssertEqual(uprightBaseline.rollDeg, 0.0, accuracy: 0.0001)
     XCTAssertEqual(uprightBaseline.shoulderTiltDeg, 0.0, accuracy: 0.0001)
-    XCTAssertEqual(uprightBaseline.headHeight, 0.30, accuracy: 0.0001)
+    XCTAssertEqual(uprightBaseline.headHeight, PostureBaseline.uprightHeadHeight, accuracy: 0.0001)
     XCTAssertEqual(try XCTUnwrap(uprightBaseline.headDepthM), 0.35, accuracy: 0.0001)
     XCTAssertEqual(uprightBaseline.shoulderWidth, 0.20, accuracy: 0.0001)
     XCTAssertEqual(uprightBaseline.neckToRoot, 0.20, accuracy: 0.0001)
@@ -235,7 +235,7 @@ final class PostureClassifierTests: XCTestCase {
     let breach = assess(rigged(.deskLean, distanceCM: 20, pitchDeg: -45))
     XCTAssertEqual(breach.breached[.deskLean], true)
     let drop = reading(breach, .headHeightDrop)
-    XCTAssertEqual(drop.value, 0.42, accuracy: 0.03)
+    XCTAssertEqual(drop.value, 0.34, accuracy: 0.03)
     XCTAssertEqual(drop.threshold, 0.10, accuracy: 0.0001)
     XCTAssertTrue(drop.isOverThreshold)
     XCTAssertEqual(drop.severity, 1.0, accuracy: 0.0001)
@@ -243,7 +243,7 @@ final class PostureClassifierTests: XCTestCase {
     // Face gone, body still in frame: the pitch branch is not needed.
     let faceGone = assess(rigged(.deskLean, distanceCM: nil, pitchDeg: nil))
     XCTAssertEqual(faceGone.breached[.deskLean], true)
-    XCTAssertEqual(reading(faceGone, .headHeightDrop).value, 0.42, accuracy: 0.03)
+    XCTAssertEqual(reading(faceGone, .headHeightDrop).value, 0.34, accuracy: 0.03)
 
     let miss = assess(rigged(.nearMissDeskLean, distanceCM: 20, pitchDeg: -45))
     XCTAssertEqual(miss.breached[.deskLean], false)
@@ -399,6 +399,23 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertNil(assessment.highlighted)
     for kind in PostureKind.allCases {
       XCTAssertEqual(assessment.breached[kind], false, "\(kind) breached without its inputs")
+    }
+  }
+
+  /// 没有关节的样本：身体相关的读数全部是「未测量」（`isMeasured == false`），距离/俯仰有值时为
+  /// `true`，任何体态都不越线。
+  func testUnmeasuredReadingsAreMarkedAndNeverBreach() {
+    let assessment = assess(noBody(distanceCM: 40, pitchDeg: 0))
+
+    for feature in [PostureFeature.headRoll, .shoulderTilt, .headHeightDrop, .handToFace,
+                   .headForward, .slouch] {
+      XCTAssertFalse(reading(assessment, feature).isMeasured,
+                     "\(feature) claimed a measurement without joints")
+    }
+    XCTAssertTrue(reading(assessment, .distance).isMeasured)
+    XCTAssertTrue(reading(assessment, .headPitch).isMeasured)
+    for kind in PostureKind.allCases {
+      XCTAssertEqual(assessment.breached[kind], false, "\(kind) breached a jointless sample")
     }
   }
 

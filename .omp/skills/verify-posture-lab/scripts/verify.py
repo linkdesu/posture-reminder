@@ -39,7 +39,7 @@ os.environ["DEVELOPER_DIR"] = DEVELOPER_DIR
 # 固定的验收模拟器：每轮复用，不新建、不删除；一轮结束只关机。
 FIXED_SIM_NAME = "pl-verify"
 
-# 与 docs/qa-log-schema.md 的 43 键契约一致；顺序无关，集合必须完全相等。
+# 与 docs/qa-log-schema.md 的 45 键契约一致；顺序无关，集合必须完全相等。
 LOG_KEYS = {
     "ts", "t", "wall_clock", "event", "state", "screen", "distance_cm",
     "pitch_deg", "alert_type", "level", "breach_seconds", "sensitivity",
@@ -54,6 +54,8 @@ LOG_KEYS = {
     "segment_kind", "segment_start", "segment_end", "segment_seconds",
     # v0.6.8 事件 `thermal`（发热降级起止）专用；只有 `thermal` 行非 null。
     "thermal_degraded",
+    # v0.6.8 (16)：校准基线新增横滚与「头部相对肩线高度」。
+    "baseline_roll_deg", "baseline_head_height",
 }
 
 
@@ -478,7 +480,7 @@ def check_contract(log: Path, out: Path) -> bool:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         f"log={log}\nrows={rows}\nkeys={len(LOG_KEYS)}\n"
-        + ("PASS: every line carries exactly the 43-key contract\n" if ok
+        + ("PASS: every line carries exactly the 45-key contract\n" if ok
            else "FAIL:\n" + "\n".join(bad) + "\n")
     )
     return ok

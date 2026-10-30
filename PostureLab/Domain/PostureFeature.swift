@@ -41,6 +41,9 @@ struct FeatureReading: Equatable {
   var value: Double
   var threshold: Double
   var baseline: Double?
+  /// Whether the reading's inputs were all present; a missing-measurement reading carries
+  /// `isMeasured: false` and is excluded from every downstream signal that means "measured".
+  var isMeasured: Bool
   var isOverThreshold: Bool
 
   /// 0...1, how close the value sits to its threshold; the overlay's red/amber/green.
