@@ -94,6 +94,7 @@
 		F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */; };
 		F67598A50D6C2423066C12D4 /* PomodoroControlsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */; };
 		F8723825308BD557B7CDF025 /* IdleTimerDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBA9D525749DAB0D43307A3 /* IdleTimerDebugLog.swift */; };
+		F8FEA579D6ABAFA8B7262AC6 /* FrameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A86E28796422085C24237B /* FrameLog.swift */; };
 		FB901494F5245F4A74E4B11B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 86098F7CD1ECFE6933A9E192 /* README.md */; };
 		FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */; };
 /* End PBXBuildFile section */
@@ -175,6 +176,7 @@
 		922487CB54BBCDE0E210C1FC /* BodyPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyPoint.swift; sourceTree = "<group>"; };
 		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
 		A3AE14E62E384345220D3E83 /* Scenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios.swift; sourceTree = "<group>"; };
+		A5A86E28796422085C24237B /* FrameLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameLog.swift; sourceTree = "<group>"; };
 		A7C23BDEA7206E390ADDB2D4 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		A977A8B8E4D95F59F32EE642 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		AAE593DCD0888E74D9B9BF59 /* IdleTimerLogTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleTimerLogTrigger.swift; sourceTree = "<group>"; };
@@ -216,6 +218,7 @@
 			children = (
 				7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */,
 				16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */,
+				A5A86E28796422085C24237B /* FrameLog.swift */,
 				2CBA9D525749DAB0D43307A3 /* IdleTimerDebugLog.swift */,
 				59664E9AA3E7DC74A67633C5 /* JointFrameLog.swift */,
 				040D7563C8041E76DE061B4A /* PerfMonitor.swift */,
@@ -537,6 +540,7 @@
 				CE36B3AD08D569B2197162CE /* DepthSegmentation.swift in Sources */,
 				20BCEFA0C1E130818EDA47EE /* FileDebugLogger.swift in Sources */,
 				3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */,
+				F8FEA579D6ABAFA8B7262AC6 /* FrameLog.swift in Sources */,
 				1833E9D9310DF60870A9941C /* HeadGeometry.swift in Sources */,
 				936FA18086DD4D8A149BF18A /* IdleTimerController.swift in Sources */,
 				F8723825308BD557B7CDF025 /* IdleTimerDebugLog.swift in Sources */,

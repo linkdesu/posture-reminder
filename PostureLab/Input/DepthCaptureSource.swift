@@ -114,6 +114,10 @@ final class DepthCaptureSource: NSObject, SampleSource {
     history.removeAll()
     latestJoints = nil
     stateLock.unlock()
+    #if DEBUG
+    // 最后一帧可能还没上屏：写出去，别让它挂在内存里消失。
+    FrameLog.shared.flushPending()
+    #endif
     depthQueue.async { [session] in
       if session.isRunning { session.stopRunning() }
     }
@@ -259,7 +263,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
 
   /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
   private func handleDepth(_ depthData: AVDepthData, at t: TimeInterval, frameTime: TimeInterval) {
-    let captureStartedAt = ProcessInfo.processInfo.systemUptime
+    let arrivalUptime = ProcessInfo.processInfo.systemUptime
+    let captureStartedAt = arrivalUptime
     // Float32 是这条管线唯一能读的格式，转换是深度到深度。
     let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
     // 一次缩放到处理宽度，省掉「先整帧拷进 Swift 数组、再缩放」的那一遍：640×480 的逐像素
@@ -282,7 +287,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
     lastDepthProcessing = captureSeconds + segmentationSeconds + cloudSeconds
 
     #if DEBUG
-    // 分步耗时：采集/分割/点云各自计时，含每帧点数。判定耗时由会话层单独记。
+    // 分步耗时（每秒汇总）与逐帧原始记录各一份：汇总只给趋势，逐帧记录才是 QA 判证据的来源。
     PerfMonitor.shared.recordCapture(seconds: captureSeconds)
     PerfMonitor.shared.recordSegment(seconds: segmentationSeconds)
     PerfMonitor.shared.recordCloud(seconds: cloudSeconds, points: cloud.count)
@@ -299,6 +304,25 @@ final class DepthCaptureSource: NSObject, SampleSource {
     // 30 Hz 的节流按固定间隔卡帧，会把 33 ms 的正常间隔偶尔拖成 67 ms，反而破坏流畅）；降级时
     // 才按 15 Hz 的上限隔一帧推一次。间隔用深度帧自己的呈现时刻量，回调晚到不算掉帧。
     let shouldEmitCloud = cloudCap >= CaptureLoad.normal.cloudHz || frameTime - lastCloudAt >= cloudInterval * 0.85
+
+    #if DEBUG
+    // 逐帧原始记录：这一帧深度有没有读数、分割出多少格、点云多少点、上屏没有、上屏多久。
+    FrameLog.shared.begin(FrameLog.Record(
+      ts: Int((Date().timeIntervalSince1970 * 1000).rounded()),
+      frameS: frameTime,
+      arrivalS: t,
+      depthMS: captureSeconds * 1000,
+      segmentMS: segmentationSeconds * 1000,
+      cloudMS: cloudSeconds * 1000,
+      points: cloud.count,
+      maskCells: mask?.count ?? 0,
+      depthValid: image.validFraction,
+      nearestM: image.nearestDepth().map { Double($0) },
+      degraded: cloudCap < CaptureLoad.normal.cloudHz,
+      cloudEmitted: shouldEmitCloud),
+      arrivalUptime: arrivalUptime)
+    #endif
+
     if shouldEmitCloud {
       lastCloudAt = frameTime
       #if DEBUG
