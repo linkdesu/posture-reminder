@@ -24,7 +24,6 @@
 		3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */; };
 		3C23B092FFC5BA5A8E7DCFD1 /* DepthImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB57EB7282F576BBD9E46A21 /* DepthImage.swift */; };
 		3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */; };
-		3E296ABD3EFEFE6C5612823A /* DepthCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80056FD012C04927DA0997E /* DepthCloud.swift */; };
 		3F794173788051EE1734E791 /* PostureSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43C4382384E519C27CCCA4F /* PostureSample.swift */; };
 		3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */; };
 		4BDD879D61EF392449490FC1 /* LaunchSurvivalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */; };
@@ -42,6 +41,7 @@
 		66F3893B5FC0E50A80A5CF10 /* DebugLogLineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */; };
 		69495B6706DD32607B923B2F /* VisionJointSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB04DE6C7DB7617E7A7C359 /* VisionJointSource.swift */; };
 		6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */; };
+		6E66B3186B84ED720BF5923E /* CloudStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF5B357C382D56E156A96BF /* CloudStabilizer.swift */; };
 		6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */; };
 		715CBA8295C0E0FC8F44DECD /* CaptureLoad.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */; };
 		727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040D7563C8041E76DE061B4A /* PerfMonitor.swift */; };
@@ -136,6 +136,7 @@
 		2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugOverlayView.swift; sourceTree = "<group>"; };
 		2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSurvivalUITests.swift; sourceTree = "<group>"; };
+		2FF5B357C382D56E156A96BF /* CloudStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStabilizer.swift; sourceTree = "<group>"; };
 		3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudMotionTests.swift; sourceTree = "<group>"; };
 		3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectAllNumberField.swift; sourceTree = "<group>"; };
 		3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInputUITests.swift; sourceTree = "<group>"; };
@@ -183,7 +184,6 @@
 		AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureClassifier.swift; sourceTree = "<group>"; };
 		B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleTimerTests.swift; sourceTree = "<group>"; };
 		BCBAEB16FED6503FA1D580B8 /* Pose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pose.swift; sourceTree = "<group>"; };
-		C80056FD012C04927DA0997E /* DepthCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthCloud.swift; sourceTree = "<group>"; };
 		CC7ACF7242CF00C1C8985848 /* VisionPoseMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionPoseMappingTests.swift; sourceTree = "<group>"; };
 		CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngineTests.swift; sourceTree = "<group>"; };
 		CFC95400FB19F268529C7871 /* DepthCaptureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthCaptureSource.swift; sourceTree = "<group>"; };
@@ -339,8 +339,8 @@
 				922487CB54BBCDE0E210C1FC /* BodyPoint.swift */,
 				53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */,
 				7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */,
+				2FF5B357C382D56E156A96BF /* CloudStabilizer.swift */,
 				4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */,
-				C80056FD012C04927DA0997E /* DepthCloud.swift */,
 				DB57EB7282F576BBD9E46A21 /* DepthImage.swift */,
 				D17AA01C83295B94B30C2140 /* DepthSegmentation.swift */,
 				8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */,
@@ -531,11 +531,11 @@
 				9628B624A31AC72209E46D2B /* BodyRig.swift in Sources */,
 				715CBA8295C0E0FC8F44DECD /* CaptureLoad.swift in Sources */,
 				F1C5459630BE5A04F9DB3F1D /* CloudMotion.swift in Sources */,
+				6E66B3186B84ED720BF5923E /* CloudStabilizer.swift in Sources */,
 				6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */,
 				5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */,
 				4D0EF23AB4D0D5063528375A /* DebugOverlayView.swift in Sources */,
 				9631FC5D284FC0FB2A2801B8 /* DepthCaptureSource.swift in Sources */,
-				3E296ABD3EFEFE6C5612823A /* DepthCloud.swift in Sources */,
 				3C23B092FFC5BA5A8E7DCFD1 /* DepthImage.swift in Sources */,
 				CE36B3AD08D569B2197162CE /* DepthSegmentation.swift in Sources */,
 				20BCEFA0C1E130818EDA47EE /* FileDebugLogger.swift in Sources */,

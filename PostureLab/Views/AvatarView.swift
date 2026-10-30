@@ -78,7 +78,10 @@ struct AvatarView: View {
         let points = motion.to.isEmpty
           ? geometry.cloud
           : motion.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
-        let cloud = points.isEmpty ? BodyCloud.points(for: geometry.joints) : points
+        // z == 0 是「这一格没有读数」的占位：固定网格的槽位在人体外时会保留旧值直到过期，
+        // 真正的空槽位不参与绘制，也不参与下面的质心计算。
+        let visible = points.filter { $0.z > 0 }
+        let cloud = visible.isEmpty ? BodyCloud.points(for: geometry.joints) : visible
         guard !cloud.isEmpty else {
           drawSilhouette(in: &context, size: size)
           return
@@ -89,7 +92,9 @@ struct AvatarView: View {
     .allowsHitTesting(false)
     // 新的样本进来时只记下它和时刻，插值本身发生在画布里，主线程不做逐点计算。
     .onChange(of: geometry) { _, newValue in
-      motion.push(newValue?.cloud ?? [], at: Date().timeIntervalSinceReferenceDate)
+      motion.push(newValue?.cloud ?? [],
+                  at: Date().timeIntervalSinceReferenceDate,
+                  interval: newValue?.cloudInterval)
     }
   }
 

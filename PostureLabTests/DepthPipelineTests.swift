@@ -22,20 +22,31 @@ final class DepthPipelineTests: XCTestCase {
                          headSlope: Float = 0,
                          headRadius: Double = 13,
                          torsoHalfWidth: Double = 30,
-                         torsoTop: Int = 39) -> DepthImage {
+                         torsoTop: Int = 39,
+                         shift: Int = 0,
+                         noise: Float = 0,
+                         frame: Int = 0) -> DepthImage {
     var metres = [Float](repeating: background, count: width * height)
+    // 确定性噪声：同一个 `frame` 永远给同一条 ±noise 序列。
+    var seed = UInt64(truncatingIfNeeded: frame &+ 1) &* 2_654_435_761
     for y in 0..<height {
       for x in 0..<width {
-        let inHead = hypot(Double(x - 80), Double(y - 30)) <= headRadius
-        let inTorso = y >= torsoTop && y <= 100 && abs(Double(x - 80)) <= torsoHalfWidth
+        let centre = 80 + shift
+        let inHead = hypot(Double(x - centre), Double(y - 30)) <= headRadius
+        let inTorso = y >= torsoTop && y <= 100 && abs(Double(x - centre)) <= torsoHalfWidth
         guard inHead || inTorso else { continue }
+        var depth = bodyDepth
         if inHead {
           // `headSlope` is metres of depth change per image row, so a positive slope means the
           // bottom of the head is farther away: a head tilted up.
-          metres[y * width + x] = (headDepth ?? bodyDepth) + headSlope * Float(y - 30)
-        } else {
-          metres[y * width + x] = bodyDepth
+          depth = (headDepth ?? bodyDepth) + headSlope * Float(y - 30)
         }
+        if noise > 0 {
+          seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+          let unit = Float(seed >> 33 % 2_000) / 1_000 - 1
+          depth += unit * noise
+        }
+        metres[y * width + x] = depth
       }
     }
     return DepthImage(width: width, height: height, metres: metres)!
@@ -151,105 +162,98 @@ final class DepthPipelineTests: XCTestCase {
     XCTAssertEqual(mixed.nanFraction, 0.25, accuracy: 0.0001)
   }
 
-  // MARK: - Cloud
+  // MARK: - Cloud（固定网格 + 帧间平滑）
 
-  func testCloudComesFromMaskPixelsAndKeepsTheirDepth() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    let cloud = DepthCloud.points(mask: mask, image: image)
+  /// 验收：静坐 10 秒（遮罩包围盒抖动 ±2 px、深度噪声 ±2 cm），逐点位移 p95 ≤ 屏宽 1%。
+  ///
+  /// 位移的算法与画布一致：槽位的归一化位置固定不变（x/y 位移恒为 0）；画面上的位移只来自透视，
+  /// 透视系数是 `cam / (cam + z - meanZ)`，对 z 的偏导约为 `1/cam`，而 `cam ≥ 0.5 m`。所以
+  /// 「|Δz| p95 ≤ 5 mm」等价于「|Δperspective| ≤ 1%」，也就是距画面中心最远的点位移 ≤ 屏宽 1%。
+  func testCloudIsStableUnderMaskJitterAndDepthNoise() throws {
+    var stabilizer = CloudStabilizer()
+    var previous: [Int: BodyPoint] = [:]
+    var displacements: [Double] = []
+    var shifts: [Double] = []
 
-    XCTAssertEqual(cloud.count, DepthCloud.pointBudget,
-                   "every depth frame carries the same number of points")
-    for point in cloud {
-      XCTAssertEqual(point.z, 0.5, accuracy: 0.001)
-      XCTAssertTrue((0...1).contains(point.x))
-      XCTAssertTrue((0...1).contains(point.y))
-    }
-  }
-
-  func testCloudIsDeterministic() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    XCTAssertEqual(DepthCloud.points(mask: mask, image: image),
-                   DepthCloud.points(mask: mask, image: image))
-  }
-
-  /// 点数固定是插值每帧生效的前提：同一个预算下，大身子和小身子都给 600 点。
-  func testEveryFrameFillsTheSamePointBudget() throws {
-    XCTAssertEqual(DepthCloud.pointBudget, 600)
-    for image in [bodyImage(), bodyImage(headRadius: 8, torsoHalfWidth: 10)] {
+    // 10 秒、30 Hz：每帧把身体整体平移 ±2 px，并加 ±2 cm 的深度噪声。
+    for frame in 0..<300 {
+      let shift = frame % 5 - 2
+      let image = bodyImage(shift: shift, noise: 0.02, frame: frame)
       let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-      XCTAssertEqual(DepthCloud.points(mask: mask, image: image).count, 600)
-    }
-  }
-
-  /// 预算比身体的格点还多时（极瘦的轮廓）循环补齐，补齐的点仍来自轮廓本身。
-  func testASparseBodyFillsTheBudgetByRepeatingItsOwnPoints() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: 2000)
-
-    XCTAssertEqual(cloud.count, 2000)
-    for point in cloud {
-      XCTAssertEqual(point.z, 0.5, accuracy: 0.001)
-      XCTAssertTrue((0...1).contains(point.x))
-      XCTAssertTrue((0...1).contains(point.y))
-    }
-  }
-
-  /// 补齐的点按收集顺序重复：同样的遮罩、同样的预算，永远给同一份点。
-  func testThePaddingIsDeterministic() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    XCTAssertEqual(DepthCloud.points(mask: mask, image: image, maxPoints: 2000),
-                   DepthCloud.points(mask: mask, image: image, maxPoints: 2000))
-  }
-
-  func testDownsamplingKeepsTheSilhouetteBoundary() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: 120)
-
-    XCTAssertLessThanOrEqual(cloud.count, 120)
-    XCTAssertGreaterThan(cloud.count, 40, "a downsampled body is still a body, not a scatter")
-    // 轮廓的四个极值都要有点：少了任何一个，人形就缺一块。
-    XCTAssertTrue(cloud.contains { $0.y < 0.35 }, "the top of the head is missing")
-    XCTAssertTrue(cloud.contains { $0.x < 0.45 }, "the left edge is missing")
-    XCTAssertTrue(cloud.contains { $0.x > 0.55 }, "the right edge is missing")
-    XCTAssertTrue(cloud.contains { $0.y > 0.75 }, "the bottom of the torso is missing")
-  }
-
-  func testDownsamplingPrefersBoundaryCells() throws {
-    let image = bodyImage()
-    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
-    let maxPoints = 60
-    // 与 DepthCloud 同一条格距公式：预算够宽时轮廓格点先入场，内部格点只能拿剩下的。
-    let step = max(1, Int((Double(mask.count) / Double(maxPoints)).squareRoot().rounded(.up)))
-    let boundary = latticeCells(mask: mask, step: step).filter { isBoundary(mask, x: $0.0, y: $0.1) }
-    XCTAssertGreaterThanOrEqual(boundary.count, 4, "the fixture's silhouette has a boundary")
-
-    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: maxPoints)
-    for cell in boundary {
-      let position = mask.normalized(x: cell.0, y: cell.1)
-      XCTAssertTrue(cloud.contains { $0.x == position.x && $0.y == position.y },
-                    "boundary cell \(cell) lost its budget to the interior")
-    }
-  }
-
-  /// 与 `DepthCloud` 相同的锚点与步长，供测试核对哪些格点落在轮廓上。
-  private func latticeCells(mask: BodyMask, step: Int) -> [(Int, Int)] {
-    var cells: [(Int, Int)] = []
-    for y in stride(from: mask.minY, through: mask.maxY, by: step) {
-      for x in stride(from: mask.minX, through: mask.maxX, by: step) where mask.contains(x: x, y: y) {
-        cells.append((x, y))
+      let cloud = stabilizer.points(mask: mask, image: image, at: Double(frame) / 30)
+      var current: [Int: BodyPoint] = [:]
+      for point in cloud { current[point.slot] = point }
+      for (slot, point) in current {
+        guard let old = previous[slot] else { continue }
+        shifts.append(max(abs(point.x - old.x), abs(point.y - old.y)))
+        displacements.append(abs(point.z - old.z))
       }
+      previous = current
     }
-    return cells
+
+    XCTAssertGreaterThan(displacements.count, 1000, "the fixture has to produce a real cloud")
+    // 位置固定：同一个槽位永远落在同一处，横向位移恒为 0。
+    XCTAssertEqual(shifts.max() ?? 1, 0, accuracy: 1e-9, "slot positions must not move")
+    let sorted = displacements.sorted()
+    let p95 = sorted[Int(0.95 * Double(sorted.count - 1))]
+    XCTAssertLessThanOrEqual(p95, 0.005,
+                             "smoothed depth jitter must stay under 5 mm (≈1% of screen width)")
   }
 
-  private func isBoundary(_ mask: BodyMask, x: Int, y: Int) -> Bool {
-    !mask.contains(x: x - 1, y: y) || !mask.contains(x: x + 1, y: y)
-      || !mask.contains(x: x, y: y - 1) || !mask.contains(x: x, y: y + 1)
+  /// 槽位由固定网格决定，不随遮罩大小、包围盒起点改变：大身子与小身子给同一批槽位坐标。
+  func testTheLatticeDoesNotFollowTheMask() throws {
+    func cloud(for image: DepthImage) throws -> [BodyPoint] {
+      var stabilizer = CloudStabilizer()
+      let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+      return stabilizer.points(mask: mask, image: image, at: 0)
+    }
+    let wide = try cloud(for: bodyImage(headRadius: 16, torsoHalfWidth: 40))
+    let narrow = try cloud(for: bodyImage(torsoHalfWidth: 24))
+
+    let column = { (slot: Int) in slot % CloudStabilizer.columns }
+    let row = { (slot: Int) in slot / CloudStabilizer.columns }
+    // 同一个槽位在两帧里的归一化位置都必须等于网格中心，与遮罩无关。
+    for point in wide.prefix(20) + narrow.prefix(20) {
+      XCTAssertEqual(point.x, (Double(column(point.slot)) + 0.5) / Double(CloudStabilizer.columns),
+                     accuracy: 1e-9)
+      XCTAssertEqual(point.y, (Double(row(point.slot)) + 0.5) / Double(CloudStabilizer.rows),
+                     accuracy: 1e-9)
+    }
+    XCTAssertLessThan(narrow.count, wide.count, "a smaller body covers fewer slots")
+  }
+
+  /// 一帧没有遮罩不清空点云：保留 `maxAge`，超时才丢。
+  func testAPointSurvivesAShortDropoutThenExpires() throws {
+    var stabilizer = CloudStabilizer()
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let first = stabilizer.points(mask: mask, image: image, at: 0)
+    XCTAssertFalse(first.isEmpty)
+
+    let kept = stabilizer.points(mask: nil, image: image, at: CloudStabilizer.maxAge * 0.8)
+    XCTAssertEqual(kept.count, first.count, "a single missing frame must not blank the cloud")
+
+    let expired = stabilizer.points(mask: nil, image: image, at: CloudStabilizer.maxAge * 1.5)
+    XCTAssertTrue(expired.isEmpty, "after maxAge without a reading the slots expire")
+  }
+
+  func testTheCloudBudgetIsRespected() throws {
+    var stabilizer = CloudStabilizer()
+    let image = bodyImage(headRadius: 20, torsoHalfWidth: 70)
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let cloud = stabilizer.points(mask: mask, image: image, at: 0)
+    XCTAssertLessThanOrEqual(cloud.count, CloudStabilizer.pointBudget)
+    XCTAssertGreaterThan(cloud.count, 40)
+  }
+
+  func testTheStabilizedCloudIsDeterministic() throws {
+    func cloud() throws -> [BodyPoint] {
+      var stabilizer = CloudStabilizer()
+      let image = bodyImage()
+      let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+      return stabilizer.points(mask: mask, image: image, at: 1)
+    }
+    XCTAssertEqual(try cloud(), try cloud())
   }
 
   // MARK: - Resampling

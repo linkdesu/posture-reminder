@@ -19,6 +19,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
   var onCloud: ((CloudFrame) -> Void)?
 
   private let vision = VisionJointSource()
+  /// 固定网格 + 帧间平滑的点云。只有深度队列碰它。
+  private var cloudStabilizer = CloudStabilizer()
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
   private let videoOutput = AVCaptureVideoDataOutput()
@@ -116,6 +118,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
     history.removeAll()
     latestJoints = nil
     stateLock.unlock()
+    cloudStabilizer.reset()
     #if DEBUG
     // 最后一帧可能还没上屏：写出去，别让它挂在内存里消失。
     FrameLog.shared.flushPending()
@@ -281,7 +284,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let segmentationSeconds = ProcessInfo.processInfo.systemUptime - segmentationStartedAt
 
     let cloudStartedAt = ProcessInfo.processInfo.systemUptime
-    let cloud = mask.map { DepthCloud.points(mask: $0, image: image) } ?? []
+    // 固定网格采样 + 距离平滑：位置不随遮罩变化，帧与帧之间按槽位配对（见 `CloudStabilizer`）。
+    let cloud = cloudStabilizer.points(mask: mask, image: image, at: frameTime)
     let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
 
     let head = HeadGeometry.measure(depth: image, mask: mask)

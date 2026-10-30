@@ -131,6 +131,8 @@ final class SessionController: ObservableObject {
   private var thermalStateName = "nominal"
   /// 上一次写进日志的降级结论，只在翻转时写 `thermal` 行。
   private var thermalDegraded = false
+  /// 上一帧点云的时刻（会话时钟），用来给画布算出真实的插值间隔。
+  private var lastCloudTime: TimeInterval?
   /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
   /// the visible layers. Reset at the start of every focus.
   private var lastViewMode: (mode: String, overlay: Bool, avatar: Bool)?
@@ -959,8 +961,11 @@ final class SessionController: ObservableObject {
   /// 直接忽略，画面仍是矢量轮廓。
   private func applyCloud(_ frame: CloudFrame) {
     guard latestGeometry != nil else { return }
+    let interval = lastCloudTime.map { max(0, frame.t - $0) }
+    lastCloudTime = frame.t
     guard latestGeometry?.cloud != frame.points else { return }
     latestGeometry?.cloud = frame.points
+    latestGeometry?.cloudInterval = interval
   }
 
   private func stopInput() {
@@ -969,5 +974,6 @@ final class SessionController: ObservableObject {
     // No source means no fresh geometry; drop the last frame so a stale avatar cannot linger.
     latestGeometry = nil
     latestAssessment = nil
+    lastCloudTime = nil
   }
 }
