@@ -379,7 +379,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
       depthGapMS: depthGap,
       arrivalGapMS: arrivalGap,
       visionMS: visionInfo.map { $0.inferenceSeconds * 1000 },
-      visionAgeMS: visionInfo.map { max(0, (frameTime - $0.t) * 1000) }),
+      // 两个时刻都取会话时钟（`t` 与 Vision 的 `t`）；用 CMTime 的 frameTime 去减会得到上亿毫秒。
+      visionAgeMS: visionInfo.map { max(0, (t - $0.t) * 1000) }),
       arrivalUptime: arrivalUptime)
     #endif
 
