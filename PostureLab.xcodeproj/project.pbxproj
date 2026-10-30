@@ -25,6 +25,7 @@
 		3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */; };
 		3C23B092FFC5BA5A8E7DCFD1 /* DepthImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB57EB7282F576BBD9E46A21 /* DepthImage.swift */; };
 		3CB2D27DB0F40763D9146F36 /* FocusTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */; };
+		3D74729205EC245D1F07331B /* KeyPointOverlayMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E79E2F95C211A5892BB6D46B /* KeyPointOverlayMotionTests.swift */; };
 		3F794173788051EE1734E791 /* PostureSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43C4382384E519C27CCCA4F /* PostureSample.swift */; };
 		3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */; };
 		4BDD879D61EF392449490FC1 /* LaunchSurvivalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */; };
@@ -212,6 +213,7 @@
 		E34CF188A7BF03E96664807B /* MonitoringEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngine.swift; sourceTree = "<group>"; };
 		E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroControlsUITests.swift; sourceTree = "<group>"; };
 		E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
+		E79E2F95C211A5892BB6D46B /* KeyPointOverlayMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyPointOverlayMotionTests.swift; sourceTree = "<group>"; };
 		E86DD762F759A830119DDC53 /* end_chime.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = end_chime.wav; sourceTree = "<group>"; };
 		EB5BC89A7E921207F3567C64 /* PostureLabUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F15B75C72C27B373EFE66CA1 /* PostureLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PostureLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -303,6 +305,7 @@
 				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
 				89FB5BAC46243600AF0A6D22 /* IdleTimerLogTriggerTests.swift */,
 				B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */,
+				E79E2F95C211A5892BB6D46B /* KeyPointOverlayMotionTests.swift */,
 				66821031BDB6350202286B72 /* MaskShoulderLineTests.swift */,
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
 				CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */,
@@ -653,6 +656,7 @@
 				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
 				84DC3253816CF7E6E1ECE701 /* IdleTimerLogTriggerTests.swift in Sources */,
 				A3ACDEDF60B18F081F4D78F2 /* IdleTimerTests.swift in Sources */,
+				3D74729205EC245D1F07331B /* KeyPointOverlayMotionTests.swift in Sources */,
 				21EB7BCC72A6BB32E423F1AF /* MaskShoulderLineTests.swift in Sources */,
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,
 				AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */,
