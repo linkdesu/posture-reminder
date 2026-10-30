@@ -630,6 +630,14 @@ def crash_reports() -> list[str]:
     return sorted(p.name for p in CRASH_DIR.glob("PostureLab*.ips"))
 
 
+def posterboard_reports() -> list[str]:
+    """模拟器系统进程 PosterBoard 的崩溃报告。新增即说明模拟器/运行时本身坏了（非 App 问题），
+    判 ENV-BLOCKED；处理办法是 erase pl-verify，仍复现再考虑换运行时（须人工确认）。"""
+    if not CRASH_DIR.exists():
+        return []
+    return sorted(p.name for p in CRASH_DIR.glob("PosterBoard*.ips"))
+
+
 def plist_value(plist: Path, key: str) -> str:
     r = sh(["plutil", "-extract", key, "raw", str(plist)], check=False)
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -786,6 +794,13 @@ def _preflight(args) -> int:
     baseline = crash_reports()
     result["frozen"]["crashBaseline"] = {"count": len(baseline), "files": baseline}
     record("crashBaseline", True, f"{len(baseline)} 份 PostureLab*.ips")
+    pb_baseline = posterboard_reports()
+    result["frozen"]["posterBoardBaseline"] = {"count": len(pb_baseline), "files": pb_baseline}
+
+    def no_new_posterboard(stage: str) -> bool:
+        new_pb = sorted(set(posterboard_reports()) - set(pb_baseline))
+        return record(f"noNewPosterBoardCrash:{stage}", not new_pb,
+                      {"baseline": len(pb_baseline), "new": new_pb})
 
     # 1. 工具链、simctl、磁盘。
     xv = sh(["xcodebuild", "-version"], check=False)
@@ -855,6 +870,10 @@ def _preflight(args) -> int:
     app = dd / "Build" / "Products" / "Debug-iphonesimulator" / "PostureLab.app"
     if not record("build", b.returncode == 0 and app.exists(), str(build_log.relative_to(ROOT))):
         return abort("构建失败")
+    # 开机后经过整段构建时间，PosterBoard 若会崩，此时报告已落盘。
+    if not no_new_posterboard("afterBootAndBuild"):
+        return abort("ENV-BLOCKED：pl-verify 开机后出现新的 PosterBoard 崩溃报告（模拟器环境损坏），"
+                     "先 simctl shutdown + erase pl-verify 再重跑预检；仍复现则上报 TL 评估换运行时")
     binary = app / "PostureLab"
     result["frozen"]["appPath"] = str(app)
     xctestrun = sorted((dd / "Build" / "Products").glob("*.xctestrun"))
@@ -940,6 +959,8 @@ def _preflight(args) -> int:
     after = crash_reports()
     new = sorted(set(after) - set(baseline))
     record("noNewCrash", not new, {"new": new})
+    if not no_new_posterboard("end"):
+        return abort("ENV-BLOCKED：预检期间出现新的 PosterBoard 崩溃报告（模拟器环境损坏）")
     return finish()
 
 

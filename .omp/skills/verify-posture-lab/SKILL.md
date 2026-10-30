@@ -29,7 +29,7 @@ scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮�
 5. 产物 `Info.plist` 的版本号与 build 号必须等于预期值；装进模拟器后再读一次已安装的 `Info.plist`，并核对已安装二进制的哈希；
 6. `simctl privacy grant camera` 预授权，无参启动后截图，OCR 确认没有系统权限弹窗；
 7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 42 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
-8. 预检期间不得新增崩溃报告；
+8. 预检期间不得新增崩溃报告；另记 `PosterBoard*.ips`（模拟器系统进程）基线，构建完成后与收尾时各比一次，只要新增一份就判 **ENV-BLOCKED** 并立即中止（`preflight.json.checks` 中 `noNewPosterBoardCrash:*` 为 FAIL）。处理：`simctl shutdown` + `simctl erase` pl-verify 后重跑预检；erase 后仍复现说明运行时本身损坏，上报 TL 评估改用其他 iOS 运行时，不得自行切换；
 9. 把 SHA、快照哈希（`snapshot.tar` 的 sha256）、二进制哈希和 UDID 冻结进 `preflight.json.frozen`。
 
 **固定模拟器的收尾**：`verify.py preflight` 用 `finally` 兜住正常退出、失败、Ctrl-C 与 TERM/HUP，`verify-preflight.sh` 再用 `trap … EXIT INT TERM HUP` 调 `verify.py preflight-cleanup --run <run-id>` 兜底。规则只有一条：**`pl-verify` 永远保留，只关机**。预检（含只跑预检、dry-run、失败、中断）结束时关机，结果写在 `preflight.json.simCleanup`（`shutdown`）；`up` 会再把它开起来；一轮结束 `verify.py down --run <run-id>` 也只关机。`--keep-sim`、`--delete-sim` 已删除。
