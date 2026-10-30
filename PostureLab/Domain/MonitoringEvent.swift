@@ -14,6 +14,9 @@ enum MonitoringEvent: Equatable {
   /// 日志第一行：构建身份（版本、build、commit）。键集不变，身份放在 `message` 里，这样 QA 的
   /// 「每行同键集」契约不被破坏，又不必去别处查这是哪个构建。
   case logHeader(summary: String)
+  /// 仅 DEBUG 的分段测试模式：每 20 秒切一段（坐直 / 歪肩 / 低头），切换时写一行，
+  /// `message` 是分段名，`ts` 就是切换的毫秒时刻。用来把真机日志按姿势切段复盘。
+  case testSegment(phase: String)
   case screenShown(name: String)
   case sample(t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case statusChanged(to: PostureStatus, t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
@@ -283,6 +286,10 @@ extension MonitoringEvent {
     case .logHeader(let summary):
       record.event = "log_header"
       record.message = summary
+
+    case .testSegment(let phase):
+      record.event = "test_segment"
+      record.message = phase
 
     case .screenShown(let name):
       record.event = "screen_shown"
