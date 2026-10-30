@@ -16,14 +16,26 @@ import Vision
 /// **频率与丢帧。** 彩色流约 30 fps，推理只跑约 10 Hz：距上一次推理不到 `minimumInterval` 的帧直
 /// 接丢掉，绝不排队——排队会让画面延迟一秒才更新姿势导演。请求实例复用，不每帧新建。
 final class VisionJointSource {
-  /// 推理节流：约 10 Hz。
-  static let minimumInterval: TimeInterval = 0.1
-
   /// 复用同一个请求。Vision 的请求对象本身不持有图像。
   private let request = VNDetectHumanBodyPoseRequest()
   private let lock = NSLock()
   private var isBusy = false
   private var lastRunAt: TimeInterval = -.greatestFiniteMagnitude
+  private var interval: TimeInterval = CaptureLoad.normal.visionInterval
+
+  /// 推理节流：正常 10 Hz，发热降级时 5 Hz（`CaptureLoad`）。改它不影响正在跑的这一次推理。
+  var minimumInterval: TimeInterval {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return interval
+    }
+    set {
+      lock.lock()
+      interval = newValue
+      lock.unlock()
+    }
+  }
 
   /// 本文件里被问到的关节名与应用的关节名一一对应。只问头、颈、双肩：其余关节这个版本不显示、
   /// 不判定、不进日志。
@@ -44,7 +56,7 @@ final class VisionJointSource {
     guard width > 0, height > 0 else { return nil }
 
     lock.lock()
-    let busy = isBusy || t - lastRunAt < Self.minimumInterval
+    let busy = isBusy || t - lastRunAt < interval
     if !busy {
       isBusy = true
       lastRunAt = t

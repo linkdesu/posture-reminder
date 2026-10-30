@@ -29,6 +29,7 @@
 		3FD92AB2AC7CA5EF6AC01ACC /* PostureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5C1EC1BC1D08DBEF00D554 /* PostureClassifier.swift */; };
 		4BDD879D61EF392449490FC1 /* LaunchSurvivalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */; };
 		4D0EF23AB4D0D5063528375A /* DebugOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEB39A6A861E7F10B1078EA /* DebugOverlayView.swift */; };
+		4D9D97621F765328F7AFDDC1 /* JointFrameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59664E9AA3E7DC74A67633C5 /* JointFrameLog.swift */; };
 		4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */; };
 		4FA5FAF4E26E7AFE50117616 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865D8839C4C8F659BB29252A /* SessionController.swift */; };
 		5173A2809E39EEA36C67E665 /* VisionPoseMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7ACF7242CF00C1C8985848 /* VisionPoseMappingTests.swift */; };
@@ -42,7 +43,9 @@
 		69495B6706DD32607B923B2F /* VisionJointSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB04DE6C7DB7617E7A7C359 /* VisionJointSource.swift */; };
 		6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */; };
 		6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */; };
+		715CBA8295C0E0FC8F44DECD /* CaptureLoad.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */; };
 		727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040D7563C8041E76DE061B4A /* PerfMonitor.swift */; };
+		752EABFC0B37A09192BA9E55 /* ThermalSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B770E14E689F2A1388F742 /* ThermalSampler.swift */; };
 		7B89D9EB41F768CEC517A868 /* VisionPoseMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845C9703820ABF4BE451190A /* VisionPoseMapping.swift */; };
 		7CA32D1FA92C371E7CFF1B67 /* Pose.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCBAEB16FED6503FA1D580B8 /* Pose.swift */; };
 		840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */; };
@@ -140,7 +143,10 @@
 		4D597B6333310C45A83D6402 /* ReminderPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayer.swift; sourceTree = "<group>"; };
 		4E20FBDAFBE151A6DFA10240 /* shoulder_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = shoulder_tilt.wav; sourceTree = "<group>"; };
 		4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogging.swift; sourceTree = "<group>"; };
+		52B770E14E689F2A1388F742 /* ThermalSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSampler.swift; sourceTree = "<group>"; };
+		53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureLoad.swift; sourceTree = "<group>"; };
 		58068D70C0C4672F10367EE5 /* SettingsTogglesPersistenceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTogglesPersistenceUITests.swift; sourceTree = "<group>"; };
+		59664E9AA3E7DC74A67633C5 /* JointFrameLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JointFrameLog.swift; sourceTree = "<group>"; };
 		5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistory.swift; sourceTree = "<group>"; };
 		5EE5AEE7BAB6B89581719950 /* ReminderPlayerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayerTests.swift; sourceTree = "<group>"; };
 		5F1CEF001EA36F12FB4E1B6F /* head_down.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_down.wav; sourceTree = "<group>"; };
@@ -211,6 +217,7 @@
 				7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */,
 				16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */,
 				2CBA9D525749DAB0D43307A3 /* IdleTimerDebugLog.swift */,
+				59664E9AA3E7DC74A67633C5 /* JointFrameLog.swift */,
 				040D7563C8041E76DE061B4A /* PerfMonitor.swift */,
 			);
 			path = Debug;
@@ -310,6 +317,7 @@
 				0AD3107ED24A698BFAF94104 /* IdleTimerController.swift */,
 				4D597B6333310C45A83D6402 /* ReminderPlayer.swift */,
 				865D8839C4C8F659BB29252A /* SessionController.swift */,
+				52B770E14E689F2A1388F742 /* ThermalSampler.swift */,
 			);
 			path = Session;
 			sourceTree = "<group>";
@@ -326,6 +334,7 @@
 			isa = PBXGroup;
 			children = (
 				922487CB54BBCDE0E210C1FC /* BodyPoint.swift */,
+				53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */,
 				7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */,
 				4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */,
 				C80056FD012C04927DA0997E /* DepthCloud.swift */,
@@ -517,6 +526,7 @@
 				193EE240EA99D8DB936FEBCE /* BodyCloud.swift in Sources */,
 				E05DCDD71A5B8B4F81ACFDCF /* BodyPoint.swift in Sources */,
 				9628B624A31AC72209E46D2B /* BodyRig.swift in Sources */,
+				715CBA8295C0E0FC8F44DECD /* CaptureLoad.swift in Sources */,
 				F1C5459630BE5A04F9DB3F1D /* CloudMotion.swift in Sources */,
 				6FB7DF4F917927B1407D2593 /* DebugLineFile.swift in Sources */,
 				5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */,
@@ -532,6 +542,7 @@
 				F8723825308BD557B7CDF025 /* IdleTimerDebugLog.swift in Sources */,
 				A15D7DA01025C72CB64CD651 /* IdleTimerLogTrigger.swift in Sources */,
 				BAC6B2B5EFCD400E857BA0D9 /* IdleTimerPolicy.swift in Sources */,
+				4D9D97621F765328F7AFDDC1 /* JointFrameLog.swift in Sources */,
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
 				727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */,
@@ -561,6 +572,7 @@
 				E1EED948404432FC29BC5370 /* SessionSummary.swift in Sources */,
 				255846CA2CDC2076E67B50B1 /* Settings.swift in Sources */,
 				CAB618B6756DF5A9C6432121 /* SimulatedSampleSource.swift in Sources */,
+				752EABFC0B37A09192BA9E55 /* ThermalSampler.swift in Sources */,
 				69495B6706DD32607B923B2F /* VisionJointSource.swift in Sources */,
 				7B89D9EB41F768CEC517A868 /* VisionPoseMapping.swift in Sources */,
 			);

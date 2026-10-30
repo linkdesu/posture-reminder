@@ -59,6 +59,10 @@ struct AvatarView: View {
       Canvas(opaque: true, rendersAsynchronously: true) { context, size in
         #if DEBUG
         // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数由 PerfMonitor 加锁。
+        let renderStartedAt = ProcessInfo.processInfo.systemUptime
+        defer {
+          PerfMonitor.shared.recordRender(seconds: ProcessInfo.processInfo.systemUptime - renderStartedAt)
+        }
         PerfMonitor.shared.recordFrame()
         #endif
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))

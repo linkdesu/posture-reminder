@@ -28,7 +28,7 @@ scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮�
 4. 只用**固定模拟器 `pl-verify`**（iPhone 17，iOS 27.0）：每轮复用，不新建、不删除（不存在时才建一次）；先卸载 App 保证沙盒干净，boot 完成后把 UDID 写进 `state.json`。构建用 `build-for-testing`，同一份冻结产物里带 `.xctestrun`，供 `drive` 的 XCUITest 入口使用；
 5. 产物 `Info.plist` 的版本号与 build 号必须等于预期值；装进模拟器后再读一次已安装的 `Info.plist`，并核对已安装二进制的哈希；
 6. `simctl privacy grant camera` 预授权，无参启动后截图，OCR 确认没有系统权限弹窗；
-7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 42 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
+7. 每种取证方法在一个 12 秒的短用例上试一次，必须拿到非空值：截图、OCR、拷贝沙盒 `Documents/`、读 debug 日志字段（`session-*.jsonl` 的 43 键与 `remaining_seconds`；`idle-*.jsonl` 的 `idle_timer_disabled`）；
 8. 预检期间不得新增崩溃报告；
 9. 把 SHA、快照哈希（`snapshot.tar` 的 sha256）、二进制哈希和 UDID 冻结进 `preflight.json.frozen`。
 
