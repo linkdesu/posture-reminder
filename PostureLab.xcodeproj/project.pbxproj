@@ -35,6 +35,8 @@
 		4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */; };
 		4FA5FAF4E26E7AFE50117616 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865D8839C4C8F659BB29252A /* SessionController.swift */; };
 		5173A2809E39EEA36C67E665 /* VisionPoseMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7ACF7242CF00C1C8985848 /* VisionPoseMappingTests.swift */; };
+		518C9DB4E8162A1E1589184B /* PomodoroPauseAccountingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B802D31A2ED33DBE4701FF /* PomodoroPauseAccountingTests.swift */; };
+		56CB69B4F25F546BD795E15B /* PhaseEndCueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC7D83CA03CE7B556EA932E /* PhaseEndCueTests.swift */; };
 		58AF263DF6D7220A3D95E4D0 /* PomodoroSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */; };
 		5EB2B3992E53FBAD5343E0F3 /* CompletedTodayCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */; };
 		5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */; };
@@ -55,12 +57,14 @@
 		840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */; };
 		84DC3253816CF7E6E1ECE701 /* IdleTimerLogTriggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89FB5BAC46243600AF0A6D22 /* IdleTimerLogTriggerTests.swift */; };
 		87872474D802D4931833A367 /* RollCalibratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1F3CD2FBA55A3EB322DE50 /* RollCalibratorTests.swift */; };
+		882266A63B6AA31AB59E37B6 /* SettingsBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F55B988F0221CC5AC185F5BF /* SettingsBehaviorUITests.swift */; };
 		8ABEF14B2733003A70D3B1F8 /* ShoulderLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0E48A26B86CA16ADAC2919 /* ShoulderLine.swift */; };
 		8B46FC5F26C523A188889FDD /* SelectAllNumberField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */; };
 		8E1F39B8B7CB4297B4B69AF5 /* head_down.wav in Resources */ = {isa = PBXBuildFile; fileRef = 5F1CEF001EA36F12FB4E1B6F /* head_down.wav */; };
 		8E3B5FD5E74E760941F05AB8 /* UnmeasuredIntervalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B8CE88D404C6990604B567 /* UnmeasuredIntervalTests.swift */; };
 		92D5FE4A613E780A737E0FAF /* PomodoroCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D89124CB90CB32D31F1777E /* PomodoroCopy.swift */; };
 		936FA18086DD4D8A149BF18A /* IdleTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD3107ED24A698BFAF94104 /* IdleTimerController.swift */; };
+		93E2F1B2E9005A49ED350B35 /* LaunchDestinationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09715F0A97E792C3B27774F4 /* LaunchDestinationUITests.swift */; };
 		944A76A1C208C2E25A3E0D4B /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */; };
 		94E32C6F7AB36B7BBDF9CBC0 /* desk_lean.wav in Resources */ = {isa = PBXBuildFile; fileRef = D2E5D6DEB21A3900506F32F1 /* desk_lean.wav */; };
 		9519248368CD65D5A9B48D6E /* end_chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = E86DD762F759A830119DDC53 /* end_chime.wav */; };
@@ -71,6 +75,7 @@
 		A254F5561FB6D8D10A609078 /* SampleSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18493035B1BBEACE3179B76 /* SampleSource.swift */; };
 		A2B2BDD9FBAC33DF0FBD0C3F /* RollCalibrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B4357807F6F87232A997AE9 /* RollCalibrator.swift */; };
 		A3ACDEDF60B18F081F4D78F2 /* IdleTimerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */; };
+		AAD1449BEA675483DE61B7A7 /* PhaseEndCue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B4C343A1443AE520711B53 /* PhaseEndCue.swift */; };
 		ADC57D874E9D8D6D20022C39 /* PomodoroRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28BC245DEF113D2E19BAECC /* PomodoroRecord.swift */; };
 		AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */; };
 		B370D27AF06F42C9ED0FC4B9 /* PomodoroStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */; };
@@ -128,12 +133,14 @@
 /* Begin PBXFileReference section */
 		01417FF66BD4502D7D8F0556 /* SessionSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSummary.swift; sourceTree = "<group>"; };
 		040D7563C8041E76DE061B4A /* PerfMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfMonitor.swift; sourceTree = "<group>"; };
+		09715F0A97E792C3B27774F4 /* LaunchDestinationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchDestinationUITests.swift; sourceTree = "<group>"; };
 		0AD3107ED24A698BFAF94104 /* IdleTimerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleTimerController.swift; sourceTree = "<group>"; };
 		0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsView.swift; sourceTree = "<group>"; };
 		0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepthPipelineTests.swift; sourceTree = "<group>"; };
 		0DB04DE6C7DB7617E7A7C359 /* VisionJointSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionJointSource.swift; sourceTree = "<group>"; };
 		11D7E94DDA0D8BB8A23DBE48 /* PomodoroStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroStore.swift; sourceTree = "<group>"; };
 		13C0C8E3EFD057439798567B /* VerifyDriveUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyDriveUITests.swift; sourceTree = "<group>"; };
+		15B802D31A2ED33DBE4701FF /* PomodoroPauseAccountingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroPauseAccountingTests.swift; sourceTree = "<group>"; };
 		1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletedTodayCountTests.swift; sourceTree = "<group>"; };
 		16AEB838486856F512DE30ED /* Sensitivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sensitivity.swift; sourceTree = "<group>"; };
 		16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDebugLogger.swift; sourceTree = "<group>"; };
@@ -163,6 +170,7 @@
 		5B4357807F6F87232A997AE9 /* RollCalibrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollCalibrator.swift; sourceTree = "<group>"; };
 		5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistory.swift; sourceTree = "<group>"; };
 		5C6AD22B6A63C248873DD485 /* AppInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInfo.swift; sourceTree = "<group>"; };
+		5DC7D83CA03CE7B556EA932E /* PhaseEndCueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhaseEndCueTests.swift; sourceTree = "<group>"; };
 		5EE5AEE7BAB6B89581719950 /* ReminderPlayerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayerTests.swift; sourceTree = "<group>"; };
 		5F1CEF001EA36F12FB4E1B6F /* head_down.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = head_down.wav; sourceTree = "<group>"; };
 		621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngine.swift; sourceTree = "<group>"; };
@@ -189,6 +197,7 @@
 		8ACBAD20AF194FB0642508E5 /* PresenceGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenceGate.swift; sourceTree = "<group>"; };
 		8B188E6D1FA2567252D40AB2 /* FocusTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimeline.swift; sourceTree = "<group>"; };
 		8D89124CB90CB32D31F1777E /* PomodoroCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroCopy.swift; sourceTree = "<group>"; };
+		91B4C343A1443AE520711B53 /* PhaseEndCue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhaseEndCue.swift; sourceTree = "<group>"; };
 		922487CB54BBCDE0E210C1FC /* BodyPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyPoint.swift; sourceTree = "<group>"; };
 		9BC31AAFEA11537D658EF378 /* PresenceDebounceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenceDebounceTests.swift; sourceTree = "<group>"; };
 		A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = chin_rest.wav; sourceTree = "<group>"; };
@@ -225,6 +234,7 @@
 		F15B75C72C27B373EFE66CA1 /* PostureLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PostureLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringEngineTests.swift; sourceTree = "<group>"; };
 		F43C4382384E519C27CCCA4F /* PostureSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureSample.swift; sourceTree = "<group>"; };
+		F55B988F0221CC5AC185F5BF /* SettingsBehaviorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsBehaviorUITests.swift; sourceTree = "<group>"; };
 		F76A7ACBCAFF7D9C5AF1A422 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		FC66FD4FCBB2227E58111334 /* PomodoroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroView.swift; sourceTree = "<group>"; };
 		FE7551EC9FE93AF81703963F /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
@@ -313,8 +323,10 @@
 				B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */,
 				E79E2F95C211A5892BB6D46B /* KeyPointOverlayMotionTests.swift */,
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
+				5DC7D83CA03CE7B556EA932E /* PhaseEndCueTests.swift */,
 				CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */,
 				4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */,
+				15B802D31A2ED33DBE4701FF /* PomodoroPauseAccountingTests.swift */,
 				D71B3E27475A546270AB65DD /* PostureClassifierTests.swift */,
 				9BC31AAFEA11537D658EF378 /* PresenceDebounceTests.swift */,
 				6576736948F69AB4B011DBC6 /* PresenceGateTests.swift */,
@@ -341,6 +353,7 @@
 			isa = PBXGroup;
 			children = (
 				0AD3107ED24A698BFAF94104 /* IdleTimerController.swift */,
+				91B4C343A1443AE520711B53 /* PhaseEndCue.swift */,
 				4D597B6333310C45A83D6402 /* ReminderPlayer.swift */,
 				865D8839C4C8F659BB29252A /* SessionController.swift */,
 				52B770E14E689F2A1388F742 /* ThermalSampler.swift */,
@@ -411,10 +424,12 @@
 		DAC2BB503B3064BA5445728D /* PostureLabUITests */ = {
 			isa = PBXGroup;
 			children = (
+				09715F0A97E792C3B27774F4 /* LaunchDestinationUITests.swift */,
 				2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */,
 				63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */,
 				E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */,
 				21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */,
+				F55B988F0221CC5AC185F5BF /* SettingsBehaviorUITests.swift */,
 				27B58076E95CF62CD4BFA447 /* SettingsInputEdgeUITests.swift */,
 				3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */,
 				69C1C01A989EA0F7638BFECD /* SettingsPersistenceUITests.swift */,
@@ -601,6 +616,7 @@
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
 				727519A69FC6355C293A5060 /* PerfMonitor.swift in Sources */,
+				AAD1449BEA675483DE61B7A7 /* PhaseEndCue.swift in Sources */,
 				92D5FE4A613E780A737E0FAF /* PomodoroCopy.swift in Sources */,
 				18F7B9ED7DDAF423EC606023 /* PomodoroEngine.swift in Sources */,
 				B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */,
@@ -640,10 +656,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				93E2F1B2E9005A49ED350B35 /* LaunchDestinationUITests.swift in Sources */,
 				4BDD879D61EF392449490FC1 /* LaunchSurvivalUITests.swift in Sources */,
 				057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */,
 				F67598A50D6C2423066C12D4 /* PomodoroControlsUITests.swift in Sources */,
 				C4ED1E93986E15951CC41E39 /* ReportCopyUITests.swift in Sources */,
+				882266A63B6AA31AB59E37B6 /* SettingsBehaviorUITests.swift in Sources */,
 				E609AA18A2598BCC08E87DF5 /* SettingsInputEdgeUITests.swift in Sources */,
 				E85CDE8DF9C31E8BB8141418 /* SettingsInputUITests.swift in Sources */,
 				E198A08B21E3EAC5EDA03D2E /* SettingsPersistenceUITests.swift in Sources */,
@@ -668,8 +686,10 @@
 				A3ACDEDF60B18F081F4D78F2 /* IdleTimerTests.swift in Sources */,
 				3D74729205EC245D1F07331B /* KeyPointOverlayMotionTests.swift in Sources */,
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,
+				56CB69B4F25F546BD795E15B /* PhaseEndCueTests.swift in Sources */,
 				AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */,
 				C963277798D4975B291D662B /* PomodoroHistoryTests.swift in Sources */,
+				518C9DB4E8162A1E1589184B /* PomodoroPauseAccountingTests.swift in Sources */,
 				3ABA8AB36C9BB00AD1EFEA32 /* PostureClassifierTests.swift in Sources */,
 				0B859BC431977A2D9F21BAFA /* PresenceDebounceTests.swift in Sources */,
 				186867C3BB2E7D3FB29D15FB /* PresenceGateTests.swift in Sources */,

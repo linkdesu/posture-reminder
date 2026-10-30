@@ -156,8 +156,9 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(engine.phase, .shortBreak)
 
     // The default `autoStartFocus` is off: the break ends and the next focus waits for `.start`.
+    // The ended break is reported first, because the surface rings the end-of-phase sound for it.
     let events = feed(&engine, samples(3_000, from: 1500))
-    XCTAssertEqual(events, [.phaseChanged(to: .focus, index: 2)])
+    XCTAssertEqual(events, [.phaseEnded(.shortBreak), .phaseChanged(to: .focus, index: 2)])
     XCTAssertEqual(engine.phase, .focus)
     XCTAssertEqual(engine.focusIndex, 2)
     XCTAssertEqual(engine.remainingSeconds, 1500)
@@ -256,17 +257,19 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(feed(&engine, absentSamples(599, from: 600)), [])
     XCTAssertEqual(engine.isRunning, true)          // suspended, not stopped
     XCTAssertEqual(engine.isPausedByAbsence, true)
-    XCTAssertEqual(engine.remainingSeconds, 900)    // the countdown holds where it stood
-    XCTAssertEqual(engine.record.focusedSeconds, 600)
-    // AC5: the away time is not focus time, so it is credited to the pause exactly like a manual
-    // one — the whole 60 s band the parent's timeline draws grey.
-    XCTAssertEqual(engine.record.pausedSeconds, 59.8, accuracy: 0.2)
+    // The first three seconds of a missing face are the grace「无人」gives a lost frame
+    // (`GLOSSARY.md`), and the countdown is still counting through them: it stops at 603.1.
+    XCTAssertEqual(engine.remainingSeconds, 896.9, accuracy: 0.2)
+    XCTAssertEqual(engine.record.focusedSeconds, 603.1, accuracy: 0.2)
+    // AC5: everything past the grace is not focus time, so it is credited to the pause exactly like
+    // a manual one — the band the parent's timeline draws grey.
+    XCTAssertEqual(engine.record.pausedSeconds, 56.8, accuracy: 0.2)
 
     feed(&engine, samples(11, from: 659.9))         // back at 660.0, still there at 661.0
     XCTAssertEqual(engine.isPausedByAbsence, false)
-    XCTAssertEqual(engine.remainingSeconds, 899)
-    XCTAssertEqual(engine.record.focusedSeconds, 601)  // 661 s of clock, 60 s of it away
-    XCTAssertEqual(engine.record.pausedSeconds, 59.9, accuracy: 0.2)
+    XCTAssertEqual(engine.remainingSeconds, 895.9, accuracy: 0.2)
+    XCTAssertEqual(engine.record.focusedSeconds, 604.1, accuracy: 0.2)  // 661 s of clock, 57 s away
+    XCTAssertEqual(engine.record.pausedSeconds, 56.9, accuracy: 0.2)
     XCTAssertEqual(engine.phase, .focus)
   }
 
@@ -281,14 +284,14 @@ final class PomodoroEngineTests: XCTestCase {
     XCTAssertEqual(engine.phase, .focus)
     XCTAssertEqual(engine.isRunning, true)
     XCTAssertNil(engine.record.endedAt)
-    XCTAssertEqual(engine.remainingSeconds, 900)
-    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.remainingSeconds, 896.9, accuracy: 0.2)
+    XCTAssertEqual(engine.record.focusedSeconds, 603.1, accuracy: 0.2)
 
-    // Back at 899.1: the countdown picks up where it stopped, with the whole ten minutes left.
+    // Back at 899.1: the countdown picks up where it stopped, three seconds into the absence.
     XCTAssertEqual(feed(&engine, samples(1, from: 899)), [])
     XCTAssertEqual(engine.isPausedByAbsence, false)
-    XCTAssertEqual(engine.remainingSeconds, 900)
-    XCTAssertEqual(engine.record.focusedSeconds, 600)
+    XCTAssertEqual(engine.remainingSeconds, 896.8, accuracy: 0.2)
+    XCTAssertEqual(engine.record.focusedSeconds, 603.2, accuracy: 0.2)
     XCTAssertEqual(engine.phase, .focus)
   }
 
@@ -297,10 +300,11 @@ final class PomodoroEngineTests: XCTestCase {
     _ = engine.command(.start)
     feed(&engine, samples(6_000))
 
-    // Exactly 300 s away is still the same, suspended focus ...
+    // Exactly 300 s away is still the same, suspended focus — suspended from 603.1, when the
+    // three-second grace ran out, which is where the countdown stopped.
     XCTAssertEqual(feed(&engine, absentSamples(3_000, from: 600)), [])
     XCTAssertEqual(engine.isRunning, true)
-    XCTAssertEqual(engine.remainingSeconds, 900)
+    XCTAssertEqual(engine.remainingSeconds, 896.9, accuracy: 0.2)
 
     // ... and the tick that makes it 300.1 s ends it.
     let events = feed(&engine, absentSamples(10, from: 900))
@@ -314,10 +318,10 @@ final class PomodoroEngineTests: XCTestCase {
     // the first sample past 900.1 s, which is 900.2.
     XCTAssertEqual(record.endedAt, 900.2)
     XCTAssertEqual(record.plannedSeconds, 1500)
-    XCTAssertEqual(record.focusedSeconds, 600)      // ten minutes in, and never the absence
-    // The whole absence is time outside the focus, so it is credited to the pause the same way a
-    // manual one is (AC5); the interval up to the interrupting tick is included.
-    XCTAssertEqual(record.pausedSeconds, 300.1, accuracy: 0.2)
+    XCTAssertEqual(record.focusedSeconds, 603.1, accuracy: 0.2)  // ten minutes plus the grace
+    // The absence past the three-second grace is time outside the focus, so it is credited to the
+    // pause the same way a manual one is (AC5); the interval up to the interrupting tick is included.
+    XCTAssertEqual(record.pausedSeconds, 297.1, accuracy: 0.2)
     XCTAssertEqual(record.skippedBreak, false)
     XCTAssertEqual(record.focusIndex, 1)
 
@@ -340,23 +344,24 @@ final class PomodoroEngineTests: XCTestCase {
     _ = engine.command(.start)
 
     feed(&engine, samples(100))                      // t = 0.1 ... 10.0, face present
-    let atAbsence = engine.remainingSeconds
-    XCTAssertEqual(atAbsence, 290, accuracy: 0.1)
+    XCTAssertEqual(engine.remainingSeconds, 290, accuracy: 0.1)
 
     feed(&engine, absentSamples(40, from: 10))       // t = 10.1 ... 14.0, no face
     XCTAssertTrue(engine.isPausedByAbsence)
-    XCTAssertEqual(engine.remainingSeconds, atAbsence, accuracy: 1e-9,
-                   "an absence moved the countdown")
-    XCTAssertEqual(engine.record.pausedSeconds, 3.9, accuracy: 0.15)
+    // The absence began at 10.1 and the pause only starts three seconds later, so the countdown ran
+    // 3.1 s further and holds from there: 300 - 13.1 = 286.9.
+    XCTAssertEqual(engine.remainingSeconds, 286.9, accuracy: 0.15,
+                   "the countdown did not keep the three-second grace")
+    XCTAssertEqual(engine.record.pausedSeconds, 0.9, accuracy: 0.15)
 
     feed(&engine, samples(30, from: 14))             // t = 14.1 ... 17.0, the child is back
     XCTAssertFalse(engine.isPausedByAbsence)
-    XCTAssertEqual(engine.remainingSeconds, 287.1, accuracy: 0.1,
+    XCTAssertEqual(engine.remainingSeconds, 284.0, accuracy: 0.15,
                    "the focus did not resume where it stopped")
 
     let record = engine.record
-    XCTAssertEqual(record.pausedSeconds, 4.0, accuracy: 0.15)
-    XCTAssertEqual(record.focusedSeconds + record.pausedSeconds, 16.9, accuracy: 0.2,
+    XCTAssertEqual(record.pausedSeconds, 1.0, accuracy: 0.15)
+    XCTAssertEqual(record.focusedSeconds + record.pausedSeconds, 17.0, accuracy: 0.2,
                    "the record stopped accounting for its wall clock")
   }
 
