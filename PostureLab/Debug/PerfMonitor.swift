@@ -19,7 +19,9 @@ import Foundation
 /// - `cloud_ms_avg` / `cloud_ms_max`：点云取样
 /// - `vision_ms_avg` / `vision_ms_max`：一次 Vision 推理 + 关节映射
 /// - `assess_ms_avg` / `assess_ms_max`：一次姿态判定
-/// - `cloud_frames` / `cloud_points`：该秒内发出的点云帧数，以及最后一帧的点数（应恒为 600）
+/// - `cloud_frames` / `cloud_points_min` / `cloud_points_max`：该秒内的点云帧数，以及这一秒里最
+///   少/最多的点数。逐帧原始事实在 `frames-*.jsonl`；这里保留极值，是为了让「同一秒里既有点云又
+///   有空格」再也不会被一个末值掩盖（0.6.8 (14) 的 `cloud_points` 就只记末值）。
 /// - `cloud_gap_p95_ms` / `cloud_gap_max_ms`：该秒内相邻两帧点云更新间隔的 p95 与最大值；
 ///   068-2 的流畅门槛（未降级时 p95 ≤ 40 ms、最大 ≤ 200 ms）就按这两个键判
 /// - `vision_calls` / `assess_count`：该秒内的推理次数与判定次数
@@ -54,7 +56,8 @@ final class PerfMonitor {
   private var cloudMax: TimeInterval = 0
   private var cloudCalls = 0
   private var cloudFrames = 0
-  private var cloudPoints = 0
+  private var cloudPointsMin = Int.max
+  private var cloudPointsMax = 0
   private var cloudGaps: [TimeInterval] = []
   private var lastCloudFrameAt: TimeInterval?
 
@@ -151,7 +154,8 @@ final class PerfMonitor {
     cloudTotal += seconds
     cloudMax = max(cloudMax, seconds)
     cloudFrames += 1
-    cloudPoints = points
+    cloudPointsMin = min(cloudPointsMin, points)
+    cloudPointsMax = max(cloudPointsMax, points)
     lock.unlock()
   }
 
@@ -197,7 +201,8 @@ final class PerfMonitor {
                          segment: (segmentCalls, segmentTotal, segmentMax),
                          cloud: (cloudCalls, cloudTotal, cloudMax),
                          cloudFrames: cloudFrames,
-                         cloudPoints: cloudPoints,
+                         cloudPointsMin: cloudPointsMin == Int.max ? 0 : cloudPointsMin,
+                         cloudPointsMax: cloudPointsMax,
                          cloudGaps: (p95, gaps.last ?? 0),
                          vision: (visionCalls, visionTotal, visionMax),
                          assess: (assessments, assessTotal, assessMax),
@@ -220,6 +225,8 @@ final class PerfMonitor {
     cloudTotal = 0
     cloudMax = 0
     cloudFrames = 0
+    cloudPointsMin = Int.max
+    cloudPointsMax = 0
     cloudGaps = []
     lastCloudFrameAt = nil
     visionCalls = 0
@@ -243,7 +250,8 @@ final class PerfMonitor {
                    segment: (Int, TimeInterval, TimeInterval),
                    cloud: (Int, TimeInterval, TimeInterval),
                    cloudFrames: Int,
-                   cloudPoints: Int,
+                   cloudPointsMin: Int,
+                   cloudPointsMax: Int,
                    cloudGaps: (TimeInterval, TimeInterval) = (0, 0),
                    vision: (Int, TimeInterval, TimeInterval),
                    assess: (Int, TimeInterval, TimeInterval),
@@ -280,7 +288,8 @@ final class PerfMonitor {
       + ",\"assess_ms_avg\":\(milliseconds(average(assess)))"
       + ",\"assess_ms_max\":\(milliseconds(assess.2))"
       + ",\"cloud_frames\":\(cloudFrames)"
-      + ",\"cloud_points\":\(cloudPoints)"
+      + ",\"cloud_points_min\":\(cloudPointsMin)"
+      + ",\"cloud_points_max\":\(cloudPointsMax)"
       + ",\"cloud_gap_p95_ms\":\(milliseconds(cloudGaps.0))"
       + ",\"cloud_gap_max_ms\":\(milliseconds(cloudGaps.1))"
       + ",\"vision_calls\":\(vision.0)"

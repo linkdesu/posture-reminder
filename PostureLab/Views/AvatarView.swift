@@ -58,10 +58,13 @@ struct AvatarView: View {
     TimelineView(.animation(minimumInterval: Self.frameInterval, paused: !hasBody)) { timeline in
       Canvas(opaque: true, rendersAsynchronously: true) { context, size in
         #if DEBUG
-        // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数由 PerfMonitor 加锁。
+        // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数与逐帧记录都由各自加锁。
         let renderStartedAt = ProcessInfo.processInfo.systemUptime
         defer {
-          PerfMonitor.shared.recordRender(seconds: ProcessInfo.processInfo.systemUptime - renderStartedAt)
+          let seconds = ProcessInfo.processInfo.systemUptime - renderStartedAt
+          PerfMonitor.shared.recordRender(seconds: seconds)
+          // 把这一帧的上屏耗时与延迟补进它对应的深度帧记录（frames-*.jsonl）。
+          FrameLog.shared.rendered(seconds: seconds)
         }
         PerfMonitor.shared.recordFrame()
         #endif
