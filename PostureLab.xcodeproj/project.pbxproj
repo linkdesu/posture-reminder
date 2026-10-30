@@ -577,7 +577,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nDEST=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GitCommit.txt\"\ngit -C \"${SRCROOT}\" rev-parse --short HEAD > \"${DEST}\"\n";
+			shellScript = "set -eu\nDEST=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GitCommit.txt\"\ncommit=$(git -C \"${SRCROOT}\" rev-parse --short HEAD 2>/dev/null || true)\nif [ -z \"${commit}\" ]; then\n  commit=\"${GIT_COMMIT:-}\"\nfi\nif [ -z \"${commit}\" ] && [ -f \"${SRCROOT}/.verify-commit\" ]; then\n  IFS= read -r commit < \"${SRCROOT}/.verify-commit\" || true\nfi\nif [ -z \"${commit}\" ]; then\n  echo \"error: GitCommit: 没有 git 仓库，也没有 GIT_COMMIT 环境变量或 ${SRCROOT}/.verify-commit\" >&2\n  echo \"error: 无法确定本构建对应的 commit；预检快照应在生成时写入 .verify-commit\" >&2\n  exit 1\nfi\nprintf '%s\\n' \"${commit}\" > \"${DEST}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
