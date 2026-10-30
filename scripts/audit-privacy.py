@@ -77,7 +77,7 @@ FORBIDDEN = [
 URL_LITERAL = re.compile(r'"(?:https?|ws|wss)://')
 
 # 规定文案：一字不差，标点也不换。
-CAMERA_USAGE_DESCRIPTION = "用于在本机识别坐姿，画面不会显示、保存或上传"
+CAMERA_USAGE_DESCRIPTION = "画面只在手机内存里处理，用于识别坐姿；不保存、不上传，也不显示摄像头画面"
 DISPLAY_NAME = "PostureLab"
 
 

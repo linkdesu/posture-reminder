@@ -65,13 +65,19 @@ def perf_rows(seconds: int, *, degraded_seconds: set[int] | None = None) -> list
                      "sanity_eye_below_mouth": 0, "sanity_shoulder_above_ear": 0,
                      "sanity_points_without_person": 0,
                      "serious_seconds": 150 if degraded else 0,
-                     "degraded_seconds": 150 if degraded else 0})
+                     "degraded_seconds": 150 if degraded else 0,
+                     # 0.6.8 (19)：静坐下的滚动 p95 与右肩累计帧数。
+                     "keypoint_jitter_p95": 0.0062, "keypoint_still_frames": 300 * (second + 1),
+                     "cloud_jitter_p95": 0.0134, "cloud_still_frames": 600 * (second + 1),
+                     "right_shoulder_frames": 300, "shoulder_frames": 300,
+                     "cloud_blank_with_face_frames": 0})
     return rows
 
 
 def frame_rows(seconds: int, *, start: int = 0, points: int = 600,
-               spacing: float = 1 / 30, degraded=False) -> list[dict]:
-    """逐帧记录：默认 30 Hz、每帧 600 点。"""
+               spacing: float = 1 / 30, degraded=False,
+               face: bool | None = True) -> list[dict]:
+    """逐帧记录：默认 30 Hz、每帧 600 点、同帧检测到脸、上屏点数为 points。"""
     rows = []
     count = int(seconds / spacing)
     for index in range(count):
@@ -81,7 +87,8 @@ def frame_rows(seconds: int, *, start: int = 0, points: int = 600,
                      "segment_ms": 82.0, "cloud_ms": 0.2, "points": points,
                      "mask_cells": 1200 if points else 0, "depth_valid": 0.98,
                      "nearest_m": 0.42, "degraded": degraded, "cloud_emitted": True,
-                     "render_ms": 0.4, "render_latency_ms": 21.0})
+                     "render_ms": 0.4, "render_latency_ms": 21.0,
+                     "visible_points": points if points else 0, "face_detected": face})
     return rows
 
 
@@ -187,7 +194,7 @@ class DeviceLogsTests(unittest.TestCase):
         self.assertIn("结论：INSUFFICIENT_DATA", r.stdout)
 
     def test_zero_cloud_points_is_insufficient(self):
-        r = self.run_device_logs(**self.fixtures(frames=frame_rows(DURATION, points=0)))
+        r = self.run_device_logs(**self.fixtures(frames=frame_rows(DURATION, points=0, face=False)))
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("INSUFFICIENT_DATA cloud-smooth", r.stdout)
 
@@ -247,7 +254,7 @@ class DeviceLogsTests(unittest.TestCase):
 
     def test_cloud_with_too_few_pointed_frames_is_insufficient(self):
         # 只有 20 帧有点云（< 30）：点数固定这件事没有被验证过。
-        frames = frame_rows(DURATION, points=0)
+        frames = frame_rows(DURATION, points=0, face=False)
         for row in frames[:20]:
             row["points"] = 600
         r = self.run_device_logs(**self.fixtures(frames=frames))
@@ -255,8 +262,87 @@ class DeviceLogsTests(unittest.TestCase):
         self.assertIn("INSUFFICIENT_DATA cloud-smooth", r.stdout)
         self.assertIn("有点云", r.stdout)
 
-    # --- shoulders-available-ratio：坐直窗口来自 test_segment 段标记 --------
+    # --- 抖动与点云空白（issue #6 AC5 / AC7） --------------------------------
 
+    def test_keypoint_jitter_over_one_percent_fails(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row["keypoint_jitter_p95"] = 0.012
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL keypoint-jitter", r.stdout)
+        self.assertIn("1.20%", r.stdout)
+
+    def test_keypoint_jitter_at_the_limit_passes(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row["keypoint_jitter_p95"] = 0.010
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS keypoint-jitter", r.stdout)
+
+    def test_cloud_jitter_over_two_percent_fails(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row["cloud_jitter_p95"] = 0.025
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL cloud-jitter", r.stdout)
+
+    def test_jitter_without_samples_is_insufficient(self):
+        # 0.6.8 (18) 的日志没有抖动键：不能读成「零抖动」。
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row.pop("keypoint_jitter_p95", None)
+            row.pop("cloud_jitter_p95", None)
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA keypoint-jitter", r.stdout)
+        self.assertIn("INSUFFICIENT_DATA cloud-jitter", r.stdout)
+
+    def test_a_blank_cloud_while_a_face_is_detected_fails(self):
+        frames = frame_rows(DURATION, points=600)
+        for row in frames[300:330]:
+            row["visible_points"] = 0
+        r = self.run_device_logs(**self.fixtures(frames=frames))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL cloud-not-blank", r.stdout)
+
+    def test_a_blank_cloud_without_face_evidence_is_insufficient(self):
+        # 没检测到脸时「点云空白」不违反正文：没有可判对象。
+        r = self.run_device_logs(**self.fixtures(frames=frame_rows(DURATION, face=False)))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA cloud-not-blank", r.stdout)
+
+    def test_cloud_never_blank_while_a_face_is_detected_passes(self):
+        r = self.run_device_logs(**self.fixtures())
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS cloud-not-blank", r.stdout)
+
+    # --- 右肩可用帧 < 50%：只记录并上报，不改判定 -----------------------------
+
+    def test_right_shoulder_below_half_is_reported_without_failing(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row["right_shoulder_frames"] = 37
+            row["shoulder_frames"] = 300
+        r = self.run_device_logs(**self.fixtures(perf=perf))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("REPORT right-shoulder", r.stdout)
+        self.assertIn("12.3%", r.stdout)
+        self.assertIn("低于 50%", r.stdout)
+
+    def test_right_shoulder_report_falls_back_to_the_joint_frames(self):
+        perf = perf_rows(DURATION)
+        for row in perf:
+            row.pop("right_shoulder_frames", None)
+            row.pop("shoulder_frames", None)
+        joints = [joint_row(T0 + index * 100) for index in range(300)]
+        r = self.run_device_logs(**self.fixtures(joints=joints, perf=perf))
+        self.assertIn("REPORT right-shoulder", r.stdout)
+        self.assertIn("300/300", r.stdout)
+
+    # --- shoulders-available-ratio：坐直窗口来自 test_segment 段标记 --------
     # 段标记：300 s 起坐直 20 秒、320 起歪肩、340 起低头、360 起离开。
     MARKS = [(300, "坐直"), (320, "歪肩"), (340, "低头"), (360, "离开")]
     # 关节只在 300–320（坐直段）与两个体态窗口里可见：status_changed 的 good 窗口被这些空白帧

@@ -14,7 +14,7 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audit-privacy
 PROJECT_OK = """\
 settings:
   base:
-    INFOPLIST_KEY_NSCameraUsageDescription: "用于在本机识别坐姿，画面不会显示、保存或上传"
+    INFOPLIST_KEY_NSCameraUsageDescription: "画面只在手机内存里处理，用于识别坐姿；不保存、不上传，也不显示摄像头画面"
     INFOPLIST_KEY_CFBundleDisplayName: "PostureLab"
 """
 
@@ -74,7 +74,7 @@ class AuditPrivacyTests(unittest.TestCase):
         self.assertEqual(audit(files).returncode, 1)
 
     def test_camera_copy_is_exact(self):
-        bad = PROJECT_OK.replace("画面不会显示、保存或上传", "画面不会上传")
+        bad = PROJECT_OK.replace("手机内存里处理", "本机处理")
         self.assertEqual(audit(project=bad).returncode, 1)
 
     def test_display_name_is_posturelab(self):
