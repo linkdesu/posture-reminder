@@ -39,6 +39,10 @@ final class VisionJointSource {
 
   /// 本文件里被问到的关节名与应用的关节名一一对应。只问头、颈、双肩：其余关节这个版本不显示、
   /// 不判定、不进日志。
+  /// 面部特征：嘴的外轮廓。Vision 的人体姿态没有嘴，所以只有在同帧找到人脸时才取一次
+  /// `VNDetectFaceLandmarksRequest` 的 outerLips；取不到就不画嘴，绝不拿眼睛与鼻子推算一个假的嘴。
+  private let faceRequest = VNDetectFaceLandmarksRequest()
+
   private static let jointNames: [(key: VNHumanBodyPoseObservation.JointName, id: JointID)] = [
     (.nose, .nose),
     (.leftEye, .leftEye), (.rightEye, .rightEye),
@@ -105,11 +109,24 @@ final class VisionJointSource {
       }
     }
 
+    var mouth: [CGPointLike] = []
+    if observation != nil {
+      // 人脸只在有身体时再找一次；失败就当作没有面部特征。
+      try? handler.perform([faceRequest])
+      if let face = (faceRequest.results ?? []).max(by: { $0.boundingBox.width < $1.boundingBox.width }),
+         let lips = face.landmarks?.outerLips {
+        mouth = lips.normalizedPoints.map { point in
+          VisionPoseMapping.imagePoint(x: Double(point.x), y: Double(point.y), portrait: portrait)
+        }
+      }
+    }
+
     let mapped = VisionPoseMapping.joints(from: points)
     return VisionJointFrame(t: t,
                             joints: mapped.joints,
                             detected: observation != nil,
                             rawConfidence: rawConfidence,
+                            mouth: mouth,
                             shouldersInvalidated: mapped.shouldersInvalidated,
                             inferenceSeconds: inferenceSeconds)
   }

@@ -24,6 +24,8 @@ struct VisionJointFrame: Equatable {
   /// 模型对八个关节给出的**原始**置信度（`0.5` 门槛之前），键是 `JointID.rawValue`；模型没报这个
   /// 关节时该键为 nil。只用来看模型的表现，不参与任何判定。
   var rawConfidence: [String: Double]
+  /// 嘴的外轮廓（归一化坐标，按轮廓顺序）；同帧找人脸失败时为空。
+  var mouth: [CGPointLike] = []
   /// 双肩因为落在鼻以上被整帧作废。真机上这个计数必须为 0。
   var shouldersInvalidated: Bool
   /// 单次推理耗时，秒。

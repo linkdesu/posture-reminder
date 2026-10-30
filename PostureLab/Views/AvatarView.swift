@@ -86,20 +86,21 @@ struct AvatarView: View {
         // z == 0 是「这一格没有读数」的占位：固定网格的槽位在人体外时会保留旧值直到过期，
         // 真正的空槽位不参与绘制，也不参与下面的质心计算。
         let visible = points.filter { $0.z > 0 }
-        let cloud = visible.isEmpty ? BodyCloud.points(for: geometry.joints) : visible
         #if DEBUG
-        FrameLog.shared.noteVisiblePoints(cloud.count)
+        FrameLog.shared.noteVisiblePoints(visible.count)
         #endif
-        guard !cloud.isEmpty else {
-          drawSilhouette(in: &context, size: size)
-          return
+        // 0.6.8 (17)：人形由 Vision 画，深度点云只是可选的暗色背景轮廓（设置项默认开）。
+        if geometry.outlineEnabled, !visible.isEmpty {
+          draw(visible, geometry: geometry, in: &context, size: size, dim: Self.outlineDim)
         }
-        draw(cloud, geometry: geometry, in: &context, size: size)
 
-        // 关键点：只看 4 个部位，缺一个就按「低于门槛」走保持/淡出。
         let overlay = keyPoints.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
         if overlay.alpha > 0.01, !overlay.points.isEmpty {
-          drawKeyPoints(overlay.points, alpha: overlay.alpha, in: &context, size: size)
+          drawFigure(overlay.points, mouth: geometry.mouth, alpha: overlay.alpha,
+                     in: &context, size: size)
+        } else if !geometry.outlineEnabled || visible.isEmpty {
+          // 既没有人形、也没有背景轮廓时才退回矢量轮廓，绝不空屏。
+          drawSilhouette(in: &context, size: size)
         }
       }
     }
@@ -121,7 +122,8 @@ struct AvatarView: View {
   private func draw(_ points: [BodyPoint],
                     geometry: PoseGeometry,
                     in context: inout GraphicsContext,
-                    size: CGSize) {
+                    size: CGSize,
+                    dim: Double = 1) {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
 
@@ -182,10 +184,10 @@ struct AvatarView: View {
       let opacity = Self.particleMinOpacity + Self.particleMaxOpacity * nearness
       if !bands[band].isEmpty {
         let ink = Self.farInk.mixed(with: Self.nearInk, nearness)
-        context.fill(bands[band], with: .color(ink.color(opacity: opacity)))
+        context.fill(bands[band], with: .color(ink.color(opacity: opacity * dim)))
       }
       if let alertInk, !alertBands[band].isEmpty {
-        context.fill(alertBands[band], with: .color(alertInk.opacity(opacity)))
+        context.fill(alertBands[band], with: .color(alertInk.opacity(opacity * dim)))
       }
     }
   }
@@ -253,46 +255,61 @@ struct AvatarView: View {
 
   /// 4 个关键点：头（鼻点，没有鼻点时取双眼中点）、颈、左右肩。缺任何一个就不返回整组，
   /// 由 `KeyPointOverlayMotion` 决定保持还是淡出。
+  /// 人形的点：鼻、双眼、双耳、颈、双肩——每帧只收这一帧真正测到的，缺的就缺席（由过渡层负责
+  /// 保持与淡出）。嘴是轮廓，单独由 `drawFigure` 画。
   static func keyPoints(from joints: [JointID: JointSample]) -> [JointID: CGPoint] {
-    let head: CGPoint? = joints[.nose]?.position ?? {
-      guard let left = joints[.leftEye], let right = joints[.rightEye] else { return nil }
-      return CGPoint(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2)
-    }()
-    guard let head,
-          let neck = joints[.neck]?.position,
-          let left = joints[.leftShoulder]?.position,
-          let right = joints[.rightShoulder]?.position else { return [:] }
-    return [.nose: head, .neck: neck, .leftShoulder: left, .rightShoulder: right]
+    var points: [JointID: CGPoint] = [:]
+    for id in [JointID.nose, .leftEye, .rightEye, .leftEar, .rightEar, .neck,
+               .leftShoulder, .rightShoulder] {
+      if let joint = joints[id] { points[id] = joint.position }
+    }
+    return points
   }
 
-  /// 关键点：颈到双肩两条细线 + 四个大点。不画文字、不画其它关节。
-  private func drawKeyPoints(_ points: [JointID: CGPoint],
-                             alpha: Double,
-                             in context: inout GraphicsContext,
-                             size: CGSize) {
+  /// Vision 人形：鼻/眼/耳/颈/双肩的点、嘴的外轮廓，以及**只限这几种**连线：
+  /// 耳–眼、眼–眼、眼–耳（左右各一段），颈–左肩、颈–右肩。没有别的线（0.6.8 (16) 头上那个 M
+  /// 形来自旧的 COCO 骨架鼻–眼–耳链，已随 DebugOverlay 一起删除）。不画任何文字。
+  static let figureLines: [(JointID, JointID)] = [
+    (.leftEar, .leftEye), (.leftEye, .rightEye), (.rightEye, .rightEar),
+    (.neck, .leftShoulder), (.neck, .rightShoulder),
+  ]
+
+  private func drawFigure(_ points: [JointID: CGPoint],
+                          mouth: [CGPointLike],
+                          alpha: Double,
+                          in context: inout GraphicsContext,
+                          size: CGSize) {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
     let ink = Self.keyInk.color(opacity: alpha)
 
     var lines = Path()
-    if let neck = points[.neck], let left = points[.leftShoulder], let right = points[.rightShoulder] {
-      lines.move(to: PoseProjection.point(neck, in: rect))
-      lines.addLine(to: PoseProjection.point(left, in: rect))
-      lines.move(to: PoseProjection.point(neck, in: rect))
-      lines.addLine(to: PoseProjection.point(right, in: rect))
+    for (from, to) in Self.figureLines {
+      guard let start = points[from], let end = points[to] else { continue }
+      lines.move(to: PoseProjection.point(start, in: rect))
+      lines.addLine(to: PoseProjection.point(end, in: rect))
     }
     context.stroke(lines, with: .color(ink),
                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
 
-    // 点半径是点云粒子的 3 倍：孩子的四个部位要一眼认出来。
+    // 点半径是人形之外的 3 倍：孩子的部位要一眼认出来。
     let radius = min(rect.width, rect.height) * Self.particleRadiusScale * 3
-    for id in [JointID.nose, .neck, .leftShoulder, .rightShoulder] {
-      guard let point = points[id] else { continue }
+    for (_, point) in points {
       let centre = PoseProjection.point(point, in: rect)
       let dot = CGRect(x: centre.x - radius, y: centre.y - radius,
                        width: radius * 2, height: radius * 2)
       context.fill(Path(ellipseIn: dot), with: .color(ink))
     }
+
+    // 嘴：外轮廓闭合折线（Vision 面部特征；取不到就不画，不伪造）。
+    guard mouth.count >= 3 else { return }
+    var lips = Path()
+    lips.move(to: PoseProjection.point(CGPoint(x: mouth[0].x, y: mouth[0].y), in: rect))
+    for point in mouth.dropFirst() {
+      lips.addLine(to: PoseProjection.point(CGPoint(x: point.x, y: point.y), in: rect))
+    }
+    lips.closeSubpath()
+    context.stroke(lips, with: .color(ink), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
   }
 
   /// A vector silhouette of a seated upper body — head, neck, shoulders and torso in outline — for
@@ -430,6 +447,8 @@ private extension AvatarView {
   /// The cloud's depth ramp, far to near: a dark slate brightening to a near white, so depth reads
   /// from brightness and size without competing with the palette.
   static let farInk = Ink(r: 0.24, g: 0.29, b: 0.37)
+  /// 深度背景轮廓的亮度：人形是主角，点云退到 0.18。
+  static let outlineDim = 0.18
   /// 关键点的对比色：暖琥珀，和点云的冷灰蓝、以及三种体态配色都能分开。
   static let keyInk = Ink(r: 1.0, g: 0.78, b: 0.28)
   static let nearInk = Ink(r: 0.86, g: 0.91, b: 0.97)

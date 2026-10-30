@@ -25,6 +25,13 @@ final class Settings: ObservableObject {
       store(baselinePitchDeg, forKey: Keys.baselinePitchDeg)
     }
   }
+  /// 深度点云是否作为人形之后的暗色背景轮廓（0.6.8 (17)，默认开；关掉方便对比开关效果）。
+  @Published var outlineEnabled: Bool {
+    didSet {
+      defaults.set(outlineEnabled, forKey: Keys.outlineEnabled)
+    }
+  }
+
   @Published var avatarEnabled: Bool {
     didSet {
       guard !suppressPersistence else { return }
@@ -68,6 +75,9 @@ final class Settings: ObservableObject {
       ? defaults.double(forKey: Keys.baselinePitchDeg)
       : nil
     // Avatar mode is on by default, so absence of the key must read as true, not `bool`'s false.
+    outlineEnabled = defaults.object(forKey: Keys.outlineEnabled) != nil
+      ? defaults.bool(forKey: Keys.outlineEnabled)
+      : true
     avatarEnabled = defaults.object(forKey: Keys.avatarEnabled) != nil
       ? defaults.bool(forKey: Keys.avatarEnabled)
       : true
@@ -109,6 +119,7 @@ final class Settings: ObservableObject {
     static let baselineDistanceCM = "settings.baselineDistanceCM"
     static let baselinePitchDeg = "settings.baselinePitchDeg"
     static let avatarEnabled = "settings.avatarEnabled"
+    static let outlineEnabled = "settings.outlineEnabled"
     static let experimentalPostures = "settings.experimentalPostures"
   }
 }

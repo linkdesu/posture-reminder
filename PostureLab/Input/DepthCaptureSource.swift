@@ -257,6 +257,14 @@ final class DepthCaptureSource: NSObject, SampleSource {
 
   /// 这一时刻的在场结论：Vision 最近一帧没有过期、且连续 `presenceStreakRequired` 帧都有头部证据。
   /// 过期时不下结论（nil，由样本的距离回退）。
+  private func mouth(at t: TimeInterval) -> [CGPointLike] {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let frame = latestJoints,
+          !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return [] }
+    return frame.mouth
+  }
+
   private func personPresent(at t: TimeInterval) -> Bool? {
     stateLock.lock()
     defer { stateLock.unlock() }
@@ -304,7 +312,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
                                depthAvailable: observation?.mask != nil,
                                cloud: observation?.cloud ?? [],
                                unavailableJoints: Set(JointID.allCases).subtracting(joints.keys),
-                               personPresent: personPresent(at: t))
+                               personPresent: personPresent(at: t),
+                               mouth: mouth(at: t))
     DispatchQueue.main.async { [weak self] in
       self?.onSample?(sample)
     }

@@ -20,6 +20,8 @@ struct PostureSample: Equatable {
   /// 保持 nil，由距离回退。0.6.8 (16) 起「在场/暂停」看这个，不看深度：真机日志里出现过 4.9 秒没有
   /// 检测到人却没有暂停事件的情况，那次深度一直有 600 点，按深度判在场就永远不停表。
   var personPresent: Bool? = nil
+  /// 嘴的外轮廓（归一化坐标）；没有面部特征时为空。
+  var mouth: [CGPointLike] = []
 
   /// 是否有人在场。有 Vision 结论时以它为准；没有（脚本源、Vision 尚未跑第一帧）才退回距离。
   var facePresent: Bool { personPresent ?? (distanceCM != nil) }
