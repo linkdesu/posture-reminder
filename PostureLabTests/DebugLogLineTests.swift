@@ -128,13 +128,17 @@ final class DebugLogLineTests: XCTestCase {
   func testJointFrameLineCarriesConfidenceAndVisibilityPerJoint() throws {
     let line = JointFrameLog.line(JointFrameDebugSample(
       sessionT: 12.5,
+      detected: true,
       stale: false,
       shouldersInvalidated: false,
       confidence: ["nose": 0.93, "leftShoulder": 0.71, "rightShoulder": 0.68, "neck": 0.9],
+      rawConfidence: ["nose": 0.93, "leftShoulder": 0.71, "rightShoulder": 0.68, "neck": 0.9,
+                      "leftEye": 0.31],
       visible: ["nose": true, "leftShoulder": true, "rightShoulder": true, "neck": true]))
     let values = try json(line)
 
     XCTAssertEqual(values["session_t"] as? Double ?? 0, 12.5, accuracy: 0.001)
+    XCTAssertEqual(values["detected"] as? Bool, true)
     XCTAssertEqual(values["stale"] as? Bool, false)
     XCTAssertEqual(values["shoulders_invalidated"] as? Bool, false)
     XCTAssertEqual(values["shoulders_available"] as? Bool, true)
@@ -148,17 +152,24 @@ final class DebugLogLineTests: XCTestCase {
     let eye = try XCTUnwrap(joints["leftEye"] as? [String: Any])
     XCTAssertNil(eye["c"] as? Double, "an invisible joint has no confidence")
     XCTAssertEqual(eye["v"] as? Bool, false)
+    // 原始分数保留门槛之前的读数：0.31 被 0.5 过滤掉，但日志里看得见「模型报过这只眼」。
+    let raw = try XCTUnwrap(values["raw"] as? [String: Any])
+    XCTAssertEqual(raw["leftEye"] as? Double ?? 0, 0.31, accuracy: 0.001)
+    XCTAssertEqual(raw["nose"] as? Double ?? 0, 0.93, accuracy: 0.001)
   }
 
   func testJointFrameLineReportsAStalePairAndNoShoulders() throws {
     let line = JointFrameLog.line(JointFrameDebugSample(
       sessionT: 3,
+      detected: false,
       stale: true,
       shouldersInvalidated: true,
       confidence: [:],
+      rawConfidence: [:],
       visible: [:]))
     let values = try json(line)
 
+    XCTAssertEqual(values["detected"] as? Bool, false, "nobody in frame is not a filtered-out joint")
     XCTAssertEqual(values["stale"] as? Bool, true)
     XCTAssertEqual(values["shoulders_invalidated"] as? Bool, true)
     XCTAssertEqual(values["shoulders_available"] as? Bool, false)

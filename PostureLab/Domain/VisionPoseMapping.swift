@@ -16,7 +16,14 @@ struct VisionPosePoint: Equatable {
 struct VisionJointFrame: Equatable {
   /// 推理所用彩色帧的采集时刻（会话时钟，秒）。
   var t: TimeInterval
+  /// 过了置信度门槛、可以进入判定的关节。
   var joints: [JointID: JointSample]
+  /// 模型这一帧是否报出了一个人。为 false 表示「画面里没人」；为 true 而某个关节不在 `joints`
+  /// 里，则是「模型看到了、但置信度没过门槛」——两者在日志里必须分得开。
+  var detected: Bool
+  /// 模型对八个关节给出的**原始**置信度（`0.5` 门槛之前），键是 `JointID.rawValue`；模型没报这个
+  /// 关节时该键为 nil。只用来看模型的表现，不参与任何判定。
+  var rawConfidence: [String: Double]
   /// 双肩因为落在鼻以上被整帧作废。真机上这个计数必须为 0。
   var shouldersInvalidated: Bool
   /// 单次推理耗时，秒。

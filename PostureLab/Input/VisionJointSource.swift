@@ -79,7 +79,8 @@ final class VisionJointSource {
     do {
       try handler.perform([request])
     } catch {
-      return VisionJointFrame(t: t, joints: [:], shouldersInvalidated: false,
+      return VisionJointFrame(t: t, joints: [:], detected: false, rawConfidence: [:],
+                              shouldersInvalidated: false,
                               inferenceSeconds: ProcessInfo.processInfo.systemUptime - startedAt)
     }
     let inferenceSeconds = ProcessInfo.processInfo.systemUptime - startedAt
@@ -88,9 +89,12 @@ final class VisionJointSource {
     let observation = (request.results ?? []).max { $0.confidence < $1.confidence }
 
     var points: [VisionPosePoint] = []
+    // 模型给出的原始分数，门槛之前：日志靠它区分「没人」与「被 0.5 过滤掉」。
+    var rawConfidence: [String: Double] = [:]
     if let observation {
       for name in Self.jointNames {
         guard let recognized = try? observation.recognizedPoint(name.key) else { continue }
+        rawConfidence[name.id.rawValue] = Double(recognized.confidence)
         let image = VisionPoseMapping.imagePoint(x: Double(recognized.location.x),
                                                  y: Double(recognized.location.y),
                                                  portrait: portrait)
@@ -104,6 +108,8 @@ final class VisionJointSource {
     let mapped = VisionPoseMapping.joints(from: points)
     return VisionJointFrame(t: t,
                             joints: mapped.joints,
+                            detected: observation != nil,
+                            rawConfidence: rawConfidence,
                             shouldersInvalidated: mapped.shouldersInvalidated,
                             inferenceSeconds: inferenceSeconds)
   }
