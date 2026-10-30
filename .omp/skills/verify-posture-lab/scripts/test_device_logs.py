@@ -212,6 +212,32 @@ class DeviceLogsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertIn("PASS degradation", r.stdout)
 
+    # --- cloud-smooth：点数只要「有点云的帧固定」就算过 -----------------------
+
+    def test_cloud_points_fixed_below_the_budget_pass(self):
+        # 600 不再是判据：点数固定 480 也是「固定」，改预算不该让这条判定失效。
+        r = self.run_device_logs(**self.fixtures(frames=frame_rows(DURATION, points=480)))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS cloud-smooth", r.stdout)
+        self.assertIn("点数固定为 480", r.stdout)
+
+    def test_cloud_points_that_change_between_frames_fail(self):
+        frames = frame_rows(300) + frame_rows(300, start=300, points=480)
+        r = self.run_device_logs(**self.fixtures(frames=frames))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL cloud-smooth", r.stdout)
+        self.assertIn("点数不固定", r.stdout)
+
+    def test_cloud_with_too_few_pointed_frames_is_insufficient(self):
+        # 只有 20 帧有点云（< 30）：点数固定这件事没有被验证过。
+        frames = frame_rows(DURATION, points=0)
+        for row in frames[:20]:
+            row["points"] = 600
+        r = self.run_device_logs(**self.fixtures(frames=frames))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA cloud-smooth", r.stdout)
+        self.assertIn("有点云", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
