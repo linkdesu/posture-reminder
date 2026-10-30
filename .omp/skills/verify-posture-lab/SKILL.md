@@ -186,7 +186,7 @@ tmp/verify/<run-id>/
 降级、耗电与真实彩色帧的隐私只能真机验。`device-logs` 负责这一段取证与判定：
 
 ```sh
-# 拷真机 Documents/debug 并判五条标准（设备 UDID 默认 00008110-001271181AD3801E）
+# 拷真机 Documents/debug 并按判定表取证（设备 UDID 默认 00008110-001271181AD3801E）
 .omp/skills/verify-posture-lab/scripts/verify.py device-logs --run <run-id> [--focus-seconds 600]
 
 # 已经拷好时直接判本地目录，不连真机
@@ -203,7 +203,15 @@ tmp/verify/<run-id>/
 | `shoulders-not-on-head` | `shoulders_invalidated` | 有可见双肩的帧里，作废帧数 = 0 |
 | `shoulders-available-ratio` | 未过期关节帧按窗口分组：坐直档优先用 DEBUG 分段测试模式（`-segmentTest 1`）写入的 `test_segment` 段标记当窗口，没有段标记时退回 `status_changed` 的 `good` 窗口并在 detail 里注明；歪头、低头两档仍按 `status_changed` | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50% |
 | `cloud-smooth` | `cloud-*.jsonl` 里未降级帧的相邻间隔，以及**有点云**（`points > 0`）的帧点数是否固定 | p95 ≤ 40 ms、最长 ≤ 200 ms、有点云的帧点数固定且 > 0（点数具体是多少不判，`CLOUD_POINT_BUDGET` 不再是判据；`points == 0` 的帧不参与固定性判断） |
+| `cloud-not-blank`（v0.6.8 (19)） | `cloud-*.jsonl` 里 `face_detected: true` 的帧：深度点数 `points` 与上屏点数 `visible_points` | 有脸的帧点云不得空白（`points > 0`、已上屏的帧 `visible_points > 0`），一帧空白即 FAIL；有脸帧 < 30 判数据不足 |
+| `keypoint-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `keypoint_jitter_p95`（滚动 10 秒、只算静止帧） | 整场最大值 ≤ 1% 屏宽；没有任何值（旧构建或整轮都在动）判数据不足 |
+| `cloud-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `cloud_jitter_p95` | 整场最大值 ≤ 2% 屏宽；没有静止帧判数据不足 |
 | `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
+
+`REPORT right-shoulder: …` 不是判定：它打印 `perf-*.jsonl` 里 `right_shoulder_frames / shoulder_frames`
+的占比（没有 perf 计数时退回 `joints-*.jsonl` 逐帧的 `rightShoulder.v`），并写进 `verdict.json` 的
+`rightShoulder`。右肩可用帧 < 50% 时 detail 里写明「已记录并上报」，不改退出码——issue #6 AC8 要的是
+记录与上报，不是放宽 0.5 的置信度门槛。
 
 坐直窗口的段标记来自真机上的 DEBUG 分段测试模式：`-segmentTest 1` 每 20 秒切一段（坐直 → 歪肩 →
 低头 → 离开）并在切换时写一行 `test_segment`（`message` 是段名，`ts` 是 epoch 毫秒），判定拿
@@ -221,15 +229,17 @@ tmp/verify/<run-id>/
 | `MIN_VISIBLE_JOINT_FRAMES` | 30 帧（10 Hz 下 3 秒） | 每个状态窗口内未过期关节帧太少：`shoulders-available-ratio` 该档判数据不足；整轮可见关节帧不足 30 时该条整体判数据不足 |
 | `MIN_DETECTED_FRAMES` | 30 帧 | 全轮 `joints-*.jsonl` 里 `detected: true` 少于 30 帧：整轮按「没人入镜」判数据不足 |
 | `MIN_BODY_FRAMES` | 30 帧（30 Hz 下 1 秒） | `cloud-*.jsonl` 里 `points > 0` 的帧太少：`cloud-smooth` 判数据不足（点数固定没有被验证过） |
+| `MIN_FACE_FRAMES` | 30 帧（30 Hz 下 1 秒） | `cloud-*.jsonl` 里 `face_detected: true` 的帧太少：`cloud-not-blank` 判数据不足（没有可判的空白对象） |
 
 因此这些情形都返回 `INSUFFICIENT_DATA`：关节全部不可见、点云点数恒为 0（没有一帧有点云）、
 会话短于 600 秒、有人在画面的时段里可见关节帧过少。`cloud-smooth` 只读 `cloud-*.jsonl`：这个文件
 不存在就直接判数据不足（perf 的每秒汇总是趋势，不是逐帧证据）。
 
-自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（17 例，
+自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（26 例，
 覆盖三个状态：全合格、髋关节、肩在鼻上、间隔超限、降级 25%、没人入镜、点数全 0、短会话、
 可见帧过少、降级 10%、点数固定但不是 600、点数在帧之间变化、有点云帧过少、坐直段标记当窗口、
-没有段标记时退回 `status_changed`）。
+没有段标记时退回 `status_changed`，以及 v0.6.8 (19) 的关键点/点云抖动超限与边界、抖动无样本、
+有脸时点云空白、无脸时空白判数据不足、右肩 <50% 只上报告不改判定）。
 
 ## 验收结论模板
 
@@ -241,6 +251,8 @@ tmp/verify/<run-id>/
 4. **模拟器测不到的项**（只能真机验，模拟器上没有对应硬件，缺这一节等于结论不完整）：
    - 关节准确率：双肩可用帧占比（坐直 ≥ 80%、歪头与低头各 ≥ 50%）、「肩点落在头上」的帧数（必须为 0）；
    - 点云更新间隔：未降级时 p95 ≤ 40 ms、最长间隔 ≤ 200 ms；
+   - 抖动：关键点滚动 p95 ≤ 1% 屏宽、点云 ≤ 2% 屏宽（读数在 `perf-*.jsonl`），以及「检测到脸时点云从不空白」；
+   - 右肩可用帧占比：`REPORT right-shoulder` 的实测百分比（< 50% 时如实上报，不改门槛）；
    - 发热降级：10 分钟专注里降级时长与占比（> 20% 判失败）、`thermal` 行是否成对；
    - 耗电：`perf-*.jsonl` 的 `battery_level` 首末差；
    - 真实彩色帧的隐私：单帧缓冲、无预览、无图片/视频文件、无联网（模拟器没有前置彩色摄像头，只能靠静态审计 + 真机沙盒审计）。
