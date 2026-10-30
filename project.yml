@@ -14,8 +14,8 @@ targets:
           set -e
           DEST="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GitCommit.txt"
           git -C "${SRCROOT}" rev-parse --short HEAD > "${DEST}"
-        outputFiles:
-          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitCommit.txt
+        # 每次都重跑：否则增量构建会留下旧的 commit，日志首行就会撒谎。
+        basedOnDependencyAnalysis: false
     platform: iOS
     sources: [PostureLab]
     settings:
