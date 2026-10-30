@@ -507,6 +507,12 @@ def command_evidence(args) -> int:
     offline.write_text(r.stdout + r.stderr + f"\n[exit {r.returncode}]\n")
     results["offline"] = r.returncode == 0
 
+    # ADR-0008 的彩色帧静态边界：白名单、禁止面与授权文案一起判，和 offline 一样是源码性质。
+    privacy = rd / "audits" / "privacy.txt"
+    r = sh([sys.executable, "scripts/audit-privacy.py"], check=False)
+    privacy.write_text(r.stdout + r.stderr + f"\n[exit {r.returncode}]\n")
+    results["privacy"] = r.returncode == 0
+
     ran = ran_scenarios(rd, state)
     skipped = [name for name in CORE_SCENARIOS if name not in ran]
     for scenario in CORE_SCENARIOS:
@@ -552,7 +558,7 @@ def command_evidence(args) -> int:
     for name, entry in sorted(state.get("checks", {}).items()):
         if name.startswith(("drive:", "case:")):
             results[name] = bool(entry.get("ok"))
-    batch = [name for name in results if name != "offline"]
+    batch = [name for name in results if name not in ("offline", "privacy")]
     # ran 列出本批真跑过的全部场景：核心场景名 + drive:<场景> + case:<用例>。
     ran_all = sorted(ran) + sorted(name for name in state.get("checks", {})
                                    if name.startswith(("drive:", "case:")))
