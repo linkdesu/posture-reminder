@@ -3,8 +3,9 @@ import Foundation
 /// 一帧位移的滚动 p95：抖动的量化口径。
 ///
 /// **什么算抖动。** 只有「静止帧」进直方图：这一帧的原始输入位移（关键点取 8 个关节里最大的一步，
-/// 点云取按槽位配对的平均位移）不超过 `stillLimit`（0.5% 屏宽）。孩子真的在扭头、起身的那一帧是
-/// 动作，不是抖动，混进来会把 p95 变成「孩子多久动一次」。
+/// 点云取按槽位配对的平均位移）不超过 `stillLimit`（0.5% 屏宽），**并且**已经连续静止
+/// `settleSeconds`（0.3 s，约两个平滑时间常数）。孩子真的在扭头、起身的那一帧是动作；刚停下来的
+/// 那几帧是平滑尾巴还在追上一次输入——两者都不是抖动，混进来会把 p95 变成「孩子多久动一次」。
 ///
 /// **窗口。** 直方图按秒分箱，只保留最近 `windowSeconds`（10）秒；p95 是窗口内所有样本合并后的
 /// 分位，不是「每秒 p95 的平均」。样本少于 `minimumSamples` 时没有答案（nil），不发一个假数字。
@@ -16,6 +17,8 @@ import Foundation
 struct JitterMeter {
   /// 判「静止帧」的原始输入位移上限。
   static let stillLimit = 0.005
+  /// 刚开始静止时要先等这么久（约两个平滑时间常数），把平滑尾巴排除在抖动之外。
+  static let settleSeconds: TimeInterval = 0.3
   /// 直方图分档宽度（0.05% 屏宽）。
   static let binWidth = 0.0005
   /// 分档数：0–4% 屏宽；更大的位移并入最后一档。
@@ -32,12 +35,23 @@ struct JitterMeter {
 
   private var current: Second?
   private var history: [Second] = []
+  /// 连续静止的起点；原始输入一动就清空。
+  private var stillSince: TimeInterval?
 
   /// 收一帧。`displacements` 是这个静止帧里各点的位移；`rawShift` 是这一帧的原始输入位移。
   /// 返回这一帧有没有被计入。
   @discardableResult
   mutating func record(displacements: [Double], rawShift: Double, at t: TimeInterval) -> Bool {
-    guard rawShift.isFinite, rawShift <= Self.stillLimit else { return false }
+    guard rawShift.isFinite, rawShift <= Self.stillLimit else {
+      stillSince = nil
+      return false
+    }
+    // 平滑是 0.15 s 时间常数：刚停下的 0.3 s 里屏幕还在追上一下的输入，那不是抖动。
+    if stillSince == nil {
+      stillSince = t
+      return false
+    }
+    guard let stillSince, t - stillSince >= Self.settleSeconds else { return false }
     guard !displacements.isEmpty else { return false }
     let second = Int(t.rounded(.down))
     if let now = current, second > now.index {

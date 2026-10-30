@@ -24,14 +24,15 @@ final class JitterMeterTests: XCTestCase {
 
   func testTheTopTenPercentOfJumpsRaiseTheP95() throws {
     var meter = JitterMeter()
-    for index in 0..<90 {
+    // 120 个安静样本 + 12 个大跳（静止门槛放行，位移本身很大）；前 0.3 s 是平滑尾巴，不计。
+    for index in 0..<120 {
       _ = meter.record(displacements: [0.002], rawShift: 0.001, at: Double(index) * 0.03)
     }
-    for index in 90..<100 {
+    for index in 120..<132 {
       _ = meter.record(displacements: [0.03], rawShift: 0.001, at: Double(index) * 0.03)
     }
-    // 100 个样本的 p95 落在排序后第 95 位，也就是那 10 个大跳里的第一个。
-    let p95 = try XCTUnwrap(meter.p95(at: 3.0))
+    // 120 个有效样本的 p95 落在排序后第 114 位，也就是那 12 个大跳里的第一个。
+    let p95 = try XCTUnwrap(meter.p95(at: 3.96))
     XCTAssertEqual(p95, 0.03, accuracy: 0.001)
   }
 
@@ -55,11 +56,23 @@ final class JitterMeterTests: XCTestCase {
     XCTAssertEqual(meter.sampleCount(at: 9.9), 0)
   }
 
-  /// 静帧里也允许有一个点的原始位移大一点点（0.5% 是门槛，不是均值）。
-  func testAStillFrameWithinTheGateIsRecorded() {
+  /// 刚开始静止的 0.3 s 是「平滑尾巴」：那一刻屏幕上还在追上一下的输入，不是抖动。
+  func testTheFirstMomentOfStillnessIsSettlingNotJitter() {
     var meter = JitterMeter()
-    XCTAssertTrue(meter.record(displacements: [0.004], rawShift: 0.005, at: 0))
-    XCTAssertEqual(meter.sampleCount(at: 0), 1)
+    XCTAssertFalse(meter.record(displacements: [0.004], rawShift: 0.005, at: 0))
+    XCTAssertFalse(meter.record(displacements: [0.004], rawShift: 0.005, at: 0.2))
+    XCTAssertTrue(meter.record(displacements: [0.004], rawShift: 0.005, at: 0.31))
+    XCTAssertEqual(meter.sampleCount(at: 0.31), 1)
+  }
+
+  /// 一次真实的移动之后，平滑尾巴那几帧也不进直方图；重新静止满 0.3 s 才恢复计数。
+  func testAFrameAfterAMoveDoesNotCountUntilTheFigureSettles() {
+    var meter = JitterMeter()
+    _ = meter.record(displacements: [0.02], rawShift: 0.02, at: 0)   // 孩子在动
+    _ = meter.record(displacements: [0.001], rawShift: 0.001, at: 0.1)  // 停下，尾巴还在走
+    XCTAssertEqual(meter.sampleCount(at: 0.2), 0)
+    _ = meter.record(displacements: [0.001], rawShift: 0.001, at: 0.45)
+    XCTAssertEqual(meter.sampleCount(at: 0.45), 1)
   }
 
   func testTooFewSamplesIsNotAnAnswer() {

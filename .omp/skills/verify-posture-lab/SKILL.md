@@ -204,7 +204,7 @@ tmp/verify/<run-id>/
 | `shoulders-available-ratio` | 未过期关节帧按窗口分组：坐直档优先用 DEBUG 分段测试模式（`-segmentTest 1`）写入的 `test_segment` 段标记当窗口，没有段标记时退回 `status_changed` 的 `good` 窗口并在 detail 里注明；歪头、低头两档仍按 `status_changed` | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50% |
 | `cloud-smooth` | `cloud-*.jsonl` 里未降级帧的相邻间隔，以及**有点云**（`points > 0`）的帧点数是否固定 | p95 ≤ 40 ms、最长 ≤ 200 ms、有点云的帧点数固定且 > 0（点数具体是多少不判，`CLOUD_POINT_BUDGET` 不再是判据；`points == 0` 的帧不参与固定性判断） |
 | `cloud-not-blank`（v0.6.8 (19)） | `cloud-*.jsonl` 里 `face_detected: true` 的帧：深度点数 `points` 与上屏点数 `visible_points` | 有脸的帧点云不得空白（`points > 0`、已上屏的帧 `visible_points > 0`），一帧空白即 FAIL；有脸帧 < 30 判数据不足 |
-| `keypoint-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `keypoint_jitter_p95`（滚动 10 秒、只算静止帧） | 整场最大值 ≤ 1% 屏宽；没有任何值（旧构建或整轮都在动）判数据不足 |
+| `keypoint-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `keypoint_jitter_p95`（滚动 10 秒、只算「连续静止 0.3 s」的帧） | 整场最大值 ≤ 1% 屏宽；没有任何值（旧构建或整轮都在动）判数据不足 |
 | `cloud-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `cloud_jitter_p95` | 整场最大值 ≤ 2% 屏宽；没有静止帧判数据不足 |
 | `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
 
