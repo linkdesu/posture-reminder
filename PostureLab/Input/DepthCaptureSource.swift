@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Foundation
 
 /// 真机输入：前置 TrueDepth 的深度流驱动点云与头几何，前置彩色流只交给 Vision 取关节。
@@ -63,7 +64,9 @@ final class DepthCaptureSource: NSObject, SampleSource {
   override init() {
     super.init()
     depthOutput.setDelegate(self, callbackQueue: depthQueue)
-    depthOutput.isFilteringEnabled = true
+    // 不跑传感器的深度滤波：它按帧做一遍 640×480 的平滑，真机上让深度帧成串到达（间隔在 0 与
+    // 67 ms 之间跳），点云看起来一顿一顿。分割与点云只用原始深度，滤波省下的时间比平滑更值钱。
+    depthOutput.isFilteringEnabled = false
     depthOutput.alwaysDiscardsLateDepthData = true
     videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
     videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -161,7 +164,27 @@ final class DepthCaptureSource: NSObject, SampleSource {
     orient(depthOutput.connection(with: .depthData))
     orient(videoOutput.connection(with: .video))
     session.commitConfiguration()
+    pinFrameRate(device)
     return true
+  }
+
+  /// 把深度与彩色的输出都钉到 30 fps。
+  ///
+  /// 默认的 `activeDepthDataMinFrameDuration` 会跟着预览预设走，真机上实测只有约 25 Hz；点云
+  /// 的流畅门槛（未降级时 p95 ≤ 40 ms）就是按 30 Hz 的帧间隔定的，所以这里显式要求 30 fps。
+  /// 设备不支持时保留默认值，不失败。
+  private func pinFrameRate(_ device: AVCaptureDevice) {
+    guard (try? device.lockForConfiguration()) != nil else { return }
+    defer { device.unlockForConfiguration() }
+    let thirty = CMTime(value: 1, timescale: 30)
+    if device.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 }) {
+      device.activeVideoMinFrameDuration = thirty
+      device.activeVideoMaxFrameDuration = thirty
+    }
+    if device.activeDepthDataFormat != nil,
+       device.activeDepthDataFormat?.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 }) == true {
+      device.activeDepthDataMinFrameDuration = thirty
+    }
   }
 
   /// 竖屏、像镜子一样镜像。尽力而为：连接不支持时保留传感器自己的方向，而不是让整次运行失败。
@@ -235,12 +258,14 @@ final class DepthCaptureSource: NSObject, SampleSource {
   // MARK: - Depth
 
   /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
-  private func handleDepth(_ depthData: AVDepthData, at t: TimeInterval) {
+  private func handleDepth(_ depthData: AVDepthData, at t: TimeInterval, frameTime: TimeInterval) {
     let captureStartedAt = ProcessInfo.processInfo.systemUptime
     // Float32 是这条管线唯一能读的格式，转换是深度到深度。
     let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
-    guard let image = Self.depthImage(from: converted.depthDataMap)?
-      .resampled(maxWidth: Self.processingWidth)
+    // 一次缩放到处理宽度，省掉「先整帧拷进 Swift 数组、再缩放」的那一遍：640×480 的逐像素
+    // 拷贝在 Debug 构建里就要 40 ms，正好把 30 Hz 拖成 15 Hz（0.6.8 真机实测）。
+    guard let image = Self.depthImage(from: converted.depthDataMap,
+                                      maxWidth: Self.processingWidth)
     else { return }
     let captureSeconds = ProcessInfo.processInfo.systemUptime - captureStartedAt
 
@@ -267,13 +292,17 @@ final class DepthCaptureSource: NSObject, SampleSource {
     history.append(observation)
     if history.count > Self.depthHistoryCount { history.removeFirst(history.count - Self.depthHistoryCount) }
     let cloudInterval = load.cloudInterval
+    let cloudCap = load.cloudHz
     stateLock.unlock()
 
-    // 点云按负载上限推给画布（正常 30 Hz，降级 15 Hz），不等 10 Hz 的样本节流。
-    if t - lastCloudAt >= cloudInterval {
-      lastCloudAt = t
+    // 点云推给画布：正常负载下**每个深度帧都推**（ADR-0008 第 4 条，不做 30 Hz 的二次节流——
+    // 30 Hz 的节流按固定间隔卡帧，会把 33 ms 的正常间隔偶尔拖成 67 ms，反而破坏流畅）；降级时
+    // 才按 15 Hz 的上限隔一帧推一次。间隔用深度帧自己的呈现时刻量，回调晚到不算掉帧。
+    let shouldEmitCloud = cloudCap >= CaptureLoad.normal.cloudHz || frameTime - lastCloudAt >= cloudInterval * 0.85
+    if shouldEmitCloud {
+      lastCloudAt = frameTime
       #if DEBUG
-      PerfMonitor.shared.recordCloudFrame(at: t)
+      PerfMonitor.shared.recordCloudFrame(at: frameTime)
       #endif
       DispatchQueue.main.async { [weak self] in
         self?.onCloud?(CloudFrame(t: t, points: cloud))
@@ -285,9 +314,13 @@ final class DepthCaptureSource: NSObject, SampleSource {
     emit(observation, at: t)
   }
 
-  /// Copies the depth plane into a Swift array, then drops the pixel buffer. One plane, one read:
-  /// there is no second plane to read even if someone wanted to.
-  private static func depthImage(from map: CVPixelBuffer) -> DepthImage? {
+  /// Reads the depth plane straight into the processing grid, then drops the pixel buffer.
+  ///
+  /// vImage 直接从像素缓冲的基地址缩放到目标宽度（`kvImageNoFlags` 的线性插值，与
+  /// `DepthImage.resampled` 同一条路径），所以整帧 640×480 的逐像素拷贝不再发生——那些拷贝在
+  /// Debug 构建里就是 40 ms，把 30 Hz 的深度流拖成 15 Hz。不足目标宽度的帧直接拷这一片。
+  /// 一次性读完、读完即解锁：没有第二遍读取，也没有第二块缓冲被保留。
+  private static func depthImage(from map: CVPixelBuffer, maxWidth: Int) -> DepthImage? {
     let width = CVPixelBufferGetWidth(map)
     let height = CVPixelBufferGetHeight(map)
     guard width > 0, height > 0 else { return nil }
@@ -297,16 +330,24 @@ final class DepthCaptureSource: NSObject, SampleSource {
     guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
 
     let bytesPerRow = CVPixelBufferGetBytesPerRow(map)
-    let floatCount = bytesPerRow / MemoryLayout<Float>.size
-    let buffer = base.assumingMemoryBound(to: Float.self)
-    var metres = [Float](repeating: 0, count: width * height)
-    for y in 0..<height {
-      let row = buffer.advanced(by: y * floatCount)
-      for x in 0..<width {
-        metres[y * width + x] = row[x]
-      }
+    let targetWidth = min(width, max(1, maxWidth))
+    let targetHeight = max(1, Int((Double(height) * Double(targetWidth) / Double(width)).rounded()))
+    var metres = [Float](repeating: 0, count: targetWidth * targetHeight)
+
+    let scaled = metres.withUnsafeMutableBufferPointer { destination -> Bool in
+      guard let destinationBase = destination.baseAddress else { return false }
+      var input = vImage_Buffer(data: base,
+                                height: vImagePixelCount(height),
+                                width: vImagePixelCount(width),
+                                rowBytes: bytesPerRow)
+      var output = vImage_Buffer(data: destinationBase,
+                                 height: vImagePixelCount(targetHeight),
+                                 width: vImagePixelCount(targetWidth),
+                                 rowBytes: targetWidth * MemoryLayout<Float>.stride)
+      return vImageScale_PlanarF(&input, &output, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError
     }
-    return DepthImage(width: width, height: height, metres: metres)
+    guard scaled else { return nil }
+    return DepthImage(width: targetWidth, height: targetHeight, metres: metres)
   }
 }
 
@@ -316,7 +357,9 @@ extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
                        timestamp: CMTime,
                        connection: AVCaptureConnection) {
     guard let startedAt else { return }
-    handleDepth(depthData, at: ProcessInfo.processInfo.systemUptime - startedAt)
+    handleDepth(depthData,
+                at: ProcessInfo.processInfo.systemUptime - startedAt,
+                frameTime: CMTimeGetSeconds(timestamp))
   }
 }
 
