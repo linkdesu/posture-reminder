@@ -114,6 +114,15 @@ enum VisionPoseMapping {
     return result
   }
 
+  /// 横滚的三个来源按顺序取第一个有值的：双眼连线 → 双耳连线 → 深度平面。
+  ///
+  /// 眼线最准（两眼在脸上对称），耳线次之（耳朵会随头型偏），两者都缺测时才退回深度平面的左右坡度
+  /// ——深度平面在头转过去时几乎读不出横滚，所以它只是兜底。关节过期时 `joints` 为空，这里自然只
+  /// 剩深度平面。
+  static func rollDegrees(_ joints: [JointID: JointSample], fallback: Double?) -> Double? {
+    eyeLineDegrees(joints) ?? earLineDegrees(joints) ?? fallback
+  }
+
   /// 双耳连线相对水平线的角度，度；两只耳朵都测到且不在同一点时才有值。
   /// 它是眼线缺测时的第二选择（ADR-0008：眼线 → 耳线 → 深度平面）。
   static func earLineDegrees(_ joints: [JointID: JointSample]) -> Double? {
