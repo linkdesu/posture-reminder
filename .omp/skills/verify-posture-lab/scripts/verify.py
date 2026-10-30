@@ -1281,7 +1281,7 @@ def drive_break_count(run_id: str, state: dict, sim: str) -> int:
     (out / "launch-args.txt").write_text(" ".join(args) + "\n")
     install_sim(sim)
     t0 = time.time()
-    launch_sim(sim, args)
+    pid = launch_sim(sim, args)
     shots = [(20, "focus.png"), (75, "break.png"), (135, "next-focus.png")]
     ocr_bin = frozen_ocr(run_id)
     counts: dict = {}
@@ -1293,12 +1293,32 @@ def drive_break_count(run_id: str, state: dict, sim: str) -> int:
         texts = ocr(ocr_bin, out / name) if ocr_bin else []
         (out / f"ocr-{Path(name).stem}.txt").write_text("\n".join(texts) + "\n")
         counts[Path(name).stem] = {"today": today_count(texts), "break": any("休息" in t for t in texts)}
-    copy_documents(container_sim(sim), out / "Documents")
+    container = container_sim(sim)
+    # 与其他场景同口径：先审实时容器（AC14/AC19 问的是沙盒里有什么），再把 Documents 拷出来。
+    audit = audit_sandbox(container, out / "sandbox-audit.json")
+    copy_documents(container, out / "Documents")
     terminate_sim(sim)
+    log = newest_log(out)
+    provenance = {
+        "scenario": "break-count",
+        "launchArgs": args,
+        "pid": pid,
+        "gitSha": FROZEN_SHA or sh_out(["git", "rev-parse", "HEAD"]),
+        "container": container,
+        "log": str(log.relative_to(out)) if log else None,
+        "history": str(history_file(out).relative_to(out)) if history_file(out).exists() else None,
+        "sandboxAuditExit": audit.returncode,
+        "when": now(),
+    }
+    write_json(out / "provenance.json", provenance)
     c = {k: (v["today"] or (None, None))[0] for k, v in counts.items()}
-    ok = c.get("focus") == 0 and c.get("break") == 1 and counts["break"]["break"] and c.get("next-focus") == 1
-    write_json(out / "break-count.json", {"ok": ok, "counts": counts, "when": now()})
-    check(state, "drive:break-count", ok, f"专注中 {c.get('focus')} → 休息中 {c.get('break')} → 下一专注 {c.get('next-focus')}")
+    ok = (c.get("focus") == 0 and c.get("break") == 1 and counts["break"]["break"]
+          and c.get("next-focus") == 1 and audit.returncode == 0)
+    write_json(out / "break-count.json", {"ok": ok, "counts": counts,
+                                          "sandboxAuditExit": audit.returncode, "when": now()})
+    check(state, "drive:break-count", ok,
+          f"专注中 {c.get('focus')} → 休息中 {c.get('break')} → 下一专注 {c.get('next-focus')}；"
+          f"sandboxAudit exit={audit.returncode}")
     write_state(run_id, state)
     return 0 if ok else 1
 
