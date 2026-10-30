@@ -33,10 +33,10 @@
 | 文件 | 频率 | 用途 |
 |---|---|---|
 | `perf-<ISO8601>.jsonl` | 每秒一行 | 汇总：渲染帧数/帧率/最大帧间隔、六步耗时（采集/分割/点云/Vision/判定/渲染）的均值与最大值、点云间隔 p95 与最大值、点数极值、热状态、电量、是否降级 |
-| `frames-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟 |
+| `cloud-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟 |
 | `joints-<ISO8601>.jsonl` | **每个 Vision 帧一行**（约 10 Hz） | 每帧关节：`detected`（模型是否看到人）、`raw`（模型原始置信度，0.5 门槛之前）、`joints`（过门槛后的置信度与可见性）、`stale`、`shoulders_available`、`shoulders_invalidated` |
 
-### `frames-*.jsonl` 的键
+### `cloud-*.jsonl` 的键
 
 一行 = 一个深度帧，`0.6.8 (15)` 起才有：
 
@@ -376,7 +376,7 @@ head_down_count = 1         head_down_remind_count = 1
 
 ## 电量与热状态是趋势线，不是逐样本读数
 
-`battery_level` 与 `thermal_state` 背后没有逐样本事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。会话日志里采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。v0.6.8 起另有每秒一条的 `Documents/debug/perf-*.jsonl`（DEBUG 构建、独立键名）带 `thermal_state`、`battery_level` 与 `degraded`，判「降级时段」与电量曲线用它，不用会话日志的 10 秒采样；逐帧原始事实（点数、点云间隔、上屏时间）另见 `frames-*.jsonl`，汇总里的 `cloud_points_min` / `cloud_points_max` 只是趋势，不要拿末值当结论。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
+`battery_level` 与 `thermal_state` 背后没有逐样本事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。会话日志里采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。v0.6.8 起另有每秒一条的 `Documents/debug/perf-*.jsonl`（DEBUG 构建、独立键名）带 `thermal_state`、`battery_level` 与 `degraded`，判「降级时段」与电量曲线用它，不用会话日志的 10 秒采样；逐帧原始事实（点数、点云间隔、上屏时间）另见 `cloud-*.jsonl`，汇总里的 `cloud_points_min` / `cloud_points_max` 只是趋势，不要拿末值当结论。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
 
 ## 截图
 

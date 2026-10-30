@@ -63,7 +63,7 @@ struct AvatarView: View {
         defer {
           let seconds = ProcessInfo.processInfo.systemUptime - renderStartedAt
           PerfMonitor.shared.recordRender(seconds: seconds)
-          // 把这一帧的上屏耗时与延迟补进它对应的深度帧记录（frames-*.jsonl）。
+          // 把这一帧的上屏耗时与延迟补进它对应的深度帧记录（cloud-*.jsonl）。
           FrameLog.shared.rendered(seconds: seconds)
         }
         PerfMonitor.shared.recordFrame()

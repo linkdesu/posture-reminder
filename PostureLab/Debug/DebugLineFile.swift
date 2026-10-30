@@ -6,16 +6,19 @@ import Foundation
 /// 只活在 DEBUG 构建里，写到 `Documents/debug/<prefix>-<会话时间>.jsonl`，同时以 `[prefix]` 前缀
 /// 打到标准输出，所以真机上 `devicectl device process launch --console` 和拉取沙盒两条路都能读到。
 ///
-/// 它和 QA 的 42 键 JSONL 契约没有关系：另一个文件、另一套键名，`docs/qa-log-schema.md` 里的
-/// 42 个键一个都不多、一个都不少。
+/// **文件在第一次写入时才创建**：没有内容的一次运行（模拟器没有深度、没有 Vision）不该在容器里
+/// 留下一个 0 字节的 `.jsonl`——那既不是证据，也会被 `audit-sandbox.py` 判成「首行不是 JSON」。
+///
+/// 它和 QA 的 43 键 JSONL 契约没有关系：另一个文件、另一套键名，`docs/qa-log-schema.md` 里的
+/// 43 个键一个都不多、一个都不少。
 final class DebugLineFile {
   private let prefix: String
   private let lock = NSLock()
   private var handle: FileHandle?
+  private var opened = false
 
   init(prefix: String) {
     self.prefix = prefix
-    open()
   }
 
   deinit {
@@ -25,6 +28,10 @@ final class DebugLineFile {
   func write(_ line: String) {
     print("[\(prefix)] \(line)")
     lock.lock()
+    if !opened {
+      open()
+      opened = true
+    }
     let handle = self.handle
     lock.unlock()
     guard let handle, let data = (line + "\n").data(using: .utf8) else { return }

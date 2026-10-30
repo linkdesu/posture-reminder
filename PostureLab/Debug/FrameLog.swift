@@ -1,7 +1,7 @@
 #if DEBUG
 import Foundation
 
-/// 每个深度帧一行 `Documents/debug/frames-*.jsonl`：逐帧原始记录，不做每秒汇总。
+/// 每个深度帧一行 `Documents/debug/cloud-*.jsonl`：逐帧原始记录，不做每秒汇总。
 ///
 /// 为什么需要它：`perf-*.jsonl` 是每秒一行的汇总，而汇总会把同一秒里的不同事实压成一个数
 /// （0.6.8 (14) 的 `cloud_points` 只保留了该秒最后一帧的点数，于是「前几帧有人、最后一帧没人」
@@ -42,7 +42,9 @@ final class FrameLog {
   }
 
   private let lock = NSLock()
-  private let file = DebugLineFile(prefix: "frames")
+  // 文件名用 cloud 而不是 frames：`audit-sandbox.py` 的名称提示会把 "frame" 当成原始画面
+  // 转储；这个文件每行是一帧点云的度量，不是画面。
+  private let file = DebugLineFile(prefix: "cloud")
   private var pending: Record?
   /// 待上屏那一帧的回调到达时刻（`systemUptime`），用来算上屏延迟。
   private var pendingArrivalUptime: TimeInterval = 0
