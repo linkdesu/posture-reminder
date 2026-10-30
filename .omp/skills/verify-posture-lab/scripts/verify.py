@@ -1533,7 +1533,6 @@ DELIVERED_JOINTS = {
 # 068-2 的流畅门槛只按未降级时段判。
 CLOUD_P95_LIMIT_MS = 40.0
 CLOUD_MAX_GAP_MS = 200.0
-CLOUD_POINT_BUDGET = 600
 # 068-1 的双肩可用帧占比下限。
 SHOULDER_RATIO_LIMITS = {"good": 0.80, "head_tilt": 0.50, "head_down": 0.50}
 # 068-3/068-4：10 分钟专注里降级时长不得超过 20%。
@@ -1551,7 +1550,7 @@ INSUFFICIENT = "INSUFFICIENT_DATA"
 MIN_SESSION_SECONDS = 600.0
 # - 每个状态窗口里至少 30 个未过期关节帧（10 Hz 下 3 秒），否则这一档没有统计意义。
 MIN_VISIBLE_JOINT_FRAMES = 30
-# - frames 日志里至少 30 帧真的取到 600 点（30 Hz 下 1 秒），才判「点数固定」。
+# - frames 日志里至少 30 帧真的有点云（30 Hz 下 1 秒），才判「有点云的帧点数固定」。
 MIN_BODY_FRAMES = 30
 # - 全轮至少 30 帧模型看到人（detected），否则整轮判「没人入镜」。
 MIN_DETECTED_FRAMES = 30
@@ -1759,19 +1758,36 @@ def judge_thermal(perf: list[dict], seconds: float) -> tuple[str, str]:
 
 
 def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
+    """点云流畅 + 点数固定。
+
+    「点数固定」只对**有点云**的帧成立：`points > 0` 的帧必须全部是同一个点数。点数本身是多少
+    不判（应用当前写 600 点，但这不是判据——改预算不该让判定失效）；`points == 0` 的帧是这一帧
+    没测到人体，不参与固定性判断，但它们的存在本身不失败。
+    """
     if not frames:
         return INSUFFICIENT, "没有 cloud-*.jsonl（0.6.8 (15) 起才有逐帧原始记录）"
-    body = [row for row in frames if row.get("points") == CLOUD_POINT_BUDGET]
+    body = [row for row in frames
+            if isinstance(row.get("points"), (int, float)) and row["points"] > 0]
     clean = [row for row in frames if row.get("degraded") is not True]
     p95, worst, count = cloud_gaps_ms(clean)
+    tally: dict[float, int] = {}
+    for row in body:
+        tally[row["points"]] = tally.get(row["points"], 0) + 1
+    fit = sorted(tally.items())
     detail = (f"逐帧 {len(frames)} 帧，未降级 {count} 帧里 p95 {p95:.1f} ms"
               f"（要求 ≤{CLOUD_P95_LIMIT_MS:.0f}）、最长间隔 {worst:.1f} ms"
-              f"（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）；取到 600 点的帧 {len(body)}")
+              f"（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）；有点云的帧 {len(body)}")
+    if not fit:
+        detail += "，没有一帧取到点"
+    elif len(fit) == 1:
+        detail += f"，点数固定为 {fit[0][0]:.0f}"
+    else:
+        mixing = "、".join(f"{points:.0f} 点 {frames_with} 帧" for points, frames_with in fit)
+        detail += f"，点数不固定（{mixing}）"
     if len(body) < MIN_BODY_FRAMES:
-        return INSUFFICIENT, detail + f"（要求 ≥{MIN_BODY_FRAMES} 帧才判点数固定，数据不足）"
-    wrong = [row.get("points") for row in frames if row.get("points") not in (0, CLOUD_POINT_BUDGET)]
-    if wrong:
-        return FAIL, detail + f"；点数既不是 0 也不是 600 的帧：{len(wrong)}"
+        return INSUFFICIENT, detail + f"（要求 ≥{MIN_BODY_FRAMES} 帧有点云才判点数固定，数据不足）"
+    if len(fit) > 1:
+        return FAIL, detail + "；有点云的帧点数必须固定"
     if p95 > CLOUD_P95_LIMIT_MS or worst > CLOUD_MAX_GAP_MS:
         return FAIL, detail
     return PASS, detail
