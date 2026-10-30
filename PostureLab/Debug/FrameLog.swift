@@ -55,6 +55,8 @@ final class FrameLog {
     var visionMS: Double?
     /// 最近一次 Vision 结果距这一帧的年龄（毫秒），用来看 Vision 是否在挤占
     var visionAgeMS: Double?
+    /// 同帧（150 ms 内）Vision 是否找到了过门槛的人脸；还没有可用结果时 nil。
+    var faceDetected: Bool? = nil
   }
 
   private let lock = NSLock()
@@ -136,7 +138,8 @@ final class FrameLog {
       + ",\"depth_gap_ms\":\(fixed(record.depthGapMS, 1))"
       + ",\"arrival_gap_ms\":\(fixed(record.arrivalGapMS, 1))"
       + ",\"vision_ms\":\(number(record.visionMS))"
-      + ",\"vision_age_ms\":\(number(record.visionAgeMS))}"
+      + ",\"vision_age_ms\":\(number(record.visionAgeMS))"
+      + ",\"face_detected\":\(record.faceDetected.map(String.init) ?? "null")}"
   }
 
   private static func fixed(_ value: Double, _ digits: Int) -> String {

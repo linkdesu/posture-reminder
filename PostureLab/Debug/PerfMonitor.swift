@@ -75,6 +75,19 @@ final class PerfMonitor {
   private var seriousSeconds = 0
   private var degradedSeconds = 0
 
+  // 0.6.8 (19)：抖动的滚动 p95（静止帧才计入）与右肩/点云空白的整场计数。
+  private var keyPointJitter = JitterMeter()
+  private var cloudJitter = JitterMeter()
+  private var keyPointStillFrames = 0
+  private var cloudStillFrames = 0
+  private var rightShoulderFrames = 0
+  private var shoulderFrames = 0
+  private var cloudBlankWithFace = 0
+  /// 上一帧显示出来的关键点与它们的原始目标（未平滑），抖动按关节配对。
+  private var lastKeyPoints: [JointID: CGPoint] = [:]
+  private var lastKeyPointTargets: [JointID: CGPoint] = [:]
+  private var lastCloudPoints: [BodyPoint] = []
+
   private var thermalState = "nominal"
   private var batteryLevel: Double?
   private var degraded = false
@@ -200,6 +213,64 @@ final class PerfMonitor {
     lock.unlock()
   }
 
+  /// 画布每渲染一帧调用：这一帧显示的关键点与上一帧比，只在「静止帧」上计入抖动。
+  ///
+  /// `rawTargets` 是这一帧 Vision 给的原始位置（未平滑），它决定这一帧算不算静止；`displayed` 是
+  /// 画到屏幕上的位置（已平滑），位移从它算——孩子看到的是平滑后的结果。
+  func noteKeyPoints(_ displayed: [JointID: CGPoint], rawTargets: [JointID: CGPoint],
+                     at now: TimeInterval) {
+    lock.lock()
+    let previousDisplayed = lastKeyPoints
+    let previousTargets = lastKeyPointTargets
+    lastKeyPoints = displayed
+    lastKeyPointTargets = rawTargets
+    guard !previousDisplayed.isEmpty, !previousTargets.isEmpty else {
+      lock.unlock()
+      return
+    }
+    if keyPointJitter.record(
+      displacements: JitterPairing.pairedDisplacements(previous: previousDisplayed,
+                                                       current: displayed),
+      rawShift: JitterPairing.maxShift(previous: previousTargets, current: rawTargets),
+      at: now) {
+      keyPointStillFrames += 1
+    }
+    lock.unlock()
+  }
+
+  /// 采集侧每个深度帧调用：点云按槽位配对，平均位移决定这一帧算不算静止。
+  func noteCloud(_ points: [BodyPoint], at now: TimeInterval) {
+    lock.lock()
+    let previous = lastCloudPoints
+    lastCloudPoints = points
+    guard !previous.isEmpty, !points.isEmpty else {
+      lock.unlock()
+      return
+    }
+    let displacements = JitterPairing.pairedDisplacements(from: previous, to: points)
+    if cloudJitter.record(displacements: displacements,
+                          rawShift: JitterPairing.meanShift(from: previous, to: points),
+                          at: now) {
+      cloudStillFrames += 1
+    }
+    lock.unlock()
+  }
+
+  /// Vision 每帧调用：这一帧右肩有没有过门槛（整场累计，供 AC8 的「右肩可用帧 <50% 上报」）。
+  func recordShoulderVisibility(rightAvailable: Bool) {
+    lock.lock()
+    shoulderFrames += 1
+    if rightAvailable { rightShoulderFrames += 1 }
+    lock.unlock()
+  }
+
+  /// 检测到脸、但这一帧点云是空的（AC7 的「从不空白」）。
+  func recordCloudBlankWithFace() {
+    lock.lock()
+    cloudBlankWithFace += 1
+    lock.unlock()
+  }
+
   /// 会话结束时的发热摘要（打到标准输出，便于 `devicectl ... --console` 直接读）。
   func thermalSummary() -> String {
     lock.lock()
@@ -224,6 +295,10 @@ final class PerfMonitor {
     let window = max(0.001, now - windowStart)
     let gaps = cloudGaps.sorted()
     let p95 = gaps.isEmpty ? 0 : gaps[min(gaps.count - 1, Int((0.95 * Double(gaps.count - 1)).rounded()))]
+    let jitter = JitterSummary(keyPointP95: keyPointJitter.p95(at: now),
+                               keyPointStillFrames: keyPointStillFrames,
+                               cloudP95: cloudJitter.p95(at: now),
+                               cloudStillFrames: cloudStillFrames)
     let line = Self.line(window: window,
                          frames: frames,
                          gap: maxFrameGap,
@@ -241,7 +316,10 @@ final class PerfMonitor {
                          battery: batteryLevel,
                          degraded: degraded,
                          sanity: (sanityEyeBelowMouth, sanityShoulderAboveEar, sanityPointsWithoutPerson),
-                         thermalSeconds: (seriousSeconds, degradedSeconds))
+                         thermalSeconds: (seriousSeconds, degradedSeconds),
+                         jitter: jitter,
+                         shoulders: (rightShoulderFrames, shoulderFrames),
+                         cloudBlankWithFace: cloudBlankWithFace)
     frames = 0
     lastFrameAt = nil
     maxFrameGap = 0
@@ -274,6 +352,16 @@ final class PerfMonitor {
     file.write(line)
   }
 
+  /// 一秒一行里的抖动与计数摘要。`nil` 的 p95 写成 `null`：样本不够时「没有答案」不能读成 0。
+  struct JitterSummary {
+    var keyPointP95: Double?
+    var keyPointStillFrames: Int = 0
+    var cloudP95: Double?
+    var cloudStillFrames: Int = 0
+
+    static let empty = JitterSummary()
+  }
+
   /// 纯函数，便于在测试里核对字段与换算。`(calls, total, max)` 是每一步的计数、累计与最大值。
   static func line(window: Double,
                    frames: Int,
@@ -292,7 +380,10 @@ final class PerfMonitor {
                    battery: Double? = nil,
                    degraded: Bool = false,
                    sanity: (Int, Int, Int) = (0, 0, 0),
-                   thermalSeconds: (Int, Int) = (0, 0)) -> String {
+                   thermalSeconds: (Int, Int) = (0, 0),
+                   jitter: JitterSummary = .empty,
+                   shoulders: (Int, Int) = (0, 0),
+                   cloudBlankWithFace: Int = 0) -> String {
     let fps = Double(frames) / window
     let epochMilliseconds = Int((Date().timeIntervalSince1970 * 1000).rounded())
     func average(_ step: (Int, TimeInterval, TimeInterval)) -> Double {
@@ -304,6 +395,11 @@ final class PerfMonitor {
     func batteryValue() -> String {
       guard let battery, battery.isFinite else { return "null" }
       return String(format: "%.2f", battery)
+    }
+    // 抖动是屏宽比例：四位小数就是 0.01% 的分辨率，p95 门槛 1% / 2% 有足够余量。
+    func jitterValue(_ value: Double?) -> String {
+      guard let value, value.isFinite else { return "null" }
+      return String(format: "%.4f", value)
     }
     // 整数用插值而不是 %d：epoch 毫秒是 64 位，`%d` 会把它截成 32 位，QA 会读到负数。
     return "{\"t\":\(epochMilliseconds)"
@@ -337,6 +433,13 @@ final class PerfMonitor {
       + ",\"sanity_points_without_person\":\(sanity.2)"
       + ",\"serious_seconds\":\(thermalSeconds.0)"
       + ",\"degraded_seconds\":\(thermalSeconds.1)"
+      + ",\"keypoint_jitter_p95\":\(jitterValue(jitter.keyPointP95))"
+      + ",\"keypoint_still_frames\":\(jitter.keyPointStillFrames)"
+      + ",\"cloud_jitter_p95\":\(jitterValue(jitter.cloudP95))"
+      + ",\"cloud_still_frames\":\(jitter.cloudStillFrames)"
+      + ",\"right_shoulder_frames\":\(shoulders.0)"
+      + ",\"shoulder_frames\":\(shoulders.1)"
+      + ",\"cloud_blank_with_face_frames\":\(cloudBlankWithFace)"
       + ",\"window_s\":\(String(format: "%.2f", window))}"
   }
 }

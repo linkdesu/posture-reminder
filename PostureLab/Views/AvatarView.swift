@@ -95,6 +95,12 @@ struct AvatarView: View {
         }
 
         let overlay = keyPoints.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
+        #if DEBUG
+        // 关键点抖动（AC5）：画到屏幕上的点与上一帧比，只有原始输入没动的静止帧才计入。
+        PerfMonitor.shared.noteKeyPoints(overlay.points,
+                                         rawTargets: keyPoints.targets,
+                                         at: ProcessInfo.processInfo.systemUptime)
+        #endif
         if !overlay.points.isEmpty {
           drawFigure(overlay.points, alphas: overlay.alphas, mouth: geometry.mouth,
                      in: &context, size: size)
@@ -415,6 +421,9 @@ struct KeyPointOverlayMotion: Equatable {
   }
 
   private(set) var tracks: [JointID: Track] = [:]
+
+  /// 每个关节这一帧的原始位置（未平滑）：抖动测量用它判「这一帧孩子是否静止」。
+  var targets: [JointID: CGPoint] { tracks.mapValues(\.target) }
 
   /// 收一帧关键点。`raw` 里没有的关节 = 这一帧低于门槛。
   mutating func update(_ raw: [JointID: CGPoint], at now: TimeInterval) {
