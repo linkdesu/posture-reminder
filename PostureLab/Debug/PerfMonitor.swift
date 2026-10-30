@@ -68,6 +68,13 @@ final class PerfMonitor {
   private var assessMax: TimeInterval = 0
   private var assessments = 0
 
+  // 0.6.8 (17)：整场累计计数（不随每秒窗口清零），供 QA 判人形健全性与发热。
+  private var sanityEyeBelowMouth = 0
+  private var sanityShoulderAboveEar = 0
+  private var sanityPointsWithoutPerson = 0
+  private var seriousSeconds = 0
+  private var degradedSeconds = 0
+
   private var thermalState = "nominal"
   private var batteryLevel: Double?
   private var degraded = false
@@ -176,6 +183,30 @@ final class PerfMonitor {
     lock.unlock()
   }
 
+  /// 一帧人形健全性判定（累计）。
+  func recordSanity(eyeBelowMouth: Bool, shoulderAboveEar: Bool, pointsWithoutPerson: Bool) {
+    lock.lock()
+    if eyeBelowMouth { sanityEyeBelowMouth += 1 }
+    if shoulderAboveEar { sanityShoulderAboveEar += 1 }
+    if pointsWithoutPerson { sanityPointsWithoutPerson += 1 }
+    lock.unlock()
+  }
+
+  /// 热状态采样器每秒调用一次：累计 serious 及以上与降级节流的秒数。
+  func recordThermalSecond(serious: Bool, degraded: Bool) {
+    lock.lock()
+    if serious { seriousSeconds += 1 }
+    if degraded { degradedSeconds += 1 }
+    lock.unlock()
+  }
+
+  /// 会话结束时的发热摘要（打到标准输出，便于 `devicectl ... --console` 直接读）。
+  func thermalSummary() -> String {
+    lock.lock()
+    defer { lock.unlock() }
+    return "serious=\(seriousSeconds)s degraded=\(degradedSeconds)s"
+  }
+
   /// 每秒由热状态采样器刷新；`degraded` 是采集源当前实际使用的负载。
   func recordEnvironment(thermalState: String, battery: Double?, degraded: Bool) {
     lock.lock()
@@ -208,7 +239,9 @@ final class PerfMonitor {
                          assess: (assessments, assessTotal, assessMax),
                          thermalState: thermalState,
                          battery: batteryLevel,
-                         degraded: degraded)
+                         degraded: degraded,
+                         sanity: (sanityEyeBelowMouth, sanityShoulderAboveEar, sanityPointsWithoutPerson),
+                         thermalSeconds: (seriousSeconds, degradedSeconds))
     frames = 0
     lastFrameAt = nil
     maxFrameGap = 0
@@ -257,7 +290,9 @@ final class PerfMonitor {
                    assess: (Int, TimeInterval, TimeInterval),
                    thermalState: String = "nominal",
                    battery: Double? = nil,
-                   degraded: Bool = false) -> String {
+                   degraded: Bool = false,
+                   sanity: (Int, Int, Int) = (0, 0, 0),
+                   thermalSeconds: (Int, Int) = (0, 0)) -> String {
     let fps = Double(frames) / window
     let epochMilliseconds = Int((Date().timeIntervalSince1970 * 1000).rounded())
     func average(_ step: (Int, TimeInterval, TimeInterval)) -> Double {
@@ -297,6 +332,11 @@ final class PerfMonitor {
       + ",\"thermal_state\":\"\(thermalState)\""
       + ",\"battery_level\":\(batteryValue())"
       + ",\"degraded\":\(degraded)"
+      + ",\"sanity_eye_below_mouth\":\(sanity.0)"
+      + ",\"sanity_shoulder_above_ear\":\(sanity.1)"
+      + ",\"sanity_points_without_person\":\(sanity.2)"
+      + ",\"serious_seconds\":\(thermalSeconds.0)"
+      + ",\"degraded_seconds\":\(thermalSeconds.1)"
       + ",\"window_s\":\(String(format: "%.2f", window))}"
   }
 }

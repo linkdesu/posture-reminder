@@ -181,8 +181,9 @@ final class SessionController: ObservableObject {
   var debugSegmentTest = false
   private var segmentTestTimer: Timer?
   private var segmentTestIndex = 0
+  /// 分段标签：测试者按语音提示摆姿势；「离开」段要求人离开镜头，用来抓无人暂停。
   private static let segmentTestPhases: [(name: String, kind: PostureKind)] = [
-    ("坐直", .near), ("歪肩", .shoulderTilt), ("低头", .headDown),
+    ("坐直", .near), ("歪肩", .shoulderTilt), ("低头", .headDown), ("离开", .near),
   ]
   /// The timer's proof hook, armed from `-autopause` in `App.swift` before the first frame: the plan
   /// for this run, whether its pause has gone out yet, and whether the run has used it up.
@@ -843,6 +844,10 @@ final class SessionController: ObservableObject {
     if let source = inputSource as? DepthCaptureSource {
       source.setLoad(CaptureLoad.load(thermalState: state))
     }
+    #if DEBUG
+    PerfMonitor.shared.recordThermalSecond(serious: CaptureLoad.degraded(thermalState: state),
+                                           degraded: degraded)
+    #endif
     guard degraded != thermalDegraded else { return }
     thermalDegraded = degraded
     logger.log(.thermal(degraded: degraded))
@@ -897,6 +902,7 @@ final class SessionController: ObservableObject {
     inputSource = source
     // 新采集源按当前热状态起跑：降级期间重建输入不该又回到 30 Hz。
     (source as? DepthCaptureSource)?.setLoad(CaptureLoad.load(thermalState: thermalStateName))
+    (source as? DepthCaptureSource)?.settingsOutlineEnabled = settings.outlineEnabled
     // A source counts from zero; the shared clock carries on where the last one stopped. Without this
     // a second source would rewind the countdown and the posture clock with it.
     pomodoroClockOffset = pomodoroLastT
@@ -1022,7 +1028,17 @@ final class SessionController: ObservableObject {
     latestGeometry?.cloudInterval = interval
   }
 
+  #if DEBUG
+  /// 整场发热摘要：serious 及以上的秒数与降级节流秒数（0.6.8 (17) 要求如实打印，不靠降温掩盖）。
+  private func printThermalSummary() {
+    print("[summary] \(PerfMonitor.shared.thermalSummary())")
+  }
+  #endif
+
   private func stopInput() {
+    #if DEBUG
+    printThermalSummary()
+    #endif
     inputSource?.stop()
     inputSource = nil
     // No source means no fresh geometry; drop the last frame so a stale avatar cannot linger.

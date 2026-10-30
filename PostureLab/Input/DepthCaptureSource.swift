@@ -29,6 +29,10 @@ final class DepthCaptureSource: NSObject, SampleSource {
   /// `presenceStreakRequired` 帧才算在场；任何一帧不满足就归零。0.6.8 (17)：Vision 在近距离会整帧
   /// 不给 observation，单帧丢失不再直接当作「人不在」。
   private var presenceStreak = 0
+  /// 上一帧背景点云，用来算背景平均位移。
+  private var previousBackground: [BodyPoint] = []
+  /// 深度轮廓背景开关（由会话层按设置注入）。
+  var settingsOutlineEnabled = true
   private static let presenceStreakRequired = 3
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
@@ -319,6 +323,37 @@ final class DepthCaptureSource: NSObject, SampleSource {
     }
   }
 
+  /// 眼睛低于嘴：任一眼的 y 大于嘴轮廓的最大 y（y 向下，越大越低）。
+  static func eyeBelowMouth(joints: [JointID: JointSample], mouth: [CGPointLike]) -> Bool {
+    guard let lowestMouth = mouth.map(\.y).max() else { return false }
+    let eyes = [JointID.leftEye, .rightEye].compactMap { joints[$0]?.y }
+    guard let lowestEye = eyes.max() else { return false }
+    return lowestEye > lowestMouth
+  }
+
+  /// 双肩高于耳朵：任一双肩的 y 小于耳朵 y。
+  static func shoulderAboveEar(joints: [JointID: JointSample]) -> Bool {
+    let ears = [JointID.leftEar, .rightEar].compactMap { joints[$0]?.y }
+    let shoulders = [JointID.leftShoulder, .rightShoulder].compactMap { joints[$0]?.y }
+    guard let highestEar = ears.min(), let highestShoulder = shoulders.min() else { return false }
+    return highestShoulder < highestEar
+  }
+
+  /// 按槽位配对的平均位移（归一化坐标的欧氏距离）。
+  static func meanSlotShift(from previous: [BodyPoint], to current: [BodyPoint]) -> Double {
+    guard !previous.isEmpty, !current.isEmpty else { return 0 }
+    var bySlot: [Int: BodyPoint] = [:]
+    for point in previous where point.slot >= 0 { bySlot[point.slot] = point }
+    var total = 0.0
+    var count = 0
+    for point in current where point.slot >= 0 {
+      guard let old = bySlot[point.slot] else { continue }
+      total += hypot(point.x - old.x, point.y - old.y)
+      count += 1
+    }
+    return count > 0 ? total / Double(count) : 0
+  }
+
   // MARK: - Depth
 
   /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
@@ -504,11 +539,31 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     PerfMonitor.shared.recordVision(seconds: frame.inferenceSeconds)
     var confidence: [String: Double] = [:]
     var visible: [String: Bool] = [:]
+    var pointX: [String: Double] = [:]
+    var pointY: [String: Double] = [:]
     for joint in VisionPoseMapping.deliveredJoints {
       let sample = joints[joint]
       confidence[joint.rawValue] = sample?.confidence
       visible[joint.rawValue] = sample != nil
+      pointX[joint.rawValue] = sample?.x
+      pointY[joint.rawValue] = sample?.y
     }
+    // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有头部证据也记一帧。
+    let eyeBelowMouth = Self.eyeBelowMouth(joints: joints, mouth: frame.mouth)
+    let shoulderAboveEar = Self.shoulderAboveEar(joints: joints)
+    let pointsWithoutPerson = !joints.isEmpty && !Self.headEvidence(joints)
+    #if DEBUG
+    PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
+                                    shoulderAboveEar: shoulderAboveEar,
+                                    pointsWithoutPerson: pointsWithoutPerson)
+    #endif
+    // 背景轮廓：点数与相对上一帧的平均位移（按槽位配对）。
+    stateLock.lock()
+    let observation = history.last
+    stateLock.unlock()
+    let background = observation?.cloud ?? []
+    let shift = Self.meanSlotShift(from: previousBackground, to: background)
+    previousBackground = background
     // Vision 肩线：采集侧已经配对好的肩点，与遮罩肩线并排写进日志供对比（不做判定）。
     let visionShoulders = ShoulderLine.make(left: joints[.leftShoulder],
                                             right: joints[.rightShoulder],
@@ -520,7 +575,14 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
                                                      confidence: confidence,
                                                      rawConfidence: frame.rawConfidence,
                                                      visible: visible,
-                                                     visionShoulders: visionShoulders))
+                                                     pointX: pointX,
+                                                     pointY: pointY,
+                                                     visionShoulders: visionShoulders,
+                                                     outlineEnabled: settingsOutlineEnabled,
+                                                     backgroundPoints: background.count,
+                                                     backgroundShift: shift,
+                                                     distanceValid: observation?.head.distanceCM != nil,
+                                                     forwardValid: !joints.isEmpty && observation?.head.distanceCM != nil))
     #endif
   }
 }

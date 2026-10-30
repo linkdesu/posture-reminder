@@ -20,8 +20,19 @@ struct JointFrameDebugSample {
   var rawConfidence: [String: Double]
   /// 每个关节这一帧是否可见。
   var visible: [String: Bool]
+  /// 关节的屏幕归一化坐标（只对可见关节有意义）。
+  var pointX: [String: Double] = [:]
+  var pointY: [String: Double] = [:]
   /// Vision 肩线：端点、角度、是否高于头部；不可用时端点为 null。
   var visionShoulders: ShoulderLine = .unavailable
+  /// 背景轮廓这一帧是否开启（设置项）。
+  var outlineEnabled: Bool = true
+  /// 背景点云这一帧的点数与相对上一帧的平均位移（归一化）。
+  var backgroundPoints: Int = 0
+  var backgroundShift: Double = 0
+  /// 距离与前倾这一帧有没有值。
+  var distanceValid: Bool = false
+  var forwardValid: Bool = false
 }
 
 /// 每个 Vision 帧一行 `joints-*.jsonl`，同时以 `[joints]` 前缀打到标准输出。
@@ -66,7 +77,39 @@ final class JointFrameLog {
       + ",\"shoulders_invalidated\":\(sample.shouldersInvalidated)"
       + ",\"raw\":{\(raw.joined(separator: ","))}"
       + ",\"joints\":{\(entries.joined(separator: ","))}"
-      + ",\"vision_shoulders\":\(visionLine)}"
+      + ",\"vision_shoulders\":\(visionLine)"
+      + ",\"figure_points\":\(figurePoints(sample))"
+      + ",\"figure_lines\":\(figureLines(sample))"
+      + ",\"background_points\":\(sample.backgroundPoints)"
+      + ",\"background_shift\":\(number(sample.backgroundShift))"
+      + ",\"outline_enabled\":\(sample.outlineEnabled)"
+      + ",\"distance_valid\":\(sample.distanceValid)"
+      + ",\"forward_valid\":\(sample.forwardValid)}"
+  }
+
+  /// 人形的点：名称、屏幕归一化坐标、置信度。只列这一帧真正画得出来的点。
+  private static func figurePoints(_ sample: JointFrameDebugSample) -> String {
+    let order: [JointID] = [.nose, .leftEye, .rightEye, .leftEar, .rightEar, .neck,
+                            .leftShoulder, .rightShoulder]
+    var items: [String] = []
+    for id in order where sample.visible[id.rawValue] == true {
+      guard let x = sample.pointX[id.rawValue], let y = sample.pointY[id.rawValue] else { continue }
+      items.append("{\"name\":\"\(id.rawValue)\",\"x\":\(number(x)),\"y\":\(number(y))"
+                   + ",\"c\":\(number(sample.confidence[id.rawValue]))}")
+    }
+    return "[" + items.joined(separator: ",") + "]"
+  }
+
+  /// 画了哪些线：只有耳–眼、眼–眼、眼–耳、颈–双肩。
+  private static func figureLines(_ sample: JointFrameDebugSample) -> String {
+    var lines: [String] = []
+    func has(_ id: JointID) -> Bool { sample.visible[id.rawValue] == true }
+    if has(.leftEar) && has(.leftEye) { lines.append("\"ear_eye\"") }
+    if has(.leftEye) && has(.rightEye) { lines.append("\"eye_eye\"") }
+    if has(.rightEye) && has(.rightEar) { lines.append("\"eye_ear\"") }
+    if has(.neck) && has(.leftShoulder) { lines.append("\"neck_left_shoulder\"") }
+    if has(.neck) && has(.rightShoulder) { lines.append("\"neck_right_shoulder\"") }
+    return "[" + lines.joined(separator: ",") + "]"
   }
 
   /// 一条肩线的 JSON：左右端点（null 写 null）、`angle_deg`、`above_head`（nil 写 null）、`available`。
