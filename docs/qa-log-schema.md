@@ -34,8 +34,8 @@
 
 | 文件 | 频率 | 用途 |
 |---|---|---|
-| `perf-<ISO8601>.jsonl` | 每秒一行 | 汇总：渲染帧数/帧率/最大帧间隔、六步耗时（采集/分割/点云/Vision/判定/渲染）的均值与最大值、点云间隔 p95 与最大值、点数极值、热状态、电量、是否降级 |
-| `cloud-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟 |
+| `perf-<ISO8601>.jsonl` | 每秒一行 | 汇总：渲染帧数/帧率/最大帧间隔、六步耗时（采集/分割/点云/Vision/判定/渲染）的均值与最大值、点云间隔 p95 与最大值、点数极值、热状态、电量、是否降级；v0.6.8 (19) 起另有抖动 p95、右肩可用帧与「检测到脸却空白」的累计计数 |
+| `cloud-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟、同帧人脸结论 |
 | `joints-<ISO8601>.jsonl` | **每个 Vision 帧一行**（约 10 Hz） | 每帧关节：`detected`（模型是否看到人）、`raw`（模型原始置信度，0.5 门槛之前）、`joints`（过门槛后的置信度与可见性）、`stale`、`shoulders_available`、`shoulders_invalidated` |
 
 ### `cloud-*.jsonl` 的键
@@ -46,7 +46,7 @@
 {"t":1793355411156,"frame_s":12.345,"arrival_s":12.351,"depth_ms":1.87,"segment_ms":8.80,
  "cloud_ms":0.20,"points":600,"mask_cells":1234,"depth_valid":0.970,"depth_nan":0.000,
  "nearest_m":0.42,"degraded":false,"cloud_emitted":true,"render_ms":0.40,
- "render_latency_ms":21.50}
+ "render_latency_ms":21.50,"visible_points":313,"face_detected":true}
 ```
 
 - `t`：写行时的 epoch 毫秒（这一帧上屏后写，因此晚于帧自己的时刻）；`frame_s` 是深度帧自己的呈现时刻（会话时钟，秒），**判点云节奏用它**；`arrival_s` 是回调到达时刻，两者之差是排队时间。
@@ -62,6 +62,7 @@
 - `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17），每秒汇总文件里是**整场累计**）：人形健全性计数。
 - `serious_seconds` / `degraded_seconds`（v0.6.8 (17)，整场累计）：`serious` 及以上热状态的秒数与降级节流秒数；会话结束时另在标准输出打印 `[summary] serious=…s degraded=…s`。
 - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
+- `face_detected`（v0.6.8 (19)）：与这一帧配对（150 ms 内）的 Vision 结果是否看到了过 0.5 门槛的人脸；还没有可用结果、或结果过期时为 `null`（「不知道」，不是 false）。AC7 的「检测到脸时点云从不空白」用它与 `points`、`visible_points` 交叉判：有脸的帧里 `points > 0` 且已上屏的帧 `visible_points > 0`，一帧空白即失败。
 
 ### `joints-*.jsonl` 的键
 
@@ -83,7 +84,7 @@
   2. `neck_shoulder`：鼻置信度 ≥ 0.5，**并且**颈/左肩/右肩至少一个过门槛；
   3. 两条都满足时记 `face_eyes`（头部证据优先）。
   **只有鼻子过门槛、其余都不在时必须记 `none`**：鼻子是锚点不是证据，只认鼻尖会让计时在孩子离开后继续跑。
-- `face_detected`（v0.6.8 (18)）：同帧 `VNDetectFaceLandmarksRequest` 是否报出人脸框。人脸框存在即算找到脸，与嘴轮廓是否取得到无关。
+- `face_detected`（v0.6.8 (18)，v0.6.8 (19) 起收紧）：同帧 `VNDetectFaceLandmarksRequest` 是否报出**置信度 ≥ 0.5** 的人脸框。低于门槛的人脸既不算找到脸，也不画嘴轮廓——人形上只出现置信度 ≥ 0.5 的点（issue #6 AC3）。
 - `neck` / `left_shoulder` / `right_shoulder`（v0.6.8 (18)）：这三个关节**过门槛后**的置信度，扁平键便于直接复算 `presence_path`；不可见时为 `null`（不是 0），与 `joints.<名>.c` 一致。
 - `raw`：八个关节在门槛之前的原始分数；模型没报这个关节时为 `null`。它只用于看模型表现，不参与判定。
 - `joints`：过门槛后的置信度 `c` 与可见性 `v`；不可见关节 `c` 为 `null`。
@@ -93,7 +94,14 @@
 - `distance_valid` / `forward_valid`：距离与前倾这一帧有没有值（缺测时对应值为 null）。
 - `shoulders_available` / `shoulders_invalidated`：双肩是否可用、是否因为落在鼻点以上被整帧作废（真机要求作废帧数为 0）。
 
-`verify.py device-logs` 新增两条判定（v0.6.8 (17)）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 无人在场却画点的累计帧数超过 5 判 FAIL）与 `thermal`（如实记录 `serious_seconds` 与 `degraded_seconds`，不设门槛）；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。
+`perf-*.jsonl` 的抖动与计数键（v0.6.8 (19)，整场累计或滚动窗口）：
+
+- `keypoint_jitter_p95` / `cloud_jitter_p95`：关键点与点云的抖动，单位是**屏宽比例**（`0.0062` = 0.62%）。口径：相邻**显示帧**上同一个点（关键点按关节 ID、点云按固定网格槽位）的位移，只统计「静止帧」——这一帧的原始输入位移 ≤ 0.5% 屏宽（关键点取 8 个关节里最大的一步，点云取成对槽位的平均）——再取最近 10 秒窗口的 p95。孩子真实挪动的那一帧不算抖动。样本不足 100 个时写 `null`，不写 0。
+- `keypoint_still_frames` / `cloud_still_frames`：进入直方图的静止帧累计数，用来判断 p95 有没有足够证据。
+- `right_shoulder_frames` / `shoulder_frames`：Vision 帧里右肩过 0.5 门槛的累计帧数与总帧数。AC8 要求右肩可用帧 < 50% 时**记录并上报**，不改判定门槛。
+- `cloud_blank_with_face_frames`：检测到脸、但这一帧点云为空的累计帧数（AC7 的「从不空白」）。
+
+`verify.py device-logs` 的判定（按此顺序读输出）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 无人在场却画点的累计帧数超过 5 判 FAIL）、`upper-body-only`、`shoulders-not-on-head`、`shoulders-available-ratio`、`cloud-smooth`、`cloud-not-blank`（有脸的帧点云不得空白）、`keypoint-jitter`（滚动 p95 最大值 ≤ 1%）、`cloud-jitter`（≤ 2%）、`degradation`、`thermal`；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。右肩可用帧占比不参与判定，单独打印 `REPORT right-shoulder: …` 并写进 `verdict.json` 的 `rightShoulder`。
 
 `0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
 
