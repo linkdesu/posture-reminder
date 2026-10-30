@@ -17,6 +17,8 @@ import Foundation
 /// - `mask_cells`：分割遮罩的格数（0 表示 `DepthSegmentation` 判定这一帧没有人）
 /// - `depth_valid`：有效深度读数的占比（0...1）；它接近 1 而 `mask_cells` 是 0，说明传感器好好的，
 ///   只是画面里没有比背景近的人；它接近 0 才是传感器的问题
+/// - `depth_nan`：NaN 读数的占比（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示没有读数；
+///   `depth_valid` 0 而 `depth_nan` 1，就是「整帧都是 NaN」，分割拿不到输入
 /// - `nearest_m`：这一帧最近的深度读数，米；没有读数时为 null
 /// - `degraded`：这一帧是否处于发热降级
 /// - `cloud_emitted`：这一帧的点云有没有推给画布（降级时会隔帧推）
@@ -36,6 +38,7 @@ final class FrameLog {
     var points: Int
     var maskCells: Int
     var depthValid: Double
+    var depthNaN: Double
     var nearestM: Double?
     var degraded: Bool
     var cloudEmitted: Bool
@@ -95,6 +98,7 @@ final class FrameLog {
       + ",\"points\":\(record.points)"
       + ",\"mask_cells\":\(record.maskCells)"
       + ",\"depth_valid\":\(fixed(record.depthValid, 3))"
+      + ",\"depth_nan\":\(fixed(record.depthNaN, 3))"
       + ",\"nearest_m\":\(number(record.nearestM))"
       + ",\"degraded\":\(record.degraded)"
       + ",\"cloud_emitted\":\(record.cloudEmitted)"

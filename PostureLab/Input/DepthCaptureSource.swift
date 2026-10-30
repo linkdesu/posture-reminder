@@ -64,9 +64,11 @@ final class DepthCaptureSource: NSObject, SampleSource {
   override init() {
     super.init()
     depthOutput.setDelegate(self, callbackQueue: depthQueue)
-    // 不跑传感器的深度滤波：它按帧做一遍 640×480 的平滑，真机上让深度帧成串到达（间隔在 0 与
-    // 67 ms 之间跳），点云看起来一顿一顿。分割与点云只用原始深度，滤波省下的时间比平滑更值钱。
-    depthOutput.isFilteringEnabled = false
+    // 深度滤波必须开着。0.6.8 (15) 的真机排查：关掉滤波后 TrueDepth 交出的 Float32 深度图整帧都是
+    // NaN（`depth_valid` 0、`depth_nan` 1、最近读数 null），分割因此拿不到任何输入、点云恒为 0 点，
+    // 而同一帧的彩色 Vision 还能看到人的五官。开着滤波时帧在 30 Hz 上稳定（逐帧日志实测间隔 33 ms），
+    // 所以「关滤波省时间」这个假设是错的：省下的几毫秒买不到一张能用的深度图。
+    depthOutput.isFilteringEnabled = true
     depthOutput.alwaysDiscardsLateDepthData = true
     videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
     videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -317,6 +319,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
       points: cloud.count,
       maskCells: mask?.count ?? 0,
       depthValid: image.validFraction,
+      depthNaN: image.nanFraction,
       nearestM: image.nearestDepth().map { Double($0) },
       degraded: cloudCap < CaptureLoad.normal.cloudHz,
       cloudEmitted: shouldEmitCloud),

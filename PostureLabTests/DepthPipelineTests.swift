@@ -139,6 +139,18 @@ final class DepthPipelineTests: XCTestCase {
     XCTAssertLessThan(try XCTUnwrap(down.pitchDeg), -5)
   }
 
+  /// 深度图的两种「没读数」：NaN（TrueDepth 的 Float32 用 NaN 表示没有读数）与 0。
+  /// 真机排查靠这两列分开「传感器整帧没读数」与「有人但没分割出来」。
+  func testDepthValiditySeparatesNaNAndValidReadings() throws {
+    let nanFrame = try XCTUnwrap(DepthImage(width: 2, height: 2, metres: [.nan, .nan, .nan, .nan]))
+    XCTAssertEqual(nanFrame.validFraction, 0, accuracy: 0.0001)
+    XCTAssertEqual(nanFrame.nanFraction, 1, accuracy: 0.0001)
+
+    let mixed = try XCTUnwrap(DepthImage(width: 2, height: 2, metres: [0.5, .nan, 0, 2.0]))
+    XCTAssertEqual(mixed.validFraction, 0.5, accuracy: 0.0001)
+    XCTAssertEqual(mixed.nanFraction, 0.25, accuracy: 0.0001)
+  }
+
   // MARK: - Cloud
 
   func testCloudComesFromMaskPixelsAndKeepsTheirDepth() throws {
