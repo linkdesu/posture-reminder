@@ -132,7 +132,7 @@ struct DebugOverlayView: View {
 
   private func featureTable() -> some View {
     VStack(alignment: .leading, spacing: 5) {
-      ForEach(PostureFeature.allCases, id: \.self) { feature in
+      ForEach(PostureFeature.allCases.filter { $0 != .headHeightDrop }, id: \.self) { feature in
         VStack(alignment: .leading, spacing: 1) {
           HStack(spacing: 4) {
             Text(feature.displayName)
@@ -164,7 +164,9 @@ struct DebugOverlayView: View {
   }
 
   private func valueText(_ feature: PostureFeature) -> String {
-    reading(feature).map { format($0.value, for: feature) } ?? "—"
+    guard let reading = reading(feature) else { return "—" }
+    // 「本轮还没有样本」是 `—`；「样本到了但这项没量到」是 未测量。
+    return reading.isMeasured ? format(reading.value, for: feature) : "未测量"
   }
 
   private func thresholdText(_ feature: PostureFeature) -> String {

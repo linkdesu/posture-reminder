@@ -20,6 +20,10 @@ struct JointFrameDebugSample {
   var rawConfidence: [String: Double]
   /// 每个关节这一帧是否可见。
   var visible: [String: Bool]
+  /// Vision 肩线（采集侧已配对好的肩点）：端点、角度、是否高于头部；不可用时端点为 null。
+  var visionShoulders: MaskShoulderLine.Estimate = .unavailable
+  /// 遮罩肩线（`MaskShoulderLine.estimate`，深度队列算好随观测存放）；不可用时端点为 null。
+  var maskShoulders: MaskShoulderLine.Estimate = .unavailable
 }
 
 /// 每个 Vision 帧一行 `joints-*.jsonl`，同时以 `[joints]` 前缀打到标准输出。
@@ -52,6 +56,11 @@ final class JointFrameLog {
       raw.append("\"\(key)\":\(number(sample.rawConfidence[key]))")
     }
 
+    // 两条肩线并排：Vision 肩点（过了 0.5 门槛的）与遮罩肩线（`MaskShoulderLine`），
+    // 供真机对比哪条更稳；它们都不进判定。
+    let visionLine = Self.shoulderLine(sample.visionShoulders)
+    let maskLine = Self.shoulderLine(sample.maskShoulders)
+
     return "{\"t\":\(epochMilliseconds)"
       + ",\"session_t\":\(String(format: "%.3f", sample.sessionT))"
       + ",\"detected\":\(sample.detected)"
@@ -59,7 +68,23 @@ final class JointFrameLog {
       + ",\"shoulders_available\":\(available)"
       + ",\"shoulders_invalidated\":\(sample.shouldersInvalidated)"
       + ",\"raw\":{\(raw.joined(separator: ","))}"
-      + ",\"joints\":{\(entries.joined(separator: ","))}}"
+      + ",\"joints\":{\(entries.joined(separator: ","))}"
+      + ",\"vision_shoulders\":\(visionLine)"
+      + ",\"mask_shoulders\":\(maskLine)}"
+  }
+
+  /// 一条肩线的 JSON：左右端点（null 写 null）、`angle_deg`、`above_head`（nil 写 null）、`available`。
+  private static func shoulderLine(_ shoulders: MaskShoulderLine.Estimate) -> String {
+    "{" + "\"left\":\(point(shoulders.left))"
+      + ",\"right\":\(point(shoulders.right))"
+      + ",\"angle_deg\":\(number(shoulders.angleDeg))"
+      + ",\"above_head\":\(shoulders.aboveHead.map(String.init) ?? "null")"
+      + ",\"available\":\(shoulders.available)}"
+  }
+
+  private static func point(_ point: CGPointLike?) -> String {
+    guard let point else { return "null" }
+    return "{\"x\":\(String(format: "%.3f", point.x)),\"y\":\(String(format: "%.3f", point.y))}"
   }
 
   private static func number(_ value: Double?) -> String {

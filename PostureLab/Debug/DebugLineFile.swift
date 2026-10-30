@@ -10,7 +10,7 @@ import Foundation
 /// 留下一个 0 字节的 `.jsonl`——那既不是证据，也会被 `audit-sandbox.py` 判成「首行不是 JSON」。
 ///
 /// 它和 QA 的 43 键 JSONL 契约没有关系：另一个文件、另一套键名，`docs/qa-log-schema.md` 里的
-/// 43 个键一个都不多、一个都不少。
+/// 45 个键一个都不多、一个都不少。
 final class DebugLineFile {
   private let prefix: String
   private let lock = NSLock()
@@ -51,6 +51,13 @@ final class DebugLineFile {
       }
       let handle = try FileHandle(forWritingTo: url)
       _ = try handle.seekToEnd()
+      // 第一行固定是构建身份：一个从手机里拷出来的日志文件不必再问「这是哪个构建」。
+      let epoch = Int((Date().timeIntervalSince1970 * 1000).rounded())
+      let header = "{\"t\":\(epoch),\"header\":\"log\",\"version\":\"\(AppInfo.version)\""
+        + ",\"build\":\"\(AppInfo.build)\",\"commit\":\"\(AppInfo.commit)\"}\n"
+      if let data = header.data(using: .utf8) {
+        try? handle.write(contentsOf: data)
+      }
       self.handle = handle
     } catch {
       // 埋点写不了文件也必须让标准输出继续工作，绝不把错误抛给调用方。

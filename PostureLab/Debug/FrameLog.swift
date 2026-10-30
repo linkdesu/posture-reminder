@@ -25,6 +25,8 @@ import Foundation
 /// - `render_ms`：画布重绘闭包为这一帧花的时间；这一帧被下一帧顶掉、或画布没在画（无人体时暂停）
 ///   时为 null
 /// - `render_latency_ms`：从回调到达画布画出这一帧的延迟；同上，没上屏时为 null
+/// - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点云被
+///   投影/裁剪吃掉了，不是采集层没有点。0.6.8 (16) 用它排查「凑近点云消失」
 final class FrameLog {
   static let shared = FrameLog()
 
@@ -51,6 +53,8 @@ final class FrameLog {
   private var pending: Record?
   /// 待上屏那一帧的回调到达时刻（`systemUptime`），用来算上屏延迟。
   private var pendingArrivalUptime: TimeInterval = 0
+  /// 这一帧画布实际画出的点数（投影后在画面矩形内的点），由 `AvatarView` 回填。
+  private var pendingVisiblePoints: Int = 0
 
   /// 深度线程调用：收下这一帧。上一帧如果还没上屏（被顶掉了），先按「未上屏」写出去，
   /// 不丢记录、也不把它的延迟算到别人头上。
@@ -65,6 +69,13 @@ final class FrameLog {
     }
   }
 
+  /// 画布线程调用：这一帧在屏幕上真正画出了多少个点。`rect` 为画面矩形，数量为投影后落在其中的点。
+  func noteVisiblePoints(_ count: Int) {
+    lock.lock()
+    pendingVisiblePoints = count
+    lock.unlock()
+  }
+
   /// 画布线程调用：这一帧上屏了，补上渲染耗时与延迟后写行。
   func rendered(seconds: Double) {
     lock.lock()
@@ -74,7 +85,12 @@ final class FrameLog {
     lock.unlock()
     guard let record else { return }
     let latency = (ProcessInfo.processInfo.systemUptime - arrival) * 1000
-    file.write(Self.line(record, renderMS: seconds * 1000, renderLatencyMS: max(0, latency)))
+    lock.lock()
+    let visible = pendingVisiblePoints
+    pendingVisiblePoints = 0
+    lock.unlock()
+    file.write(Self.line(record, renderMS: seconds * 1000, renderLatencyMS: max(0, latency),
+                         visiblePoints: visible))
   }
 
   /// 采集停下时把还挂着的最后一帧写出去（未上屏）。
@@ -88,7 +104,8 @@ final class FrameLog {
   }
 
   /// 纯函数，字段名就是 QA 解析时用的键名。
-  static func line(_ record: Record, renderMS: Double?, renderLatencyMS: Double?) -> String {
+  static func line(_ record: Record, renderMS: Double?, renderLatencyMS: Double?,
+                   visiblePoints: Int? = nil) -> String {
     "{\"t\":\(record.ts)"
       + ",\"frame_s\":\(fixed(record.frameS, 3))"
       + ",\"arrival_s\":\(fixed(record.arrivalS, 3))"
@@ -103,7 +120,8 @@ final class FrameLog {
       + ",\"degraded\":\(record.degraded)"
       + ",\"cloud_emitted\":\(record.cloudEmitted)"
       + ",\"render_ms\":\(number(renderMS))"
-      + ",\"render_latency_ms\":\(number(renderLatencyMS))}"
+      + ",\"render_latency_ms\":\(number(renderLatencyMS))"
+      + ",\"visible_points\":\(visiblePoints.map(String.init) ?? "null")}"
   }
 
   private static func fixed(_ value: Double, _ digits: Int) -> String {

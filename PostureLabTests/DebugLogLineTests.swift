@@ -176,5 +176,28 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["shoulders_invalidated"] as? Bool, true)
     XCTAssertEqual(values["shoulders_available"] as? Bool, false)
   }
+
+  /// `features` 行：未测量的读数写 `"value": null`（键仍在），`over` 是 false，`threshold` 照写。
+  func testFeaturesLineWritesNullForAnUnmeasuredReading() throws {
+    let event = MonitoringEvent.features(t: 12.5,
+                                       readings: [
+        FeatureReading(feature: .distance, value: 24.3, threshold: 30.0, baseline: 40.0,
+                       isMeasured: true, isOverThreshold: false, severity: 0.79),
+        FeatureReading(feature: .shoulderTilt, value: 5.0, threshold: 10.0, baseline: 0.0,
+                       isMeasured: false, isOverThreshold: false, severity: 0),
+      ],
+                                       highlighted: nil)
+    let data = try JSONEncoder().encode(event.logRecord(now: Date(timeIntervalSince1970: 1_793_000_000)))
+    let values = try json(String(decoding: data, as: UTF8.self))
+
+    XCTAssertEqual(values["event"] as? String, "features")
+    let featureValues = try XCTUnwrap(values["feature_values"] as? [String: Any])
+    let measured = try XCTUnwrap(featureValues["distance"] as? [String: Any])
+    XCTAssertEqual(measured["value"] as? Double ?? 0, 24.3, accuracy: 0.0001)
+    let unmeasured = try XCTUnwrap(featureValues["shoulder_tilt"] as? [String: Any])
+    XCTAssertTrue(unmeasured["value"] is NSNull, "an unmeasured reading must encode value as null")
+    XCTAssertEqual(unmeasured["over"] as? Bool, false)
+    XCTAssertEqual(unmeasured["threshold"] as? Double ?? 0, 10.0, accuracy: 0.0001)
+  }
 }
 #endif
