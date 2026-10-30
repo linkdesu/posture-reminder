@@ -1,0 +1,143 @@
+#if DEBUG
+import Foundation
+
+/// 每秒一条的调试性能埋点。
+///
+/// 只在 DEBUG 构建里存在：一个后台计时器把上一秒的点云渲染帧数、最大帧间隔、关节推算耗时和
+/// 姿态判定次数汇总成一行 JSON，追加到 `Documents/debug/perf-<会话时间>.jsonl`，同时打到标准
+/// 输出（`[perf] {...}`），这样 `devicectl device process launch --console` 和拉取沙盒两条路
+/// 都能读到。
+///
+/// 它与 QA 的 42 键 JSONL 契约没有关系：另一个文件、另一套键名、另一个目录文件，
+/// `docs/qa-log-schema.md` 里的 42 个键一个都不多、一个都不少。
+///
+/// 键名（全部单位写进键名，避免 QA 二次换算）：
+/// - `t`：这一行代表的那一秒结束时的 epoch 毫秒
+/// - `frames`：该秒内点云画布实际绘制的帧数
+/// - `fps`：`frames / window_s`，该秒的渲染帧率
+/// - `frame_gap_ms`：该秒内相邻两帧之间的最大间隔，毫秒
+/// - `joint_ms_avg` / `joint_ms_max`：该秒内每次关节推算的平均/最大耗时，毫秒
+/// - `joint_calls`：该秒内的关节推算次数
+/// - `assess_count`：该秒内的姿态判定次数（每个姿态样本判定一次）
+/// - `window_s`：本行统计窗口的实际秒数（计时器漂移时不是整数 1）
+final class PerfMonitor {
+  static let shared = PerfMonitor()
+
+  private let lock = NSLock()
+  private let queue = DispatchQueue(label: "me.xieal.posturelab.perf", qos: .utility)
+  private let file = DebugLineFile(prefix: "perf")
+
+  private var timer: DispatchSourceTimer?
+  private var windowStart = ProcessInfo.processInfo.systemUptime
+
+  private var frames = 0
+  private var lastFrameAt: TimeInterval?
+  private var maxFrameGap: TimeInterval = 0
+  private var jointTotal: TimeInterval = 0
+  private var jointMax: TimeInterval = 0
+  private var jointCalls = 0
+  private var assessments = 0
+
+  private init() {}
+
+  // MARK: - Lifecycle
+
+  /// 幂等：重复调用只保留第一个计时器。
+  func start() {
+    lock.lock()
+    defer { lock.unlock() }
+    guard timer == nil else { return }
+    windowStart = ProcessInfo.processInfo.systemUptime
+
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
+    timer.setEventHandler { [weak self] in self?.flush() }
+    self.timer = timer
+    timer.resume()
+  }
+
+  func stop() {
+    lock.lock()
+    timer?.cancel()
+    timer = nil
+    lock.unlock()
+  }
+
+  // MARK: - Recording
+
+  /// 一次点云画布的实际绘制。`rendersAsynchronously` 打开后这个闭包在后台线程跑，所以计数要加锁。
+  func recordFrame() {
+    let now = ProcessInfo.processInfo.systemUptime
+    lock.lock()
+    frames += 1
+    if let last = lastFrameAt {
+      maxFrameGap = max(maxFrameGap, now - last)
+    }
+    lastFrameAt = now
+    lock.unlock()
+  }
+
+  func recordJointEstimate(seconds: TimeInterval) {
+    lock.lock()
+    jointCalls += 1
+    jointTotal += seconds
+    jointMax = max(jointMax, seconds)
+    lock.unlock()
+  }
+
+  func recordAssessment() {
+    lock.lock()
+    assessments += 1
+    lock.unlock()
+  }
+
+  // MARK: - One line per second
+
+  private func flush() {
+    let now = ProcessInfo.processInfo.systemUptime
+    lock.lock()
+    let window = max(0.001, now - windowStart)
+    let line = Self.line(window: window,
+                         frames: frames,
+                         gap: maxFrameGap,
+                         jointTotal: jointTotal,
+                         jointMax: jointMax,
+                         jointCalls: jointCalls,
+                         assessments: assessments)
+    frames = 0
+    lastFrameAt = nil
+    maxFrameGap = 0
+    jointTotal = 0
+    jointMax = 0
+    jointCalls = 0
+    assessments = 0
+    windowStart = now
+    lock.unlock()
+
+    file.write(line)
+  }
+
+  /// 纯函数，便于在测试里核对字段与换算。
+  static func line(window: Double,
+                   frames: Int,
+                   gap: TimeInterval,
+                   jointTotal: TimeInterval,
+                   jointMax: TimeInterval,
+                   jointCalls: Int,
+                   assessments: Int) -> String {
+    let fps = Double(frames) / window
+    let jointAverage = jointCalls > 0 ? jointTotal / Double(jointCalls) : 0
+    let epochMilliseconds = Int((Date().timeIntervalSince1970 * 1000).rounded())
+    // 整数用插值而不是 %d：epoch 毫秒是 64 位，`%d` 会把它截成 32 位，QA 会读到负数。
+    return "{\"t\":\(epochMilliseconds)"
+      + ",\"frames\":\(frames)"
+      + ",\"fps\":\(String(format: "%.1f", fps))"
+      + ",\"frame_gap_ms\":\(String(format: "%.1f", gap * 1000))"
+      + ",\"joint_ms_avg\":\(String(format: "%.2f", jointAverage * 1000))"
+      + ",\"joint_ms_max\":\(String(format: "%.2f", jointMax * 1000))"
+      + ",\"joint_calls\":\(jointCalls)"
+      + ",\"assess_count\":\(assessments)"
+      + ",\"window_s\":\(String(format: "%.2f", window))}"
+  }
+}
+#endif
