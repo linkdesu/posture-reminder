@@ -26,11 +26,11 @@ struct RootView: View {
     }
     .task {
       // The first report arms the screen rule (and tells it the app is on screen right now).
-      controller.scenePhaseChanged(isActive: scenePhase == .active)
+      controller.scenePhaseChanged(scenePhase)
       controller.autoStartIfSimulating()
     }
     .onChange(of: scenePhase) { _, phase in
-      controller.scenePhaseChanged(isActive: phase == .active)
+      controller.scenePhaseChanged(phase)
     }
   }
 

@@ -41,6 +41,9 @@ struct FocusTimeline: Equatable {
   private(set) var lastSampleAt: Double?
   /// The band in flight: its kind and the instant it started.
   private var open: OpenBand?
+  /// The last band kind that was a measurement (a posture, `detecting` or `no_data`). It is what the
+  /// timeline returns to when a pause band closes, so no time is dropped and none is drawn as pause.
+  private var lastMeasuredKind: String?
 
   init() {}
 
@@ -57,6 +60,9 @@ struct FocusTimeline: Equatable {
   mutating func observe(_ kind: String, at t: TimeInterval) -> PostureSegment? {
     let detecting = closeDetecting(at: t)
     defer { lastSampleAt = t }
+    if kind != PostureSegment.pausedKind, kind != PostureStatus.noPerson.rawValue {
+      lastMeasuredKind = kind
+    }
     guard let current = open else {
       open = OpenBand(kind: kind, start: t)
       return detecting
@@ -68,6 +74,26 @@ struct FocusTimeline: Equatable {
     // Only the bands that are not postures write a `segment` line; a posture change is already
     // visible in the `sample`/`status_changed` rows.
     return current.kind == PostureSegment.noDataKind ? closed : detecting
+  }
+
+  /// A sample arrived while the countdown runs but the posture engine still says「无人」(`bandKind`
+  /// answers nil): either the three-second grace before the pause, or the one-second resume debounce
+  /// after it.
+  ///
+  /// Two things happen here. The sample is recorded, because the stream is alive and the ticker must
+  /// not read the silence as a stalled stream and cut a `no_data` band. And a pause band that is open
+  /// is closed at this instant: the pause is over, so the grey band has to end with it - otherwise
+  /// the debounce it stretches over makes the report's 不在画面 longer than the record's
+  /// `pausedSeconds`. The timeline then carries on with the last band that was a measurement, so it
+  /// stays contiguous.
+  mutating func endPause(at t: TimeInterval) {
+    lastSampleAt = t
+    guard let current = open,
+          current.kind == PostureSegment.pausedKind
+            || current.kind == PostureStatus.noPerson.rawValue
+    else { return }
+    segments.append(PostureSegment(kind: current.kind, start: current.start, end: t))
+    open = OpenBand(kind: lastMeasuredKind ?? PostureStatus.good.rawValue, start: t)
   }
 
   /// The wall clock moved without a sample: if the open band's last sample is more than
@@ -119,7 +145,14 @@ struct FocusTimeline: Equatable {
   /// absence rather than the child stopping, and the report names that band 不在画面. Both still
   /// freeze the countdown and both still count into `pausedSeconds` — only the drawing differs.
   static func bandKind(isPaused: Bool, isPausedByAbsence: Bool, status: String?) -> String? {
-    guard isPaused else { return status }
+    guard isPaused else {
+      // A `no_person` from the posture engine while the countdown is still running is the grace a
+      // short absence gets, and the timeline has no band for it: those seconds are inside the focus
+      // (the countdown was counting), so the last posture band keeps them instead of a band that
+      // would sit outside the timeline's sum and read as pause time the child never had. The
+      // 「不在画面」band is the pause, and nothing else.
+      return status == PostureStatus.noPerson.rawValue ? nil : status
+    }
     return isPausedByAbsence ? PostureStatus.noPerson.rawValue : PostureSegment.pausedKind
   }
 

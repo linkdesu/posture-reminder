@@ -278,11 +278,12 @@ final class IdleTimerTests: XCTestCase {
     rig.feed(10)
     XCTAssertTrue(rig.screenHeld)
 
-    rig.feed(10, present: false, from: 1)
+    // 无人 has to last three seconds before it becomes a pause; the screen is released with it.
+    rig.feed(40, present: false, from: 1)
     XCTAssertTrue(rig.engine.isPausedByAbsence)
     XCTAssertFalse(rig.screenHeld)
 
-    rig.feed(10, present: true, from: 2)
+    rig.feed(10, present: true, from: 5.2)
     XCTAssertFalse(rig.engine.isPausedByAbsence)
     XCTAssertTrue(rig.screenHeld)
   }

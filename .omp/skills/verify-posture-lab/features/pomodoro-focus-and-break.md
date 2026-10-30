@@ -31,7 +31,8 @@ Preconditions：
   ` 的 `pomodoro-focus` 场景执行 `-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -voice 1 -debug 1 -endSound chime`；35 秒、70 秒与 130 秒各一张截图。
 - **读倒计时。** 打开 `tmp/verify/<run-id>/scenarios/pomodoro-focus/Documents/debug/session-*.jsonl`，确认 `pomodoro_tick` 每秒一行，`remaining_seconds` 随 `ts` 间隔下降，`phase` 在 `focus` / `shortBreak` / `longBreak` 之间流转。
 - **读完成与休息。** 70 秒时第一个专注完成；130 秒时休息结束，`pomodoro-history.json` 至少 1 条 `completed` 记录；70 秒日志快照 `session-at-70.jsonl` 用于历史对账。
-- **读提示音。** `cue_played` 的 `message` 为 `end_soft` / `end_chime`；`endSound=none` 时没有任何 `cue_played`。
+- **读提示音（专注结束与休息结束各一条）。** `cue_played` 的 `message` 为 `end_soft` / `end_chime`；`endSound=none` 时没有任何 `cue_played`。0.6.8 (21) 起**休息自然结束也响**（`GLOSSARY.md`「阶段提示音」）：`-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -endSound chime` 跑到 130 秒，`cue_played` 至少两条（第一个专注归零、第一段休息归零）；孩子点「离开」或「跳过休息」不产生 `cue_played`。判断规则的单元测试是 `PostureLabTests/PhaseEndCueTests`。
+- **从桌面图标回到主页。** `-only-testing:PostureLabUITests/LaunchDestinationUITests`：设置页/统计页开着时按 Home、再切回 App，必须落在 `pomodoro_main`（`AC4-main-after-reopen` 截图）。启动参数 `-settings 1` / `-report day` 的首屏不受影响。
 - **手动暂停与恢复。** 运行 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PostureLab.xcodeproj -scheme PostureLab -destination "platform=iOS Simulator,name=pl-verify" -only-testing:PostureLabUITests/ManualPauseUITests test`；测试会点击真实「暂停」并检查倒计时冻结与时间轴灰带。
 - **今日目标（归零即加一）。** `verify.py drive --run <run-id> break-count`：20 s 专注中「今天 0/N」、75 s 休息中「今天 **1**/N」、135 s 下一段专注仍「今天 1/N」，判据见 `scenarios/break-count/break-count.json`。
 - **今日目标（离开不计）。** `verify.py drive --run <run-id> abandon-count`：XCUITest 真点「开始专注」再真点「离开」提前结束，主页「今天 x/N」前后相等，历史里是 `abandoned` 而不是 `completed`，判据见 `scenarios/abandon-count/abandon-count.json`。不手写 plist、不靠启动参数伪造结果。

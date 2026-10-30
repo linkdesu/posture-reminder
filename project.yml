@@ -7,13 +7,26 @@ targets:
   PostureLab:
     type: application
     postBuildScripts:
-      # 把当前 commit 写进 bundle：日志第一行要能回答「这是哪个构建」。构建目录里跑 git 即可，
-      # 不在源文件里写死 hash。
+      # 把当前 commit 写进 bundle：日志第一行要能回答「这是哪个构建」。有 git 就用 git，不在源文件里
+      # 写死 hash。Verification 的预检在无 .git 的快照里构建，那时依次读 GIT_COMMIT 与源码根的
+      # .verify-commit（预检生成快照时写入）；三者都没有就构建失败——绝不写 unknown 冒充身份。
       - name: GitCommit
         script: |
-          set -e
+          set -eu
           DEST="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GitCommit.txt"
-          git -C "${SRCROOT}" rev-parse --short HEAD > "${DEST}"
+          commit=$(git -C "${SRCROOT}" rev-parse --short HEAD 2>/dev/null || true)
+          if [ -z "${commit}" ]; then
+            commit="${GIT_COMMIT:-}"
+          fi
+          if [ -z "${commit}" ] && [ -f "${SRCROOT}/.verify-commit" ]; then
+            IFS= read -r commit < "${SRCROOT}/.verify-commit" || true
+          fi
+          if [ -z "${commit}" ]; then
+            echo "error: GitCommit: 没有 git 仓库，也没有 GIT_COMMIT 环境变量或 ${SRCROOT}/.verify-commit" >&2
+            echo "error: 无法确定本构建对应的 commit；预检快照应在生成时写入 .verify-commit" >&2
+            exit 1
+          fi
+          printf '%s\n' "${commit}" > "${DEST}"
         # 每次都重跑：否则增量构建会留下旧的 commit，日志首行就会撒谎。
         basedOnDependencyAnalysis: false
     platform: iOS
@@ -31,7 +44,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.6.8"
-        CURRENT_PROJECT_VERSION: "18"
+        CURRENT_PROJECT_VERSION: "22"
   PostureLabTests:
     type: bundle.unit-test
     platform: iOS
