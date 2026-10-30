@@ -194,18 +194,36 @@ tmp/verify/<run-id>/
 ```
 
 它把 `Documents/debug` 拷到 `tmp/verify/<run-id>/device/Documents/debug`，读 `session-*.jsonl`、
-`perf-*.jsonl`、`joints-*.jsonl`，按 0.6.8 的验收口径逐条打印 `PASS`/`FAIL`/`SKIP` 并写
-`device/verdict.json`：
+`perf-*.jsonl`、`joints-*.jsonl`、`frames-*.jsonl`，逐条打印 `PASS` / `FAIL` / `INSUFFICIENT_DATA`
+并写 `device/verdict.json`。**三个状态并列**：退出码 `0` = PASS，`1` = FAIL，`2` = INSUFFICIENT_DATA。
 
 | 判定 | 依据 | 门槛 |
 |---|---|---|
-| `upper-body-only` | `joints-*.jsonl` 的 `joints` 键集合 | ⊆ 鼻/双眼/双耳/颈/双肩；出现髋、root、肘、腕即 FAIL |
-| `shoulders-not-on-head` | `shoulders_invalidated` | 帧数 = 0 |
-| `shoulders-available-ratio` | 未过期关节帧按 `status_changed` 窗口分组 | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50%；窗口内无证据记 SKIP |
-| `cloud-smooth` | 未降级秒的 `cloud_gap_p95_ms` / `cloud_gap_max_ms` / `cloud_points` | p95 ≤ 40 ms、最长 ≤ 200 ms、点数 = 600 |
+| `upper-body-only` | `joints-*.jsonl` 的 `joints` 键集合与可见帧数 | ⊆ 鼻/双眼/双耳/颈/双肩；出现髋、root、肘、腕即 FAIL |
+| `shoulders-not-on-head` | `shoulders_invalidated` | 有可见双肩的帧里，作废帧数 = 0 |
+| `shoulders-available-ratio` | 未过期关节帧按 `status_changed` 窗口分组 | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50% |
+| `cloud-smooth` | `frames-*.jsonl` 里未降级帧的相邻间隔与点数 | p95 ≤ 40 ms、最长 ≤ 200 ms、有点的帧点数 = 600 |
 | `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
 
-自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`。
+### 数据充分性门槛（INSUFFICIENT_DATA 的判据）
+
+只有「已经测到东西」的规则才能 PASS。任何一条规则如果只因为**没有数据**才成立，判
+`INSUFFICIENT_DATA`，不是 PASS。判据写死在 `verify.py` 的常量里：
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `MIN_SESSION_SECONDS` | 600 秒 | 会话短于 10 分钟：`degradation` 的分母不成立，判数据不足 |
+| `MIN_VISIBLE_JOINT_FRAMES` | 30 帧（10 Hz 下 3 秒） | 每个状态窗口内未过期关节帧太少：`shoulders-available-ratio` 该档判数据不足；整轮可见关节帧不足 30 时该条整体判数据不足 |
+| `MIN_DETECTED_FRAMES` | 30 帧 | 全轮 `joints-*.jsonl` 里 `detected: true` 少于 30 帧：整轮按「没人入镜」判数据不足 |
+| `MIN_BODY_FRAMES` | 30 帧（30 Hz 下 1 秒） | `frames-*.jsonl` 里 `points == 600` 的帧太少：`cloud-smooth` 判数据不足（点数固定没有被验证过） |
+
+因此这些情形都返回 `INSUFFICIENT_DATA`：关节全部不可见、点云点数恒为 0、会话短于 600 秒、
+有人在画面的时段里可见关节帧过少。`cloud-smooth` 只读 `frames-*.jsonl`：这个文件不存在就直接判
+数据不足（perf 的每秒汇总是趋势，不是逐帧证据）。
+
+自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（10 例，
+覆盖三个状态：全合格、髋关节、肩在鼻上、间隔超限、降级 25%、没人入镜、点数全 0、短会话、
+可见帧过少、降级 10%）。
 
 ## 验收结论模板
 

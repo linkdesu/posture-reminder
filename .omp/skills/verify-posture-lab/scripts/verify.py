@@ -1518,6 +1518,22 @@ SHOULDER_RATIO_LIMITS = {"good": 0.80, "head_tilt": 0.50, "head_down": 0.50}
 DEGRADED_SHARE_LIMIT = 0.20
 DEFAULT_FOCUS_SECONDS = 600.0
 
+# 三个并列状态：通过、失败、数据不足。数据不足不是通过——只因为「没有证据」才成立的规则
+# （没人体所以没有髋关节、没点云所以点数看起来固定）一律判 INSUFFICIENT_DATA。
+PASS = "PASS"
+FAIL = "FAIL"
+INSUFFICIENT = "INSUFFICIENT_DATA"
+
+# 数据充分性门槛（INSUFFICIENT_DATA 的判据，见 SKILL.md「数据充分性门槛」）：
+# - 会话短于 10 分钟：降级占比与双肩占比都不判（分母不成立）。
+MIN_SESSION_SECONDS = 600.0
+# - 每个状态窗口里至少 30 个未过期关节帧（10 Hz 下 3 秒），否则这一档没有统计意义。
+MIN_VISIBLE_JOINT_FRAMES = 30
+# - frames 日志里至少 30 帧真的取到 600 点（30 Hz 下 1 秒），才判「点数固定」。
+MIN_BODY_FRAMES = 30
+# - 全轮至少 30 帧模型看到人（detected），否则整轮判「没人入镜」。
+MIN_DETECTED_FRAMES = 30
+
 
 def load_jsonl(path: Path) -> list[dict]:
     rows = []
@@ -1533,8 +1549,8 @@ def load_jsonl(path: Path) -> list[dict]:
 
 
 def read_debug_logs(directory: Path, *, all_runs: bool = False) -> dict:
-    """读一轮的日志。默认只读最近一次启动的那三份（文件名带启动时刻，字典序即时间序）：
-    容器会累积历史运行的日志，旧构建的 perf 字段语义不同，混在一起判没有意义。"""
+    """读一轮的日志。默认只读最近一次启动的那几份（文件名带启动时刻，字典序即时间序）：
+    容器会累积历史运行的日志，旧构建的字段语义不同，混在一起判没有意义。"""
     def files(pattern: str) -> list[Path]:
         found = sorted(directory.glob(pattern))
         if not found:
@@ -1545,6 +1561,7 @@ def read_debug_logs(directory: Path, *, all_runs: bool = False) -> dict:
         "sessions": [load_jsonl(p) for p in files("session-*.jsonl")],
         "perf": [row for p in files("perf-*.jsonl") for row in load_jsonl(p)],
         "joints": [row for p in files("joints-*.jsonl") for row in load_jsonl(p)],
+        "frames": [row for p in files("frames-*.jsonl") for row in load_jsonl(p)],
     }
 
 
@@ -1552,24 +1569,55 @@ def iso_from_millis(value: float) -> str:
     return datetime.fromtimestamp(value / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def judge_upper_body_only(joints: list[dict]) -> tuple[bool, str]:
+def session_seconds(logs: dict) -> float:
+    """这一轮跑了多久，秒：session 日志与逐帧日志的时间跨度取大者。"""
+    stamps: list[float] = []
+    for rows in logs["sessions"]:
+        stamps += [row["ts"] for row in rows if isinstance(row.get("ts"), (int, float))]
+    stamps += [row["t"] for row in logs["frames"] if isinstance(row.get("t"), (int, float))]
+    if len(stamps) < 2:
+        return 0.0
+    return max(0.0, (max(stamps) - min(stamps)) / 1000)
+
+
+def visible_joint_frames(joints: list[dict]) -> list[dict]:
+    """任一关节可见的帧。一个都没有 = 整轮没测到人身上的任何一点。"""
+    return [row for row in joints
+            if any((entry or {}).get("v") is True for entry in (row.get("joints") or {}).values())]
+
+
+def shoulders_visible(row: dict) -> bool:
+    joints = row.get("joints") or {}
+    return ((joints.get("leftShoulder") or {}).get("v") is True
+            and (joints.get("rightShoulder") or {}).get("v") is True)
+
+
+def judge_upper_body_only(joints: list[dict]) -> tuple[str, str]:
     if not joints:
-        return False, "没有 joints-*.jsonl（真机跑过 Vision 才会有）"
+        return INSUFFICIENT, "没有 joints-*.jsonl（真机跑过 Vision 才会有）"
     unexpected = set()
     for row in joints:
         unexpected |= set((row.get("joints") or {}).keys()) - DELIVERED_JOINTS
     if unexpected:
-        return False, f"出现不属于上半身八个关节的键：{sorted(unexpected)}"
-    return True, f"{len(joints)} 帧关节，只含鼻/眼/耳/颈/双肩"
+        return FAIL, f"出现不属于上半身八个关节的键：{sorted(unexpected)}"
+    visible = visible_joint_frames(joints)
+    if len(visible) < MIN_VISIBLE_JOINT_FRAMES:
+        return INSUFFICIENT, (f"{len(joints)} 帧关节里只有 {len(visible)} 帧可见（要求 ≥"
+                              f"{MIN_VISIBLE_JOINT_FRAMES}）——只含八个关节这个结论没有证据")
+    return PASS, f"{len(joints)} 帧关节，其中 {len(visible)} 帧可见，只含鼻/眼/耳/颈/双肩"
 
 
-def judge_shoulders_not_on_head(joints: list[dict]) -> tuple[bool, str]:
+def judge_shoulders_not_on_head(joints: list[dict]) -> tuple[str, str]:
     if not joints:
-        return False, "没有 joints-*.jsonl"
+        return INSUFFICIENT, "没有 joints-*.jsonl"
+    eyes_on_shoulders = [row for row in joints if shoulders_visible(row)]
+    if len(eyes_on_shoulders) < MIN_VISIBLE_JOINT_FRAMES:
+        return INSUFFICIENT, (f"只有 {len(eyes_on_shoulders)} 帧双肩可见（要求 ≥"
+                              f"{MIN_VISIBLE_JOINT_FRAMES}）；0 帧作废只是因为没有肩线可作废")
     bad = sum(1 for row in joints if row.get("shoulders_invalidated") is True)
     if bad:
-        return False, f"{bad} 帧的双肩落在鼻点以上（要求 0）"
-    return True, f"{len(joints)} 帧里 0 帧肩点在鼻上"
+        return FAIL, f"{bad} 帧的双肩落在鼻点以上（要求 0）"
+    return PASS, f"{len(eyes_on_shoulders)} 帧双肩可见，其中 0 帧肩点在鼻上"
 
 
 def shoulder_windows(sessions: list[list[dict]]) -> list[dict]:
@@ -1595,25 +1643,33 @@ def shoulder_windows(sessions: list[list[dict]]) -> list[dict]:
 
 
 def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, str]:
-    """返回 ("PASS"/"FAIL"/"SKIP", 细节)。任一有窗口的档位不达标即 FAIL；三档都没窗口才 SKIP。"""
+    """PASS / FAIL / INSUFFICIENT_DATA。每一档都需要足够的未过期帧，三档都没有就判数据不足。"""
     if not joints:
-        return "FAIL", "没有 joints-*.jsonl，无法判双肩可用帧占比"
+        return INSUFFICIENT, "没有 joints-*.jsonl，无法判双肩可用帧占比"
     usable = [row for row in joints if row.get("stale") is not True]
     if not usable:
-        return "FAIL", "所有关节帧都过期，没有可用证据"
+        return INSUFFICIENT, "所有关节帧都过期，没有可用证据"
+    # 整轮没有一个可见关节 = 没人入镜：占比 0% 不是「肩不可用」，是「没测到」。
+    if len(visible_joint_frames(joints)) < MIN_VISIBLE_JOINT_FRAMES:
+        return INSUFFICIENT, (f"整轮只有 {len(visible_joint_frames(joints))} 帧可见关节"
+                              f"（要求 ≥{MIN_VISIBLE_JOINT_FRAMES}），双肩占比没有证据")
 
     details: list[str] = []
     failed = False
+    insufficient = False
     measured = 0
     for state, limit in SHOULDER_RATIO_LIMITS.items():
         spans = [w for w in windows if w.get("state") == state]
         if not spans:
-            details.append(f"{state}: 本轮没有该状态时段（跳过）")
+            insufficient = True
+            details.append(f"{state}: 本轮没有该状态时段（数据不足）")
             continue
         in_window = [row for row in usable
                      if any(w["start"] <= (row.get("t") or 0) <= (w["end"] or w["start"]) for w in spans)]
-        if not in_window:
-            details.append(f"{state}: 窗口内没有关节帧（跳过）")
+        if len(in_window) < MIN_VISIBLE_JOINT_FRAMES:
+            insufficient = True
+            details.append(f"{state}: 窗口内只有 {len(in_window)} 个未过期关节帧"
+                           f"（要求 ≥{MIN_VISIBLE_JOINT_FRAMES}，数据不足）")
             continue
         measured += 1
         available = sum(1 for row in in_window if row.get("shoulders_available") is True)
@@ -1622,35 +1678,43 @@ def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, 
         failed = failed or not ok
         details.append(f"{state}: {ratio:.1%}（{available}/{len(in_window)}，要求 ≥{limit:.0%}）"
                        + ("" if ok else " ✗"))
-    if measured == 0:
-        return "SKIP", "；".join(details) if details else "没有可判的状态窗口"
-    return ("FAIL" if failed else "PASS"), "；".join(details)
+    summary = "；".join(details) if details else "没有可判的状态窗口"
+    if failed:
+        return FAIL, summary
+    if measured == 0 or insufficient:
+        return INSUFFICIENT, summary
+    return PASS, summary
 
 
-def judge_cloud_smooth(perf: list[dict]) -> tuple[bool, str]:
-    if not perf:
-        return False, "没有 perf-*.jsonl（DEBUG 构建且跑过采集才会有）"
-    clean = [row for row in perf
-             if row.get("degraded") is not True
-             and row.get("thermal_state") not in ("serious", "critical")
-             and (row.get("cloud_frames") or 0) > 0]
-    if not clean:
-        return False, "没有未降级的点云时段，无法判流畅"
-    worst_p95 = max(row.get("cloud_gap_p95_ms") or 0 for row in clean)
-    worst_gap = max(row.get("cloud_gap_max_ms") or 0 for row in clean)
-    # 没人时点云是空的（0 点），有人时必须是 600 点；其它任何数字都说明预算没有固定。
-    wrong_points = [row.get("cloud_points") for row in clean
-                    if row.get("cloud_points") not in (0, CLOUD_POINT_BUDGET)]
-    with_body = [row for row in clean if row.get("cloud_points") == CLOUD_POINT_BUDGET]
-    detail = (f"未降级 {len(clean)} 秒里 p95 最差 {worst_p95:.1f} ms（要求 ≤{CLOUD_P95_LIMIT_MS:.0f}）、"
-              f"最长间隔 {worst_gap:.1f} ms（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）")
-    detail += (f"；{len(with_body)} 秒取到 600 点云" if with_body
-               else "；本轮没有人体入镜，点数固定 600 未取到证据（点云为空，0 点）")
-    if wrong_points:
-        return False, detail + f"；点数既不是 0 也不是 600 的秒数：{len(wrong_points)}"
-    if worst_p95 > CLOUD_P95_LIMIT_MS or worst_gap > CLOUD_MAX_GAP_MS:
-        return False, detail
-    return True, detail
+def cloud_gaps_ms(frames: list[dict]) -> tuple[float, float, int]:
+    """未降级帧的相邻间隔：p95 与最大值（毫秒），以及参与计算的帧数。"""
+    stamps = sorted(row["frame_s"] for row in frames
+                    if row.get("degraded") is not True and isinstance(row.get("frame_s"), (int, float)))
+    gaps = [(b - a) * 1000 for a, b in zip(stamps, stamps[1:])]
+    if not gaps:
+        return 0.0, 0.0, len(stamps)
+    gaps.sort()
+    p95 = gaps[min(len(gaps) - 1, round(0.95 * (len(gaps) - 1)))]
+    return p95, gaps[-1], len(stamps)
+
+
+def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
+    if not frames:
+        return INSUFFICIENT, "没有 frames-*.jsonl（0.6.8 (15) 起才有逐帧原始记录）"
+    body = [row for row in frames if row.get("points") == CLOUD_POINT_BUDGET]
+    clean = [row for row in frames if row.get("degraded") is not True]
+    p95, worst, count = cloud_gaps_ms(clean)
+    detail = (f"逐帧 {len(frames)} 帧，未降级 {count} 帧里 p95 {p95:.1f} ms"
+              f"（要求 ≤{CLOUD_P95_LIMIT_MS:.0f}）、最长间隔 {worst:.1f} ms"
+              f"（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）；取到 600 点的帧 {len(body)}")
+    if len(body) < MIN_BODY_FRAMES:
+        return INSUFFICIENT, detail + f"（要求 ≥{MIN_BODY_FRAMES} 帧才判点数固定，数据不足）"
+    wrong = [row.get("points") for row in frames if row.get("points") not in (0, CLOUD_POINT_BUDGET)]
+    if wrong:
+        return FAIL, detail + f"；点数既不是 0 也不是 600 的帧：{len(wrong)}"
+    if p95 > CLOUD_P95_LIMIT_MS or worst > CLOUD_MAX_GAP_MS:
+        return FAIL, detail
+    return PASS, detail
 
 
 def degradation_periods(sessions: list[list[dict]], perf: list[dict]) -> list[dict]:
@@ -1700,18 +1764,21 @@ def degradation_periods(sessions: list[list[dict]], perf: list[dict]) -> list[di
     return periods
 
 
-def judge_degradation(periods: list[dict], perf: list[dict], focus_seconds: float) -> tuple[bool, str]:
+def judge_degradation(periods: list[dict], perf: list[dict], focus_seconds: float,
+                      seconds: float) -> tuple[str, str]:
     total = sum(p["seconds"] for p in periods)
     share = total / focus_seconds if focus_seconds > 0 else 0
     detail = (f"降级 {len(periods)} 段、合计 {total:.1f} s，占计划专注 {focus_seconds:.0f} s 的 "
-              f"{share:.1%}（上限 {DEGRADED_SHARE_LIMIT:.0%}）")
+              f"{share:.1%}（上限 {DEGRADED_SHARE_LIMIT:.0%}）；会话 {seconds:.0f} s")
     if total > 0:
         listing = "；".join(f"{iso_from_millis(p['start'])} 起 {p['seconds']:.1f} s"
                            f"（{p['source']}）" for p in periods)
         detail += f"。时段：{listing}"
     if perf and not periods and any(r.get("degraded") is True for r in perf):
-        return False, detail + "；但 perf 的 degraded 字段显示降级过——两处证据矛盾"
-    return (share <= DEGRADED_SHARE_LIMIT), detail
+        return FAIL, detail + "；但 perf 的 degraded 字段显示降级过——两处证据矛盾"
+    if seconds < MIN_SESSION_SECONDS:
+        return INSUFFICIENT, detail + f"（短于 {MIN_SESSION_SECONDS:.0f} s，降级占比不判）"
+    return (PASS if share <= DEGRADED_SHARE_LIMIT else FAIL), detail
 
 
 def pull_device_debug(run_id: str, device: str) -> Path:
@@ -1739,50 +1806,58 @@ def command_device_logs(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     logs = read_debug_logs(directory, all_runs=args.all_runs)
-    if not logs["sessions"] and not logs["perf"] and not logs["joints"]:
-        sys.exit(f"{directory} 里没有任何 session-/perf-/joints-*.jsonl；真机没跑过或调试模式没开")
-    ok_upper, detail_upper = judge_upper_body_only(logs["joints"])
-    ok_head, detail_head = judge_shoulders_not_on_head(logs["joints"])
-    ratio_status, detail_ratio = judge_shoulder_ratio(logs["joints"], shoulder_windows(logs["sessions"]))
-    ok_cloud, detail_cloud = judge_cloud_smooth(logs["perf"])
-    periods = degradation_periods(logs["sessions"], logs["perf"])
-    ok_thermal, detail_thermal = judge_degradation(periods, logs["perf"], args.focus_seconds)
+    if not logs["sessions"] and not logs["perf"] and not logs["joints"] and not logs["frames"]:
+        sys.exit(f"{directory} 里没有任何 session-/perf-/joints-/frames-*.jsonl；"
+                 "真机没跑过或调试模式没开")
+    seconds = session_seconds(logs)
+    detected = sum(1 for row in logs["joints"] if row.get("detected") is True)
 
     checks = {
-        "upper-body-only": (ok_upper, detail_upper),
-        "shoulders-not-on-head": (ok_head, detail_head),
-        "shoulders-available-ratio": (ratio_status, detail_ratio),
-        "cloud-smooth": (ok_cloud, detail_cloud),
-        "degradation": (ok_thermal, detail_thermal),
+        "upper-body-only": judge_upper_body_only(logs["joints"]),
+        "shoulders-not-on-head": judge_shoulders_not_on_head(logs["joints"]),
+        "shoulders-available-ratio": judge_shoulder_ratio(logs["joints"],
+                                                          shoulder_windows(logs["sessions"])),
+        "cloud-smooth": judge_cloud_smooth(logs["frames"]),
+        "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
+                                          logs["perf"], args.focus_seconds, seconds),
     }
-    def label_of(value) -> str:
-        # 判定值可能是 bool，也可能是 "PASS"/"SKIP"（双肩占比那条要区分「没证据」与「不达标」）。
-        if value is True or value == "PASS":
-            return "PASS"
-        return "SKIP" if value == "SKIP" else "FAIL"
+    # 整轮没测到人：任何「没人体也成立」的规则都不能算通过，统一判数据不足。
+    if detected < MIN_DETECTED_FRAMES:
+        checks["upper-body-only"] = (INSUFFICIENT,
+                                     f"模型只在 {detected} 帧看到人（要求 ≥{MIN_DETECTED_FRAMES}），"
+                                     "整轮没有可用的关节证据")
+        checks["shoulders-not-on-head"] = (INSUFFICIENT,
+                                           f"模型只在 {detected} 帧看到人，没有肩线可判")
+
+    statuses = [status for status, _detail in checks.values()]
+    if FAIL in statuses:
+        verdict_status, code = FAIL, 1
+    elif INSUFFICIENT in statuses:
+        verdict_status, code = INSUFFICIENT, 2
+    else:
+        verdict_status, code = PASS, 0
 
     verdict = {"when": now(), "runId": run_id, "device": device, "sourceDir": str(directory),
-               "focusSeconds": args.focus_seconds,
-               "degradationPeriods": periods,
-               "checks": {name: {"status": label_of(value), "detail": detail}
-                          for name, (value, detail) in checks.items()}}
-    failed = []
-    for name, (value, detail) in checks.items():
-        label = label_of(value)
-        print(f"{label} {name}: {detail}")
-        if label == "FAIL":
-            failed.append(name)
-        check(state, f"device-logs:{name}", label != "FAIL", detail)
-    verdict["ok"] = not failed
+               "focusSeconds": args.focus_seconds, "sessionSeconds": round(seconds, 1),
+               "detectedFrames": detected, "status": verdict_status,
+               "degradationPeriods": degradation_periods(logs["sessions"], logs["perf"]),
+               "checks": {name: {"status": status, "detail": detail}
+                          for name, (status, detail) in checks.items()}}
+    for name, (status, detail) in checks.items():
+        print(f"{status} {name}: {detail}")
+        check(state, f"device-logs:{name}", status == PASS,
+              f"{status}：{detail}")
     write_json(out / "verdict.json", verdict)
     write_state(run_id, state)
-    print(f"\n结论：{'PASS' if not failed else 'FAIL'}"
-          + ("" if not failed else f"（{', '.join(failed)}）")
+    print(f"\n结论：{verdict_status}"
+          + ("" if verdict_status == PASS else
+             "（数据不足：这一轮的证据不足以通过任何一条只靠「没有数据」成立的规则）"
+             if verdict_status == INSUFFICIENT else "（有判定不达标）")
           + f"；证据 {out / 'verdict.json'}")
-    # 模拟器测不到的项单列，提醒读者这三条只能真机验。
+    # 模拟器测不到的项单列，提醒读者这几条只能真机验。
     print("模拟器测不到的项：关节准确率（双肩可用帧占比、肩点在鼻上）、点云更新间隔、发热降级时长、"
           "耗电、真实彩色帧隐私")
-    return 0 if not failed else 1
+    return code
 
 
 # --- PNG 像素统计（点云占屏比例、叠加层区域；r16.py 沉淀） --------------------
