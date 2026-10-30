@@ -87,6 +87,16 @@ enum VisionPoseMapping {
     return Joints(joints: joints, shouldersInvalidated: shouldersInvalidated)
   }
 
+  /// 嘴的外轮廓，只在同帧人脸框置信度过门槛时交付。
+  ///
+  /// Vision 的人体姿态没有嘴；嘴来自 `VNDetectFaceLandmarksRequest` 的 outerLips，而面部特征点本身
+  /// 不带逐点置信度，所以门槛落在人脸框上。低于 `minimumConfidence` 的人脸不画嘴：宁可缺一个嘴，
+  /// 也不把一张误检的脸画成孩子的一部分（issue #6 AC3）。
+  static func mouth(points: [CGPointLike], faceConfidence: Double?) -> [CGPointLike] {
+    guard let faceConfidence, faceConfidence >= minimumConfidence else { return [] }
+    return points
+  }
+
   /// Vision 的归一化点（原点在左下、y 向上）换成应用的关节空间（原点左上、y 向下）。
   ///
   /// `portrait` 说的是模型看到的那帧缓冲的方向。采集图只要求竖屏（旋转 90°、镜像），竖屏缓冲直接

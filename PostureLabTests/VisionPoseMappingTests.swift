@@ -146,6 +146,21 @@ final class VisionPoseMappingTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(VisionPoseMapping.rollDegrees(joints, fallback: 42)), 0, accuracy: 0.0001)
   }
 
+  // MARK: - 嘴
+
+  /// 嘴是面部特征，没有逐点置信度：整条轮廓按同帧人脸框的置信度过 0.5 门槛才画。
+  func testMouthIsDeliveredOnlyWhenTheFacePassesTheThreshold() {
+    let lips = [CGPointLike(x: 0.45, y: 0.35), CGPointLike(x: 0.55, y: 0.35),
+                CGPointLike(x: 0.50, y: 0.37)]
+    XCTAssertEqual(VisionPoseMapping.mouth(points: lips, faceConfidence: 0.5), lips,
+                   "0.5 is exactly at the threshold and counts")
+    XCTAssertTrue(VisionPoseMapping.mouth(points: lips, faceConfidence: 0.49).isEmpty,
+                  "a face below 0.5 must not add a mouth")
+    XCTAssertTrue(VisionPoseMapping.mouth(points: lips, faceConfidence: nil).isEmpty,
+                  "no face box, no mouth")
+    XCTAssertTrue(VisionPoseMapping.mouth(points: [], faceConfidence: 0.9).isEmpty)
+  }
+
   // MARK: - 配对窗口
 
   func testTheNearestDepthFrameWins() {
