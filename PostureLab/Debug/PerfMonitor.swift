@@ -20,7 +20,7 @@ import Foundation
 /// - `vision_ms_avg` / `vision_ms_max`：一次 Vision 推理 + 关节映射
 /// - `assess_ms_avg` / `assess_ms_max`：一次姿态判定
 /// - `cloud_frames` / `cloud_points_min` / `cloud_points_max`：该秒内的点云帧数，以及这一秒里最
-///   少/最多的点数。逐帧原始事实在 `frames-*.jsonl`；这里保留极值，是为了让「同一秒里既有点云又
+///   少/最多的点数。逐帧原始事实在 `cloud-*.jsonl`；这里保留极值，是为了让「同一秒里既有点云又
 ///   有空格」再也不会被一个末值掩盖（0.6.8 (14) 的 `cloud_points` 就只记末值）。
 /// - `cloud_gap_p95_ms` / `cloud_gap_max_ms`：该秒内相邻两帧点云更新间隔的 p95 与最大值；
 ///   068-2 的流畅门槛（未降级时 p95 ≤ 40 ms、最大 ≤ 200 ms）就按这两个键判

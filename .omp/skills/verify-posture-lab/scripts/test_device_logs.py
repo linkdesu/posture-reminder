@@ -94,7 +94,7 @@ class DeviceLogsTests(unittest.TestCase):
             debug.mkdir()
             (root_path / "runs").mkdir()
             for name, rows in (("session", sessions), ("perf", perf),
-                               ("joints", joints), ("frames", frames)):
+                               ("joints", joints), ("cloud", frames)):
                 (debug / f"{name}-test.jsonl").write_text(
                     "\n".join(json.dumps(row) for row in rows) + "\n")
             env = os.environ.copy()

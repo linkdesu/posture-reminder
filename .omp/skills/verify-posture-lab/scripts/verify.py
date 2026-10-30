@@ -1581,7 +1581,7 @@ def read_debug_logs(directory: Path, *, all_runs: bool = False) -> dict:
         "sessions": [load_jsonl(p) for p in files("session-*.jsonl")],
         "perf": [row for p in files("perf-*.jsonl") for row in load_jsonl(p)],
         "joints": [row for p in files("joints-*.jsonl") for row in load_jsonl(p)],
-        "frames": [row for p in files("frames-*.jsonl") for row in load_jsonl(p)],
+        "cloud": [row for p in files("cloud-*.jsonl") for row in load_jsonl(p)],
     }
 
 
@@ -1594,7 +1594,7 @@ def session_seconds(logs: dict) -> float:
     stamps: list[float] = []
     for rows in logs["sessions"]:
         stamps += [row["ts"] for row in rows if isinstance(row.get("ts"), (int, float))]
-    stamps += [row["t"] for row in logs["frames"] if isinstance(row.get("t"), (int, float))]
+    stamps += [row["t"] for row in logs["cloud"] if isinstance(row.get("t"), (int, float))]
     if len(stamps) < 2:
         return 0.0
     return max(0.0, (max(stamps) - min(stamps)) / 1000)
@@ -1720,7 +1720,7 @@ def cloud_gaps_ms(frames: list[dict]) -> tuple[float, float, int]:
 
 def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
     if not frames:
-        return INSUFFICIENT, "没有 frames-*.jsonl（0.6.8 (15) 起才有逐帧原始记录）"
+        return INSUFFICIENT, "没有 cloud-*.jsonl（0.6.8 (15) 起才有逐帧原始记录）"
     body = [row for row in frames if row.get("points") == CLOUD_POINT_BUDGET]
     clean = [row for row in frames if row.get("degraded") is not True]
     p95, worst, count = cloud_gaps_ms(clean)
@@ -1826,8 +1826,8 @@ def command_device_logs(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     logs = read_debug_logs(directory, all_runs=args.all_runs)
-    if not logs["sessions"] and not logs["perf"] and not logs["joints"] and not logs["frames"]:
-        sys.exit(f"{directory} 里没有任何 session-/perf-/joints-/frames-*.jsonl；"
+    if not logs["sessions"] and not logs["perf"] and not logs["joints"] and not logs["cloud"]:
+        sys.exit(f"{directory} 里没有任何 session-/perf-/joints-/cloud-*.jsonl；"
                  "真机没跑过或调试模式没开")
     seconds = session_seconds(logs)
     detected = sum(1 for row in logs["joints"] if row.get("detected") is True)
@@ -1837,7 +1837,7 @@ def command_device_logs(args) -> int:
         "shoulders-not-on-head": judge_shoulders_not_on_head(logs["joints"]),
         "shoulders-available-ratio": judge_shoulder_ratio(logs["joints"],
                                                           shoulder_windows(logs["sessions"])),
-        "cloud-smooth": judge_cloud_smooth(logs["frames"]),
+        "cloud-smooth": judge_cloud_smooth(logs["cloud"]),
         "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
                                           logs["perf"], args.focus_seconds, seconds),
     }
