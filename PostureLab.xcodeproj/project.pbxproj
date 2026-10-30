@@ -730,8 +730,8 @@
 				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "PostureLab 深度版";
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于读取前置 TrueDepth 深度数据来估计阅读坐姿；不读取彩色画面，全部在本机处理";
+				INFOPLIST_KEY_CFBundleDisplayName = PostureLab;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于在本机识别坐姿，画面不会显示、保存或上传";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -829,8 +829,8 @@
 				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "PostureLab 深度版";
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于读取前置 TrueDepth 深度数据来估计阅读坐姿；不读取彩色画面，全部在本机处理";
+				INFOPLIST_KEY_CFBundleDisplayName = PostureLab;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于在本机识别坐姿，画面不会显示、保存或上传";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
