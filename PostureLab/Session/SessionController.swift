@@ -808,6 +808,8 @@ final class SessionController: ObservableObject {
     guard phase != .report, !pomodoroRunFinished, inputSource == nil else { return }
     let source = makeSource()
     source.onSample = { [weak self] sample in self?.handlePomodoro(sample) }
+    // 30 Hz 的点云只喂画布：它不动样本时钟、不动判定，也不写日志。
+    source.onCloud = { [weak self] frame in self?.applyCloud(frame) }
     inputSource = source
     // A source counts from zero; the shared clock carries on where the last one stopped. Without this
     // a second source would rewind the countdown and the posture clock with it.
@@ -921,6 +923,14 @@ final class SessionController: ObservableObject {
       return SimulatedSampleSource(scenario: scenario)
     }
     return DepthCaptureSource()
+  }
+
+  /// 一个深度帧的点云（约 30 Hz）。只替换镜子里的点，关节、深度格与判定都不碰；还没有任何样本时
+  /// 直接忽略，画面仍是矢量轮廓。
+  private func applyCloud(_ frame: CloudFrame) {
+    guard latestGeometry != nil else { return }
+    guard latestGeometry?.cloud != frame.points else { return }
+    latestGeometry?.cloud = frame.points
   }
 
   private func stopInput() {

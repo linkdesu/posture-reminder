@@ -1,8 +1,9 @@
 import XCTest
 @testable import PostureLab
 
-/// The depth pipeline end to end on synthetic frames: segmentation, the joints a depth-only source
-/// can honestly report, the joints it must leave unavailable, and the cloud sampled from the mask.
+/// The depth pipeline end to end on synthetic frames: segmentation, the head geometry depth alone
+/// can honestly report, and the cloud sampled from the mask. Joints come from Vision now; their
+/// mapping has its own tests.
 ///
 /// The fixtures are built by hand rather than recorded from a device so every assertion has a known
 /// geometry: a head disc, a torso trapezoid and a flat wall behind them, in metres.
@@ -40,30 +41,13 @@ final class DepthPipelineTests: XCTestCase {
     return DepthImage(width: width, height: height, metres: metres)!
   }
 
-  /// A close child whose mask is cut off at the chest: a wide head with ears, and a neck that never
-  /// opens into a shoulder line because the shoulders are below the frame. The frame that made
-  /// v0.6.1 call the ears "shoulders".
-  private func headWithEarsImage() -> DepthImage {
-    var metres = [Float](repeating: background, count: width * height)
-    for y in 0..<height {
-      for x in 0..<width {
-        let inHead = hypot(Double(x - 80), Double(y - 35)) <= 30
-        let inEar = (y >= 30 && y <= 44) && (abs(x - 44) <= 6 || abs(x - 116) <= 6)
-        let inNeck = y >= 65 && abs(x - 80) <= 12
-        guard inHead || inEar || inNeck else { continue }
-        metres[y * width + x] = 0.32
-      }
-    }
-    return DepthImage(width: width, height: height, metres: metres)!
-  }
-
   private func flatWall() -> DepthImage {
     DepthImage(width: width, height: height,
                metres: [Float](repeating: 1.4, count: width * height))!
   }
 
   /// The same seated body at TrueDepth's own size: 320 by 240, head disc radius 26, torso 120 px
-  /// wide, wall at 2 m. `DepthJointSource` resamples this down before segmenting it.
+  /// wide, wall at 2 m. `DepthCaptureSource` resamples this down before segmenting it.
   private func wideBodyImage() -> DepthImage {
     let wideWidth = 320
     let wideHeight = 240
@@ -116,98 +100,42 @@ final class DepthPipelineTests: XCTestCase {
     XCTAssertNil(DepthSegmentation.segment(empty))
   }
 
-  // MARK: - Joints
+  // MARK: - Head geometry
 
-  func testDepthJointsReportTheHeadNeckShouldersTorsoAndHips() throws {
-    let estimate = DepthJointSource().estimate(from: bodyImage())
+  /// 头部深度带给出的距离、俯仰、横滚。关节现在来自 Vision，深度一侧只负责这三样，所以它们必须
+  /// 在没有关节的情况下也成立。
+  func testHeadGeometryReadsDistanceFromTheMaskOnly() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let reading = HeadGeometry.measure(depth: image, mask: mask)
 
-    XCTAssertEqual(estimate.joints[.nose]?.depthM ?? 0, 0.5, accuracy: 0.05)
-    for joint in [JointID.neck, .leftShoulder, .rightShoulder, .root, .leftHip, .rightHip] {
-      XCTAssertNotNil(estimate.joints[joint], "\(joint.rawValue) should come from the mask")
-    }
-    XCTAssertEqual(estimate.distanceCM ?? 0, 50, accuracy: 6)
+    XCTAssertEqual(try XCTUnwrap(reading.distanceCM), 50, accuracy: 6,
+                   "the wall behind the child must not pull the distance back")
   }
 
-  // MARK: - Shoulders
-
-  func testShouldersSitBelowTheNeckInANormalSittingPose() throws {
-    let estimate = DepthJointSource().estimate(from: bodyImage())
-    let neck = try XCTUnwrap(estimate.joints[.neck])
-    let left = try XCTUnwrap(estimate.joints[.leftShoulder])
-    let right = try XCTUnwrap(estimate.joints[.rightShoulder])
-
-    XCTAssertGreaterThan(left.y, neck.y, "a shoulder above the neck is a head")
-    XCTAssertGreaterThan(right.y, neck.y, "a shoulder above the neck is a head")
-    // 两肩的三维距离落在 20–45 cm：这条约束是肩点被判为可用的前提。
-    let span = try XCTUnwrap(DepthCamera().distance(left, right))
-    XCTAssertGreaterThanOrEqual(span, 0.20)
-    XCTAssertLessThanOrEqual(span, 0.45)
-    XCTAssertFalse(estimate.unavailable.contains(.leftShoulder))
-    XCTAssertFalse(estimate.unavailable.contains(.rightShoulder))
+  func testHeadGeometryIsEmptyWithoutABody() {
+    let reading = HeadGeometry.measure(depth: flatWall(), mask: nil)
+    XCTAssertNil(reading.distanceCM)
+    XCTAssertNil(reading.pitchDeg)
+    XCTAssertNil(reading.rollDeg)
   }
 
-  func testTheEarsOfACutOffNearMaskAreNotShoulders() {
-    let estimate = DepthJointSource().estimate(from: headWithEarsImage())
-
-    // 头部两侧的耳朵与颈部都在轮廓里，但没有任何一行宽到能当肩线：双肩必须记为不可用。
-    XCTAssertNil(estimate.joints[.leftShoulder], "an ear is not a shoulder")
-    XCTAssertNil(estimate.joints[.rightShoulder], "an ear is not a shoulder")
-    XCTAssertTrue(estimate.unavailable.contains(.leftShoulder))
-    XCTAssertTrue(estimate.unavailable.contains(.rightShoulder))
-  }
-
-  func testShouldersAreUnavailableWhenTheSpanIsOutOfRange() throws {
-    // 肩线比头宽合理，但同样的宽度在 0.8 m 处换算是 58 cm：远超两肩 20–45 cm 的区间。
-    let estimate = DepthJointSource().estimate(from: bodyImage(bodyDepth: 0.8,
-                                                               headRadius: 20,
-                                                               torsoHalfWidth: 50,
-                                                               torsoTop: 40))
-    XCTAssertNil(estimate.joints[.leftShoulder])
-    XCTAssertNil(estimate.joints[.rightShoulder])
-    XCTAssertTrue(estimate.unavailable.contains(.leftShoulder))
-    // 颈部本身仍然可用：不可用的只是没有通过约束的肩。
-    XCTAssertNotNil(estimate.joints[.neck])
-  }
-
-  func testShouldersAreUnavailableWhenTheHeadIsWiderThanTheShoulderLine() {
-    // 头（含耳朵）60 px、肩线只有 40 px：肩宽 / 头宽 落到合理区间之外。
-    let estimate = DepthJointSource().estimate(from: bodyImage(headRadius: 30, torsoHalfWidth: 20))
-    XCTAssertNil(estimate.joints[.leftShoulder])
-    XCTAssertNil(estimate.joints[.rightShoulder])
-  }
-
-  func testDepthJointsNeverInventEyesEarsElbowsOrWrists() {
-    let estimate = DepthJointSource().estimate(from: bodyImage())
-
-    let mustBeUnavailable: Set<JointID> = [
-      .leftEye, .rightEye, .leftEar, .rightEar, .leftElbow, .rightElbow, .leftWrist, .rightWrist,
-    ]
-    XCTAssertTrue(mustBeUnavailable.isSubset(of: estimate.unavailable))
-    for joint in mustBeUnavailable {
-      XCTAssertNil(estimate.joints[joint], "\(joint.rawValue) must not be fabricated")
-    }
-    XCTAssertEqual(estimate.unavailable.count + estimate.joints.count, JointID.allCases.count)
-  }
-
-  func testNobodyInFrameLeavesEveryJointUnavailable() {
-    let estimate = DepthJointSource().estimate(from: flatWall())
-    XCTAssertTrue(estimate.joints.isEmpty)
-    XCTAssertTrue(estimate.cloud.isEmpty)
-    XCTAssertNil(estimate.distanceCM)
-    XCTAssertEqual(estimate.unavailable, Set(JointID.allCases))
-  }
-
-  func testHeadOrientationFollowsTheDepthSlope() throws {
-    let upright = DepthJointSource().estimate(from: bodyImage())
+  func testHeadGeometryFollowsTheDepthSlope() throws {
+    let uprightImage = bodyImage()
+    let upright = HeadGeometry.measure(depth: uprightImage,
+                                       mask: try XCTUnwrap(DepthSegmentation.segment(uprightImage)))
     XCTAssertEqual(upright.pitchDeg ?? .nan, 0, accuracy: 1.5)
 
     // The bottom of the head 0.3 m farther than its top: a head tipped back, positive pitch here.
-    let up = DepthJointSource().estimate(from: bodyImage(headSlope: 0.3 / 30))
-    let pitch = try XCTUnwrap(up.pitchDeg)
-    XCTAssertGreaterThan(pitch, 5)
+    let upImage = bodyImage(headSlope: 0.3 / 30)
+    let up = HeadGeometry.measure(depth: upImage,
+                                  mask: try XCTUnwrap(DepthSegmentation.segment(upImage)))
+    XCTAssertGreaterThan(try XCTUnwrap(up.pitchDeg), 5)
 
     // The opposite slope is a nod.
-    let down = DepthJointSource().estimate(from: bodyImage(headSlope: -0.3 / 30))
+    let downImage = bodyImage(headSlope: -0.3 / 30)
+    let down = HeadGeometry.measure(depth: downImage,
+                                    mask: try XCTUnwrap(DepthSegmentation.segment(downImage)))
     XCTAssertLessThan(try XCTUnwrap(down.pitchDeg), -5)
   }
 
@@ -294,15 +222,13 @@ final class DepthPipelineTests: XCTestCase {
     XCTAssertEqual(small.value(x: 1, y: 1), background, accuracy: 0.06)
   }
 
-  func testAWideFrameIsResampledBeforeTheJointsAreRead() throws {
-    let estimate = DepthJointSource().estimate(from: wideBodyImage())
+  func testAWideFrameIsResampledBeforeTheHeadIsMeasured() throws {
+    // 真机的深度帧是 320×240；采集源先缩到 160 px 再分割、量头，距离仍是半米。
+    let image = wideBodyImage().resampled(maxWidth: 160)
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let reading = HeadGeometry.measure(depth: image, mask: mask)
 
-    XCTAssertNotNil(estimate.joints[.neck])
-    let left = try XCTUnwrap(estimate.joints[.leftShoulder])
-    let right = try XCTUnwrap(estimate.joints[.rightShoulder])
-    XCTAssertGreaterThan(left.y, estimate.joints[.neck]?.y ?? 1)
-    XCTAssertGreaterThan(right.y, estimate.joints[.neck]?.y ?? 1)
-    XCTAssertEqual(estimate.distanceCM ?? 0, 50, accuracy: 6)
+    XCTAssertEqual(try XCTUnwrap(reading.distanceCM), 50, accuracy: 6)
   }
 
   // MARK: - Coarse grid
