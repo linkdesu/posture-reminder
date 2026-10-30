@@ -37,6 +37,27 @@ struct DepthImage: Equatable {
     return value > 0.05 && value < 5
   }
 
+  /// 有效读数占整帧的比例（0...1）。
+  ///
+  /// 它把两种「没有点云」分开：传感器这一帧真的没有读数（≈0）与传感器正常、只是画面里没有比背景
+  /// 近的人（≈1 但分割失败）。逐帧日志靠它自证深度流在工作。
+  var validFraction: Double {
+    guard !metres.isEmpty else { return 0 }
+    var valid = 0
+    for value in metres where value > 0.05 && value < 5 { valid += 1 }
+    return Double(valid) / Double(metres.count)
+  }
+
+  /// NaN 读数占整帧的比例（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；
+  /// 关掉深度滤波后整帧都可能是 NaN，那时分割拿不到任何输入、点云必然是空的（0.6.8 (15) 真机
+  /// 排查记录：depth_valid = 0、depth_nan = 1、点云 0 点）。
+  var nanFraction: Double {
+    guard !metres.isEmpty else { return 0 }
+    var nan = 0
+    for value in metres where !value.isFinite { nan += 1 }
+    return Double(nan) / Double(metres.count)
+  }
+
   /// The median of a rect's valid readings, or nil when the rect has none.
   func median(in rect: (minX: Int, minY: Int, maxX: Int, maxY: Int)) -> Float? {
     let minX = max(0, rect.minX)

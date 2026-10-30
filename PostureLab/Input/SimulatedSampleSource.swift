@@ -3,6 +3,8 @@ import Foundation
 /// Replays a `Scenario` on the wall clock at 10Hz, without a camera.
 final class SimulatedSampleSource: SampleSource {
   var onSample: ((PostureSample) -> Void)?
+  /// 脚本源没有真实深度帧，点云跟着样本走：每秒十帧，点数由 `BodyRig` 决定。
+  var onCloud: ((CloudFrame) -> Void)?
 
   private let scenario: Scenario
   private var timer: Timer?
@@ -50,7 +52,11 @@ final class SimulatedSampleSource: SampleSource {
       t += Self.tickInterval
       return
     }
-    onSample?(scenario.sample(at: t))
+    let sample = scenario.sample(at: t)
+    onSample?(sample)
+    if !sample.cloud.isEmpty {
+      onCloud?(CloudFrame(t: sample.t, points: sample.cloud))
+    }
     t += Self.tickInterval
   }
 }

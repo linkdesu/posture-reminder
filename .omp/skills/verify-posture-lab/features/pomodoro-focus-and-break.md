@@ -63,7 +63,7 @@ Preconditions：
 - **每次启动是一个独立文件** `idle-<启动时刻>.jsonl`。同一容器里启动几次就有几个文件，合并读时会看到多行启动时的 `background false`（r16 dry-run 的「两行」就是 preflight 先无参启动、再跑短用例的两次启动，各一行，不是重复写入）。按文件分开判。
 - 启动判据：**启动时至少有一行 `false`**（`background false`，之后通常紧跟 `foreground false`）；不要求恰好一行。
 - 判据：`focus_start`、`resume` 为 `true`；专注计时中的 `foreground` 为 `true`；`pause`、`focus_end`、`background` 为 `false`；休息中或首页（未开始专注）回到前台的 `foreground` 为 `false`。
-- 这是独立文件、独立键名，`docs/qa-log-schema.md` 的 42 键契约不变，`session-*.jsonl` 的逐行契约检查不受影响。
+- 这是独立文件、独立键名，`docs/qa-log-schema.md` 的 43 键契约不变，`session-*.jsonl` 的逐行契约检查不受影响。
 
 ### 常亮验收场景
 

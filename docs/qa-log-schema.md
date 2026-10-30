@@ -4,7 +4,9 @@
 
 **v0.6 是一次破坏性的契约变更：键集从 38 个增至 42 个（新增 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`），事件表新增 `segment`。** 按 ADR-0002，schema 变更必须先让 QA 知情；本轮由 TL 负责把这次变更写进 `tmp/handoff/omp-questions.md` 告知 QA，本文档只记录契约本身。倒计时与专注起点同时改用墙钟口径（见「ts 与 t 不是一回事」一节末尾），新增的「识别中」段见「识别中段与时间轴不变量」。
 
-**v0.6.1 不改变键数，也不新增事件：** 只给 `segment_kind` 增加取值 `no_data`（「无数据」段——首样本之后样本流中断的那段墙钟时间）。已经按 42 键读取日志的读者无需改动；按取值穷举 `segment_kind` 的读者需要接受这个新值。详见「样本中断与「无数据」段」。
+**v0.6.8 是一次契约变更：键集从 42 个增至 43 个（新增 `thermal_degraded`，布尔），事件表新增 `thermal`（发热降级起止各一行）。** 已经按 42 键读取日志的读者必须接受第 43 个键；不关心发热的读者可以忽略它。按 ADR-0002，这次变更同样由 TL 在报告里告知 QA。
+
+**v0.6.1 不改变键数，也不新增事件：** 只给 `segment_kind` 增加取值 `no_data`（「无数据」段——首样本之后样本流中断的那段墙钟时间）。按取值穷举 `segment_kind` 的读者需要接受这个新值。详见「样本中断与「无数据」段」。
 
 **v0.6.3 同样不改变键数，也不新增事件：** 时间轴段种类（`segment_kind` 词表，以及记录里 `postureSegments[].kind`）增加取值 `no_person`——**无人自动暂停**的那段墙钟时间，图例与统计页写「不在画面」。只有孩子自己点的「暂停」仍写 `paused`。停表行为、`pausedSeconds` 累计与「单次无人超过 300 秒记 `interrupted`」的口径一律不变；`no_person` 段与 `paused` 段一样不产生 `reminder`、不进坏姿势统计、不进良好占比分母，也**不写 `segment` 行**（`segment` 事件仍只由 `detecting` 与 `no_data` 关闭时产生）。按取值穷举的读者需要接受这个取值。
 
@@ -26,6 +28,54 @@
 - `Documents/debug/session-<ISO8601>.jsonl`——每次启动一个 JSONL 文件。文件名是启动时间的 ISO8601 表示并去掉冒号，例如 `2026-10-17T01:23:45Z` 启动会产出 `session-2026-10-17T012345Z.jsonl`。每次新运行写一个新文件；`run-scenarios.sh` 选取最新的那个。
 - 应用容器内**没有任何图像文件**（v0.5 起）：页面截图只在内存里渲染，供调试时查看，不写 PNG。留档截图由验收脚本用 `simctl io screenshot` / 外部命令从设备侧拍摄，它们不在 App 容器里。
 
+同目录（`Documents/debug/`）还有三份 **DEBUG 构建专用**的原始记录，它们与上面那份 43 键契约无关（另一个文件、另一套键名），**不掺进 `session-*.jsonl` 的任何键**：
+
+| 文件 | 频率 | 用途 |
+|---|---|---|
+| `perf-<ISO8601>.jsonl` | 每秒一行 | 汇总：渲染帧数/帧率/最大帧间隔、六步耗时（采集/分割/点云/Vision/判定/渲染）的均值与最大值、点云间隔 p95 与最大值、点数极值、热状态、电量、是否降级 |
+| `cloud-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟 |
+| `joints-<ISO8601>.jsonl` | **每个 Vision 帧一行**（约 10 Hz） | 每帧关节：`detected`（模型是否看到人）、`raw`（模型原始置信度，0.5 门槛之前）、`joints`（过门槛后的置信度与可见性）、`stale`、`shoulders_available`、`shoulders_invalidated` |
+
+### `cloud-*.jsonl` 的键
+
+一行 = 一个深度帧，`0.6.8 (15)` 起才有：
+
+```json
+{"t":1793355411156,"frame_s":12.345,"arrival_s":12.351,"depth_ms":1.87,"segment_ms":8.80,
+ "cloud_ms":0.20,"points":600,"mask_cells":1234,"depth_valid":0.970,"depth_nan":0.000,
+ "nearest_m":0.42,"degraded":false,"cloud_emitted":true,"render_ms":0.40,
+ "render_latency_ms":21.50}
+```
+
+- `t`：写行时的 epoch 毫秒（这一帧上屏后写，因此晚于帧自己的时刻）；`frame_s` 是深度帧自己的呈现时刻（会话时钟，秒），**判点云节奏用它**；`arrival_s` 是回调到达时刻，两者之差是排队时间。
+- `depth_ms` / `segment_ms` / `cloud_ms`：取深度、分割、点云三步各自的耗时。
+- `points`：这一帧实际生成的点数；`mask_cells`：分割遮罩格数（0 = 这一帧没分割出人体）。
+- `depth_valid`：有效深度读数占比（0...1）。**它接近 1 而 `mask_cells` 为 0，说明传感器正常、只是画面里没有比背景近 10 cm 的连通块。**
+- `depth_nan`：NaN 读数占比（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；`depth_valid` 为 0 且 `depth_nan` 为 1 就是整帧 NaN——0.6.8 (15) 关掉深度滤波时真机每次都是这个样子，分割拿不到输入、点云恒为 0。排查「点云为什么是空的」先看这两列：`depth_valid≈1` = 没人，`depth_nan≈1` = 深度图不可用。
+- `nearest_m`：这一帧最近的深度读数，米；没有读数时为 `null`。
+- `degraded` / `cloud_emitted`：这一帧是否处于发热降级、点云是否推给了画布（降级时隔帧推）。
+- `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
+
+### `joints-*.jsonl` 的键
+
+一行 = 一个 Vision 帧：
+
+```json
+{"t":1793355411149,"session_t":0.280,"detected":true,"stale":false,
+ "shoulders_available":false,"shoulders_invalidated":false,
+ "raw":{"nose":0.71,"leftEye":0.52,…, "rightShoulder":0.44},
+ "joints":{"nose":{"c":0.71,"v":true},"leftEye":{"c":0.52,"v":true},…,
+           "rightShoulder":{"c":null,"v":false}}}
+```
+
+- `detected`：模型这一帧是否报出了人。`false` = 画面里没人；`true` 而某关节 `v=false`、`raw` 有分数 = 模型看到了但**被 0.5 门槛过滤**。
+- `raw`：八个关节在门槛之前的原始分数；模型没报这个关节时为 `null`。它只用于看模型表现，不参与判定。
+- `joints`：过门槛后的置信度 `c` 与可见性 `v`；不可见关节 `c` 为 `null`。
+- `stale`：关节与深度帧的配对超过 150 ms 而过期，这一帧关节全部不可见。
+- `shoulders_available` / `shoulders_invalidated`：双肩是否可用、是否因为落在鼻点以上被整帧作废（真机要求作废帧数为 0）。
+
+`0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
+
 日志器只在调试模式开启时工作（`FileDebugLogger.isEnabled`）；关闭时不写任何文件。
 
 ### 从设备取出文件
@@ -45,7 +95,7 @@ xcrun devicectl device copy from \
 
 ## 行格式与完整键集
 
-每行一个 JSON 对象，UTF-8，以换行结尾。**每行携带全部 42 个键**（v0.5 以前是 38 个，v0.6 新增四个 `segment_*` 键）。写入器在每行编码完整键集，不适用值写成 JSON `null`，因此读者**永远不必检查键是否存在**——对某个事件没有意义的键以 JSON `null` 存在，而不是缺失。每行唯一的变化是哪些键非 `null`。
+每行一个 JSON 对象，UTF-8，以换行结尾。**每行携带全部 43 个键**（v0.5 以前是 38 个，v0.6 新增四个 `segment_*` 键，v0.6.8 新增 `thermal_degraded`）。写入器在每行编码完整键集，不适用值写成 JSON `null`，因此读者**永远不必检查键是否存在**——对某个事件没有意义的键以 JSON `null` 存在，而不是缺失。每行唯一的变化是哪些键非 `null`。
 
 `scripts/verify-session.py` 仍把其中六个作为 P1 拒绝条件硬校验（`REQUIRED_KEYS`）：`ts`、`event`、`state`、`screen`、`distance_cm`、`pitch_deg`。这六个键在每行都非 `null`。
 
@@ -95,8 +145,9 @@ xcrun devicectl device copy from \
 | `segment_start` | Int64? | 在 `segment` 行：该段起点的 Unix 纪元**毫秒**。`detecting` 是孩子点「开始」的墙钟时刻；`no_data` 是中断前**最后一个样本**到达的墙钟时刻。其他行为 `null`。 |
 | `segment_end` | Int64? | 在 `segment` 行：该段终点的 Unix 纪元**毫秒**。`detecting` 是该专注第一个姿态样本到达的墙钟时刻；`no_data` 是让样本流恢复的那个样本（或专注结束）的墙钟时刻。其他行为 `null`。 |
 | `segment_seconds` | Double? | 在 `segment` 行：该段时长，秒，等于 `(segment_end − segment_start) / 1000`。其他行为 `null`。 |
+| `thermal_degraded` | Bool? | 在 `thermal` 行（v0.6.8）：`true` 表示发热降级开始，`false` 表示结束。其他行为 `null`，键本身仍然存在。 |
 
-这四个 `segment_*` 键只在 `segment` 行非 `null`；其余所有行都写 JSON `null`，键本身仍然存在。
+这四个 `segment_*` 键只在 `segment` 行非 `null`，`thermal_degraded` 只在 `thermal` 行非 `null`；其余所有行都写 JSON `null`，键本身仍然存在。
 
 ### `feature_values` 的嵌套结构
 
@@ -149,6 +200,7 @@ xcrun devicectl device copy from \
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
 | `segment` | 一个专注内的非姿态时间轴段关闭：`detecting`（从孩子点击「开始」到该专注**第一个姿态样本**到达）或 `no_data`（v0.6.1：首样本之后样本流中断，直到下一个样本到达或专注结束）。这段墙钟时间不并入任何姿态段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的段不写行。只有 `detecting` 与 `no_data` 段产生这个事件；`good`、各体态、`no_person` 与 `paused` 段不写。 | `segment_kind`（`detecting` 或 `no_data`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
 | `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
+| `thermal` | 发热降级开始或结束（v0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz，恢复时再写一行结束。降级期间 `thermal_state` 会同时在每行盖上（采样见下文），但只有翻转的那一行带 `thermal_degraded`。 | `thermal_degraded` |
 | `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
 | `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |
 | `session_ended` | 会话结束；携带汇总。 | `total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`paused_seconds`、`near_count`、`near_remind_count`、`head_down_count`、`head_down_remind_count`、`longest_good_streak_seconds`、`posture_stats` |
@@ -224,7 +276,7 @@ v0.6 起，一次专注的时间轴必须能被完整解释：开头是一段「
 
 ### `thermal_state`
 
-`nominal`、`fair`、`serious`、`critical`。
+`nominal`、`fair`、`serious`、`critical`。`serious` 与 `critical` 触发发热降级（v0.6.8），降级的起止由 `thermal` 行标记；这个键本身仍按下面的采样节奏盖在每行上。
 
 ### `segment_kind`
 
@@ -326,7 +378,7 @@ head_down_count = 1         head_down_remind_count = 1
 
 ## 电量与热状态是趋势线，不是逐样本读数
 
-`battery_level` 与 `thermal_state` 背后没有事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
+`battery_level` 与 `thermal_state` 背后没有逐样本事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。会话日志里采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。v0.6.8 起另有每秒一条的 `Documents/debug/perf-*.jsonl`（DEBUG 构建、独立键名）带 `thermal_state`、`battery_level` 与 `degraded`，判「降级时段」与电量曲线用它，不用会话日志的 10 秒采样；逐帧原始事实（点数、点云间隔、上屏时间）另见 `cloud-*.jsonl`，汇总里的 `cloud_points_min` / `cloud_points_max` 只是趋势，不要拿末值当结论。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
 
 ## 截图
 
@@ -348,4 +400,5 @@ v0.5 起应用不写任何图像文件：`FileDebugLogger.screenshot(_:)` 只把
 | 音频 | `speech_played` 行（`alert_type` + `level`）；语音开关关闭时完全没有这类行。阶段结束提示音只写 `cue_played`（`end_soft` / `end_chime`），静音时没有。 |
 | 暂停 | `paused` / `resumed` 行；暂停期间倒计时冻结，暂停时长进入历史的 `pausedSeconds` 与灰色 `paused` 时间轴带。 |
 | 体态提醒 | `reminder` 行带 `t`、`alert_type`、`level`（1 与 2）与 `breach_seconds`；实验级体态永不发声。 |
+| 发热降级（v0.6.8） | `thermal` 行：`thermal_degraded: true` 与 `false` 配对切出降级时段；`serious` 期间同一时段在 `Documents/debug/perf-*.jsonl` 的 `degraded` 为 `true`。降级不改判定口径，只降采集频率。 |
 | 隐私 | 没有任何网络键或远端地址；`Documents/` 下没有任何图像文件，只有 JSONL 与番茄钟历史（截图只在内存，ADR-0005）。 |

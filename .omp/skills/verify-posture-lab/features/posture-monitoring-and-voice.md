@@ -1,10 +1,14 @@
 # 体态监测与语音提醒
 
-主页冷启动即启动输入源：设置页/主页可见时深度输入运行，开始专注前就有 3D 人形点云（模拟器用 BodyRig 场景）；任何构建都不显示摄像头画面（ADR-0007），统计页会停输入。专注阶段中前 3 秒有效人脸样本静默建立校准基线，之后系统识别 8 种不良体态。坐姿越阈不会暂停番茄钟或弹窗，只有可发声体态连续越阈满 15 秒才播放本机预录 WAV 语音；无人暂停连续 3 秒触发，单次超过 300 秒记为 `interrupted`。
+主页冷启动即启动输入源：设置页/主页可见时深度与彩色输入运行，开始专注前就有 3D 人形点云（模拟器用 BodyRig 场景）；任何构建都不显示摄像头画面（ADR-0007、ADR-0008），统计页会停输入。关节由前置彩色帧的 Vision 识别给出（0.6.8），点云仍只来自 TrueDepth 深度。专注阶段中前 3 秒有效人脸样本静默建立校准基线，之后系统识别 8 种不良体态。坐姿越阈不会暂停番茄钟或弹窗，只有可发声体态连续越阈满 15 秒才播放本机预录 WAV 语音；无人暂停连续 3 秒触发，单次超过 300 秒记为 `interrupted`。
 
 ## Sub-features
 
-- `posture-cloud`：`pomodoro_main` 常驻 3D 人形点云，背景干净；冷启动即显示（开始专注前就有）；未检测到人体时显示矢量轮廓；真实输入只读 TrueDepth 深度，不读彩色帧、不显示相机画面；设置页「形象模式」关闭时点云隐藏，因此只剩黑底与调试叠加层。
+- `posture-cloud`：`pomodoro_main` 常驻 3D 人形点云，背景干净；冷启动即显示（开始专注前就有）；未检测到人体时显示矢量轮廓；点云只来自 TrueDepth 深度（每个深度帧约 30 Hz 更新、每帧固定 600 点），彩色帧只进 Vision、不显示相机画面；设置页「形象模式」关闭时点云隐藏，因此只剩黑底与调试叠加层。
+- `posture-joints-vision`（0.6.8）：关节来自 `VNDetectHumanBodyPoseRequest`（2D），Vision 在独立串行队列上约 10 Hz 推理、忙时丢帧、复用同一个请求；只交付鼻/双眼/双耳/颈/双肩，置信度门槛 0.5，双肩之一跑在鼻点上方则整帧双肩作废；关节配时间最近的深度帧，差超过 150 ms 整帧作废。日志侧证据是 `Documents/debug/joints-*.jsonl`（每帧一个关节对象，含 `c` 与 `v`）。
+- `posture-thermal`（0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz；降级起止各写一行 `thermal`（`thermal_degraded`），每秒的热状态、电量与降级标记在 `Documents/debug/perf-*.jsonl`。
+- `posture-tuning`（真机项）：坐直时双肩可用帧占比 ≥ 80%，歪头与低头各 ≥ 50%，「肩点落在头上」的帧数为 0；验收用 `verify.py device-logs` 判定（见 SKILL.md 的「真机日志判定」「数据充分性门槛」与「模拟器测不到的项」）。证据不足时 `device-logs` 返回 `INSUFFICIENT_DATA`（退出码 2），不是 PASS：关节全部不可见、点数为 0、会话短于 600 秒、有人在画面但可见关节帧过少，这四种情形都不算通过。
+- `posture-frames-log`（0.6.8 (15)）：`Documents/debug/cloud-*.jsonl` 每个深度帧一行（帧呈现时刻、回调到达时刻、取深度/分割/点云耗时、实际点数、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟）；`joints-*.jsonl` 每帧带 `detected` 与模型原始置信度 `raw`，用来区分「没人」与「被 0.5 门槛过滤」。
 - `posture-baseline`：专注启动后前 3 秒有效人脸样本中位数建立距离/俯仰基线。
 - `posture-kinds`：识别 `desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 - `posture-tiers`：稳定级、 中度级可发声；实验级只记录与调试高亮，永不触发任何提醒。
@@ -47,7 +51,8 @@ Preconditions：
 - Q4 已确认实验级 `head_forward` / `slouch` 永不触发任何提醒；当前代码在旧 `experimentalPostures` 开关打开时仍可能发一级事件。若日志出现 `reminder`/`speech_played`，按失败报告。
 - Q2 已确认手动与无人暂停都计入 `pausedSeconds`；v0.5 起无人暂停的整段也累加（`PomodoroEngine` 在 `absentSince != nil` 时按样本间隔计入），与灰色 `paused` 段时间轴对账。
 - 语音是预录 WAV，不是系统 TTS；`speech_played` 只证明片段开始，不证明房间听见。
-- 模拟器没有真实摄像头；`deskLean` 等场景的 joints/depth 来自 `BodyRig`，不能把它们当作真机 TrueDepth 证据。
+- 模拟器没有真实摄像头（也没有前置彩色摄像头）；`deskLean` 等场景的 joints/depth 来自 `BodyRig`，不能把它们当作真机 TrueDepth 或 Vision 关节证据。真机项一律用 `verify.py device-logs`。
+- 0.6.8 的关节来源不给出腕关节，`hand_to_face` 永远缺测，托腮（`chin_rest`）在真机上不会触发；脚本 rig 仍摆得出这个姿势，只用于回归。
 - 隐私边界（0.4/0.5，ADR-0007 与 ADR-0005 修订）：任何构建都不显示摄像头画面，容器内也不能有任何图像文件（应用自绘调试图改为只留内存）。设备侧 `simctl io screenshot` 拍的证据图不属于容器。
 
 ## 扩展用例（`verify.py case`）

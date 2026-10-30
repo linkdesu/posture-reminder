@@ -1,14 +1,15 @@
 # 离线与沙盒隐私
 
-应用从构造上离线：没有网络权限、没有 HTTP 客户端、没有分析端点；番茄钟历史、日志与设置只留在本机沙盒。页面截图只在内存里渲染，容器内没有任何图像文件。主页的 3D 人形点云不展示也不落盘原始 RGB 画面；JSONL 日志每行必须携带完整的 42 个键（v0.6 起比 v0.5 多 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`）。
+应用从构造上离线：没有网络权限、没有 HTTP 客户端、没有分析端点；番茄钟历史、日志与设置只留在本机沙盒。页面截图只在内存里渲染，容器内没有任何图像文件。主页的 3D 人形点云不展示也不落盘原始 RGB 画面；JSONL 日志每行必须携带完整的 43 个键（v0.6 起比 v0.5 多 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`，v0.6.8 起再多 `thermal_degraded`）。
 
 ## Sub-features
 
 - `privacy-offline-source`：源码中没有 `URLSession`、`Network`、`WKWebView`、socket 等联网 API，也没有 URL 字面量。
 - `privacy-offline-runtime`：运行中的 App 不持有 internet socket。
 - `privacy-sandbox-files`：沙盒只允许 JSONL/JSON/TXT 与系统自有缓存；**任何图像后缀（png/jpg/heic/mp4/dng/raw 等）都是失败**，包括应用自绘的调试图。
-- `privacy-rgb`：不展示、不落盘原始 RGB；点云是渲染几何，不是相机照片。页面截图只在内存（`FileDebugLogger.latestScreenshot`）。
-- `privacy-log-contract`：每行 JSONL 恰好 42 个键，`ts` 为 epoch 毫秒，缺失值为 `null`；事件词表含 `segment`（识别中段：从点击「开始」到该专注首个姿态样本，段关闭时写一行），该行只有 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds` 这四个键非 `null`，其余行为 `null`。
+- `privacy-rgb`：不展示、不落盘原始 RGB；彩色帧只在内存里交给 Vision（ADR-0008），点云仍是渲染几何，不是相机照片。页面截图只在内存（`FileDebugLogger.latestScreenshot`）。
+- `privacy-colour-boundary`：`VNDetectHumanBodyPose` 只允许出现在 `PostureLab/Input/VisionJointSource.swift`，`AVCaptureVideoDataOutput` 与视频 delegate 只允许出现在 `PostureLab/Input/DepthCaptureSource.swift`；这两处以外的任何文件命中即失败。预览层（`AVCaptureVideoPreviewLayer`）、图片创建与编码（`UIImage(`、`CGImage`、`jpegData(`、`pngData(`、`CIImage`、`CIContext`）、视频文件写入（`AVAssetWriter`、`AVCaptureMovieFileOutput`）与联网 API 在**任何**文件里都不允许。`NSCameraUsageDescription` 必须一字不差是「用于在本机识别坐姿，画面不会显示、保存或上传」，显示名必须是 `PostureLab`。
+- `privacy-log-contract`：每行 JSONL 恰好 43 个键，`ts` 为 epoch 毫秒，缺失值为 `null`；事件词表含 `segment`（识别中段：从点击「开始」到该专注首个姿态样本，段关闭时写一行），该行只有 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds` 这四个键非 `null`；含 `thermal`（v0.6.8 发热降级起止），该行只有 `thermal_degraded` 非 `null`，其余行为 `null`。
 
 ## How to get to it (user POV)
 
@@ -23,9 +24,10 @@ Preconditions：
 - 运行时容器路径在 `state.json.appContainerDataPath`。
 
 - **源码离线审计。** 运行 `python3 scripts/audit-offline.py`；退出码 0 且输出结尾为 `AC8 PASS`。`verify.py evidence` 会把结果写到 `audits/offline.txt`。
+- **彩色帧边界静态审计（ADR-0008）。** 运行 `python3 scripts/audit-privacy.py`；退出码 0 且输出含 `ADR-0008 PASS`。`verify.py evidence` 会把结果写到 `audits/privacy.txt`。它同时校验 `project.yml` 的授权文案与显示名；自测是 `python3 scripts/test_audit_privacy.py`。
 - **运行时 socket 审计。** 在应用运行时执行 `lsof -nP -p <pid> -i`；不得有 internet socket。真机上用 `nettop` 或 `lsof` 对同一 pid 检查。
 - **沙盒审计。** 运行 `python3 scripts/audit-sandbox.py <appContainerDataPath> --json <run>/scenarios/<scenario>/sandbox-audit.json`；退出码 0，manifest 中不得出现禁止后缀或 raw/frame/depth/rgb 等命中。`verify.py drive` 已在每个场景自动执行。
-- **42-key 契约。** `verify.py evidence` 对每个 `session-*.jsonl` 逐行检查键集合恰好为 42 个（v0.6 起含事件 `segment` 的四个键），并运行 `scripts/verify-session.py`（其中 P2 检查 `Documents/` 下没有任何图像文件）。也可手工：
+- **43-key 契约。** `verify.py evidence` 对每个 `session-*.jsonl` 逐行检查键集合恰好为 43 个（v0.6 起含事件 `segment` 的四个键，v0.6.8 起含 `thermal_degraded`），并运行 `scripts/verify-session.py`（其中 P2 检查 `Documents/` 下没有任何图像文件）。也可手工：
   ```sh
   python3 scripts/verify-session.py <log> --quiet
   ```

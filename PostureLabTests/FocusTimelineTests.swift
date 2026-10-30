@@ -263,11 +263,11 @@ final class SegmentLogTests: XCTestCase {
 
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    XCTAssertEqual(fields.count, 42, "the log contract carries 42 keys from v0.6 on")
+    XCTAssertEqual(fields.count, 43, "the log contract carries 43 keys from v0.6.8 on (thermal_degraded)")
     XCTAssertEqual(fields["segment_kind"] as? String, "detecting")
   }
 
-  /// v0.6.1: `no_data` rides the same event and the same 42 keys; only the `segment_kind` value is
+  /// v0.6.1: `no_data` rides the same event and the same keys; only the `segment_kind` value is
   /// new, so a reader's key set is unchanged.
   func testANoDataSegmentReusesTheSameFourKeys() throws {
     let record = MonitoringEvent
@@ -282,7 +282,7 @@ final class SegmentLogTests: XCTestCase {
 
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    XCTAssertEqual(fields.count, 42)
+    XCTAssertEqual(fields.count, 43)
     XCTAssertEqual(fields["segment_kind"] as? String, "no_data")
   }
 
@@ -292,9 +292,21 @@ final class SegmentLogTests: XCTestCase {
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-    XCTAssertEqual(fields.count, 42)
-    for key in ["segment_kind", "segment_start", "segment_end", "segment_seconds"] {
+    XCTAssertEqual(fields.count, 43)
+    for key in ["segment_kind", "segment_start", "segment_end", "segment_seconds", "thermal_degraded"] {
       XCTAssertTrue(fields[key] is NSNull, "\(key) should be null on a paused line")
     }
+  }
+
+  /// v0.6.8：发热降级起止各写一行 `thermal`，只有 `thermal_degraded` 非 null。
+  func testAThermalLineCarriesOnlyItsOwnKey() throws {
+    let start = MonitoringEvent.thermal(degraded: true).logRecord(now: Date(timeIntervalSince1970: 7))
+    let end = MonitoringEvent.thermal(degraded: false).logRecord(now: Date(timeIntervalSince1970: 9))
+
+    XCTAssertEqual(start.event, "thermal")
+    XCTAssertEqual(start.thermal_degraded, true)
+    XCTAssertEqual(end.event, "thermal")
+    XCTAssertEqual(end.thermal_degraded, false)
+    XCTAssertNil(start.segment_kind, "a thermal line does not borrow the segment keys")
   }
 }
