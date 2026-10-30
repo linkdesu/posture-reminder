@@ -20,6 +20,11 @@ struct JointFrameDebugSample {
   var rawConfidence: [String: Double]
   /// 每个关节这一帧是否可见。
   var visible: [String: Bool]
+  /// 这一帧的在场证据路径（v0.6.8 (18)）：`face_eyes` / `neck_shoulder` / `none`。只有鼻子过门槛
+  /// 的一帧记 `none`——鼻子是锚点，不是证据。
+  var presencePath: PresencePath
+  /// 同帧是否找到人脸（`VNDetectFaceLandmarksRequest` 的人脸框）。
+  var faceDetected: Bool
   /// 关节的屏幕归一化坐标（只对可见关节有意义）。
   var pointX: [String: Double] = [:]
   var pointY: [String: Double] = [:]
@@ -68,6 +73,11 @@ final class JointFrameLog {
     // 两条肩线并排：Vision 肩点（过了 0.5 门槛的）与遮罩肩线（`MaskShoulderLine`），
     // 供真机对比哪条更稳；它们都不进判定。
     let visionLine = Self.shoulderLine(sample.visionShoulders)
+    // 在场判定的三个输入关节单独列一份扁平键：`joints` 里有同样的数字，但 QA 复算路径时不必
+    // 再钻进嵌套对象。不可见时为 null，与 `joints.<名>.c` 一致。
+    func passed(_ key: String) -> String {
+      number((sample.visible[key] ?? false) ? sample.confidence[key] : nil)
+    }
 
     return "{\"t\":\(epochMilliseconds)"
       + ",\"session_t\":\(String(format: "%.3f", sample.sessionT))"
@@ -75,6 +85,11 @@ final class JointFrameLog {
       + ",\"stale\":\(sample.stale)"
       + ",\"shoulders_available\":\(available)"
       + ",\"shoulders_invalidated\":\(sample.shouldersInvalidated)"
+      + ",\"presence_path\":\"\(sample.presencePath.rawValue)\""
+      + ",\"face_detected\":\(sample.faceDetected)"
+      + ",\"neck\":\(passed("neck"))"
+      + ",\"left_shoulder\":\(passed("leftShoulder"))"
+      + ",\"right_shoulder\":\(passed("rightShoulder"))"
       + ",\"raw\":{\(raw.joined(separator: ","))}"
       + ",\"joints\":{\(entries.joined(separator: ","))}"
       + ",\"vision_shoulders\":\(visionLine)"

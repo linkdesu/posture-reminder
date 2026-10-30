@@ -25,15 +25,14 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private var cloudStabilizer = CloudStabilizer()
   /// 横滚基线的静默校准（前 3 秒的 Vision 眼线/耳线中位数）。
   private var rollCalibrator = RollCalibrator()
-  /// 在场判定的连续帧计数：头部（鼻）置信度过门槛、且同时有人脸（鼻）或双眼，连续
-  /// `presenceStreakRequired` 帧才算在场；任何一帧不满足就归零。0.6.8 (17)：Vision 在近距离会整帧
-  /// 不给 observation，单帧丢失不再直接当作「人不在」。
-  private var presenceStreak = 0
+  /// 在场判定：连续 `PresenceGate.streakRequired` 帧有可靠证据才算在场。0.6.8 (17)：Vision 在
+  /// 近距离会整帧不给 observation，单帧丢失不再直接当作「人不在」；0.6.8 (18) 起证据本身更严
+  /// （只有鼻子不算有人，见 `PresenceGate`）。
+  private var presence = PresenceGate()
   /// 上一帧背景点云，用来算背景平均位移。
   private var previousBackground: [BodyPoint] = []
   /// 深度轮廓背景开关（由会话层按设置注入）。
   var settingsOutlineEnabled = true
-  private static let presenceStreakRequired = 3
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
   private let videoOutput = AVCaptureVideoDataOutput()
@@ -252,15 +251,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
     return history[index]
   }
 
-  /// 这一帧 Vision 是否给出了「有一个人」的可靠证据：头部（鼻）置信度过门槛，并且鼻或双眼在。
-  /// 只靠 `detected` 会把「模型报了人但所有关节都被门槛滤掉」也算在场；只靠鼻子又会在侧脸时抖。
-  static func headEvidence(_ joints: [JointID: JointSample]) -> Bool {
-    guard joints[.nose] != nil else { return false }
-    return joints[.nose] != nil || (joints[.leftEye] != nil && joints[.rightEye] != nil)
-  }
-
-  /// 这一时刻的在场结论：Vision 最近一帧没有过期、且连续 `presenceStreakRequired` 帧都有头部证据。
-  /// 过期时不下结论（nil，由样本的距离回退）。
+  /// 这一时刻的在场结论：Vision 最近一帧没有过期、且连续 `PresenceGate.streakRequired` 帧都有
+  /// 在场的可靠证据（见 `PresenceGate`）。过期时不下结论（nil，由样本的距离回退）。
   private func mouth(at t: TimeInterval) -> [CGPointLike] {
     stateLock.lock()
     defer { stateLock.unlock() }
@@ -274,7 +266,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
     defer { stateLock.unlock() }
     guard let frame = latestJoints,
           !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return nil }
-    return presenceStreak >= Self.presenceStreakRequired
+    return presence.isPresent
   }
 
   /// 这一时刻还能用的关节：最近一次配对结果没有过期，且双肩没有因为落在头上被作废。
@@ -524,15 +516,16 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
                                   joints: joints,
                                   detected: frame.detected,
                                   rawConfidence: frame.rawConfidence,
+                                  faceDetected: frame.faceDetected,
                                   shouldersInvalidated: frame.shouldersInvalidated,
                                   inferenceSeconds: frame.inferenceSeconds)
+    // 在场只看这一帧的证据路径（`PresenceGate`）：只有鼻子不算有人。
+    var jointConfidence: [JointID: Double] = [:]
+    for (joint, sample) in joints { jointConfidence[joint] = sample.confidence }
     stateLock.lock()
     latestJoints = paired
-    if Self.headEvidence(paired.joints) {
-      presenceStreak = min(Self.presenceStreakRequired, presenceStreak + 1)
-    } else {
-      presenceStreak = 0
-    }
+    let presencePath = presence.observe(confidence: jointConfidence,
+                                        faceDetected: paired.faceDetected)
     stateLock.unlock()
 
     #if DEBUG
@@ -548,10 +541,10 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
       pointX[joint.rawValue] = sample?.x
       pointY[joint.rawValue] = sample?.y
     }
-    // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有头部证据也记一帧。
+    // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有在场证据也记一帧。
     let eyeBelowMouth = Self.eyeBelowMouth(joints: joints, mouth: frame.mouth)
     let shoulderAboveEar = Self.shoulderAboveEar(joints: joints)
-    let pointsWithoutPerson = !joints.isEmpty && !Self.headEvidence(joints)
+    let pointsWithoutPerson = !joints.isEmpty && presencePath == .none
     #if DEBUG
     PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
                                     shoulderAboveEar: shoulderAboveEar,
@@ -575,6 +568,8 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
                                                      confidence: confidence,
                                                      rawConfidence: frame.rawConfidence,
                                                      visible: visible,
+                                                     presencePath: presencePath,
+                                                     faceDetected: frame.faceDetected,
                                                      pointX: pointX,
                                                      pointY: pointY,
                                                      visionShoulders: visionShoulders,

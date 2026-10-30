@@ -8,12 +8,12 @@
 - `posture-joints-vision`（0.6.8）：关节来自 `VNDetectHumanBodyPoseRequest`（2D），Vision 在独立串行队列上约 10 Hz 推理、忙时丢帧、复用同一个请求；只交付鼻/双眼/双耳/颈/双肩，置信度门槛 0.5，双肩之一跑在鼻点上方则整帧双肩作废；关节配时间最近的深度帧，差超过 150 ms 整帧作废。日志侧证据是 `Documents/debug/joints-*.jsonl`（每帧一个关节对象，含 `c` 与 `v`）。
 - `posture-thermal`（0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz；降级起止各写一行 `thermal`（`thermal_degraded`），每秒的热状态、电量与降级标记在 `Documents/debug/perf-*.jsonl`。
 - `posture-tuning`（真机项）：坐直时双肩可用帧占比 ≥ 80%，歪头与低头各 ≥ 50%，「肩点落在头上」的帧数为 0；验收用 `verify.py device-logs` 判定（见 SKILL.md 的「真机日志判定」「数据充分性门槛」与「模拟器测不到的项」）。证据不足时 `device-logs` 返回 `INSUFFICIENT_DATA`（退出码 2），不是 PASS：关节全部不可见、点数为 0、会话短于 600 秒、有人在画面但可见关节帧过少，这四种情形都不算通过。
-- `posture-frames-log`（0.6.8 (15)）：`Documents/debug/cloud-*.jsonl` 每个深度帧一行（帧呈现时刻、回调到达时刻、取深度/分割/点云耗时、实际点数、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟）；`joints-*.jsonl` 每帧带 `detected` 与模型原始置信度 `raw`，用来区分「没人」与「被 0.5 门槛过滤」。
+- `posture-frames-log`（0.6.8 (15)）：`Documents/debug/cloud-*.jsonl` 每个深度帧一行（帧呈现时刻、回调到达时刻、取深度/分割/点云耗时、实际点数、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟）；`joints-*.jsonl` 每帧带 `detected` 与模型原始置信度 `raw`，用来区分「没人」与「被 0.5 门槛过滤」；v0.6.8 (18) 起另带在场判定的证据：`presence_path`（`face_eyes` / `neck_shoulder` / `none`）、`face_detected`，以及 `neck`/`left_shoulder`/`right_shoulder` 三个过门槛后的置信度（详见 qa-log-schema.md 的 `joints-*.jsonl` 一节）。
 - `posture-baseline`：专注启动后前 3 秒有效人脸样本中位数建立距离/俯仰基线。
 - `posture-kinds`：识别 `desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 - `posture-tiers`：稳定级、 中度级可发声；实验级只记录与调试高亮，永不触发任何提醒。
 - `posture-voice`：可发声体态连续越阈 15 秒后播放预录 WAV；多体态按 `priority` 1..8 串行。
-- `posture-absence`：连续 3 秒无人自动停表（中文文档与验收统一写作「无人」，不叫「离开」；统计页/历史图例文案写「不在画面」）；日志写 `state: "no_person"` 与 `paused`/`resumed`，单次超过 300 秒转 `interrupted`。它与「离开」按钮是两件事：按钮只写历史 `abandoned`。
+- `posture-absence`：连续 3 秒无人自动停表（中文文档与验收统一写作「无人」，不叫「离开」；统计页/历史图例文案写「不在画面」）；「在场」的判据是连续 3 帧有可靠证据（鼻过门槛且【找到人脸或双眼】或【颈/双肩】；只有鼻子不算有人，见 `PresenceGate`），日志写 `state: "no_person"` 与 `paused`/`resumed`，单次超过 300 秒转 `interrupted`。它与「离开」按钮是两件事：按钮只写历史 `abandoned`。
 - `posture-overlay`：`debugEnabled` 开启时主页随时显示骨架（中文关节名：头/左眼/右眼/左耳/右耳/颈/躯干/左肩/右肩/左肘/右肘/左腕/右腕/左髋/右髋，只画到髋因为 JointID 没有膝/踝）与特征读数，每个指标带一行算法来源（距离=脸到相机距离；低头角度=基线俯仰−当前脸俯仰；歪头=|当前脸滚转−基线滚转|；肩线=左肩-右肩连线与水平夹角−基线；头高=鼻尖 y−基线头高；手到脸=min(左腕、右腕到鼻尖的距离)；头前伸=基线鼻深−当前鼻深；驼背=max(肩宽缩短比, 颈-躯干缩短比)），未开始专注时数值列显示 `—`，不遮挡操作按钮。
 
 ## How to get to it (user POV)
