@@ -13,6 +13,7 @@
 		09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */; };
 		0B859BC431977A2D9F21BAFA /* PresenceDebounceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC31AAFEA11537D658EF378 /* PresenceDebounceTests.swift */; };
 		0DB897EB8360B737DFB5D758 /* head_tilt.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69901B3D5C223A77CD1EBE1F /* head_tilt.wav */; };
+		15C044B577FE320672B1A689 /* JitterMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A59C6ECE34282D333581F58 /* JitterMeterTests.swift */; };
 		170B06E027BAE044052D3EA2 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7551EC9FE93AF81703963F /* ReportView.swift */; };
 		1833E9D9310DF60870A9941C /* HeadGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72CE5EC22155E8F6C02D413E /* HeadGeometry.swift */; };
 		186867C3BB2E7D3FB29D15FB /* PresenceGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6576736948F69AB4B011DBC6 /* PresenceGateTests.swift */; };
@@ -35,6 +36,7 @@
 		4E2966F24B20FA36E983B63A /* PosturePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFDECAE4877BF804FA8CA66 /* PosturePalette.swift */; };
 		4FA5FAF4E26E7AFE50117616 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865D8839C4C8F659BB29252A /* SessionController.swift */; };
 		5173A2809E39EEA36C67E665 /* VisionPoseMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7ACF7242CF00C1C8985848 /* VisionPoseMappingTests.swift */; };
+		54F6F63D746ACE076051DA8B /* JitterMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46C437A787C2C4B94F44ED7A /* JitterMeter.swift */; };
 		58AF263DF6D7220A3D95E4D0 /* PomodoroSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89EA4D069BC95EAC5E5AF1 /* PomodoroSettingsView.swift */; };
 		5EB2B3992E53FBAD5343E0F3 /* CompletedTodayCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */; };
 		5FAEA6EE9120BC09B9B6D5B0 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */; };
@@ -77,6 +79,7 @@
 		B7757B9E602A9AB50CE23F03 /* PomodoroHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C59E39DAF6EB24B7AA1C2A2 /* PomodoroHistory.swift */; };
 		B90C2CED7EA810A6FC0FBC6A /* end_soft.wav in Resources */ = {isa = PBXBuildFile; fileRef = D7B37DC421C94D509CA43F7C /* end_soft.wav */; };
 		BAC6B2B5EFCD400E857BA0D9 /* IdleTimerPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDC6CDB9B4FF19B9E9B9168 /* IdleTimerPolicy.swift */; };
+		C46F4B933E72664F6765C9B7 /* JitterPairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C3A80753ECA7A7E074833A6 /* JitterPairingTests.swift */; };
 		C4ED1E93986E15951CC41E39 /* ReportCopyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */; };
 		C64D63145339A974597D094B /* chin_rest.wav in Resources */ = {isa = PBXBuildFile; fileRef = A0F78ED886C87AE6D5C792F3 /* chin_rest.wav */; };
 		C76487803E453EB4019A121C /* near.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7E37082B9C3154D095C46336 /* near.wav */; };
@@ -101,6 +104,7 @@
 		E85CDE8DF9C31E8BB8141418 /* SettingsInputUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */; };
 		F1C5459630BE5A04F9DB3F1D /* CloudMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */; };
 		F21BAA109EAB06EB7FDC2F92 /* PostureKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1CDDF86ADE4E0BC1E76A70 /* PostureKind.swift */; };
+		F26A59D85749F1838461AB4F /* JitterPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813F2F7236721F28DE809E2C /* JitterPairing.swift */; };
 		F67598A50D6C2423066C12D4 /* PomodoroControlsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40844A71A7FA776D14ABA05 /* PomodoroControlsUITests.swift */; };
 		F8723825308BD557B7CDF025 /* IdleTimerDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBA9D525749DAB0D43307A3 /* IdleTimerDebugLog.swift */; };
 		F8FEA579D6ABAFA8B7262AC6 /* FrameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A86E28796422085C24237B /* FrameLog.swift */; };
@@ -137,6 +141,7 @@
 		1623951DBFC9BC8EFA799F2F /* CompletedTodayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletedTodayCountTests.swift; sourceTree = "<group>"; };
 		16AEB838486856F512DE30ED /* Sensitivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sensitivity.swift; sourceTree = "<group>"; };
 		16FF5A2B01CE44152D560016 /* FileDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDebugLogger.swift; sourceTree = "<group>"; };
+		1A59C6ECE34282D333581F58 /* JitterMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JitterMeterTests.swift; sourceTree = "<group>"; };
 		1F1F3CD2FBA55A3EB322DE50 /* RollCalibratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollCalibratorTests.swift; sourceTree = "<group>"; };
 		20AC3B13FF9BC2E816A28141 /* PomodoroSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettings.swift; sourceTree = "<group>"; };
 		21F5A1D1FBCF5C62DBCAED4F /* ReportCopyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCopyUITests.swift; sourceTree = "<group>"; };
@@ -147,10 +152,12 @@
 		2EAF941EB4E2E3D2D375C5A1 /* PostureLabTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PostureLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2F92209E5F1473E5EF0E8860 /* LaunchSurvivalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSurvivalUITests.swift; sourceTree = "<group>"; };
 		2FF5B357C382D56E156A96BF /* CloudStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStabilizer.swift; sourceTree = "<group>"; };
+		3C3A80753ECA7A7E074833A6 /* JitterPairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JitterPairingTests.swift; sourceTree = "<group>"; };
 		3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudMotionTests.swift; sourceTree = "<group>"; };
 		3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectAllNumberField.swift; sourceTree = "<group>"; };
 		3FE34E82F3E58AA44FDD09B5 /* SettingsInputUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInputUITests.swift; sourceTree = "<group>"; };
 		46C067C01A1CB047E992E32D /* PostureFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureFeature.swift; sourceTree = "<group>"; };
+		46C437A787C2C4B94F44ED7A /* JitterMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JitterMeter.swift; sourceTree = "<group>"; };
 		4D05846EBA947C6BFBA6C07E /* PomodoroHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroHistoryTests.swift; sourceTree = "<group>"; };
 		4D597B6333310C45A83D6402 /* ReminderPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayer.swift; sourceTree = "<group>"; };
 		4E20FBDAFBE151A6DFA10240 /* shoulder_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = shoulder_tilt.wav; sourceTree = "<group>"; };
@@ -180,6 +187,7 @@
 		7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLineFile.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
 		811535D53E4DC668785CE570 /* PomodoroSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroSettingsStore.swift; sourceTree = "<group>"; };
+		813F2F7236721F28DE809E2C /* JitterPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JitterPairing.swift; sourceTree = "<group>"; };
 		83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimelineTests.swift; sourceTree = "<group>"; };
 		845C9703820ABF4BE451190A /* VisionPoseMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionPoseMapping.swift; sourceTree = "<group>"; };
 		86098F7CD1ECFE6933A9E192 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -311,6 +319,8 @@
 				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
 				89FB5BAC46243600AF0A6D22 /* IdleTimerLogTriggerTests.swift */,
 				B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */,
+				1A59C6ECE34282D333581F58 /* JitterMeterTests.swift */,
+				3C3A80753ECA7A7E074833A6 /* JitterPairingTests.swift */,
 				E79E2F95C211A5892BB6D46B /* KeyPointOverlayMotionTests.swift */,
 				F36E91803ECE993B77DA479B /* MonitoringEngineTests.swift */,
 				CCFB0C07FD9A387E0344F002 /* PomodoroEngineTests.swift */,
@@ -371,6 +381,8 @@
 				72CE5EC22155E8F6C02D413E /* HeadGeometry.swift */,
 				AAE593DCD0888E74D9B9BF59 /* IdleTimerLogTrigger.swift */,
 				6DDC6CDB9B4FF19B9E9B9168 /* IdleTimerPolicy.swift */,
+				46C437A787C2C4B94F44ED7A /* JitterMeter.swift */,
+				813F2F7236721F28DE809E2C /* JitterPairing.swift */,
 				E34CF188A7BF03E96664807B /* MonitoringEngine.swift */,
 				E234E8EE0CA862D61855BAE2 /* MonitoringEvent.swift */,
 				621F800E3AC9D1A5B5173CE6 /* PomodoroEngine.swift */,
@@ -597,6 +609,8 @@
 				F8723825308BD557B7CDF025 /* IdleTimerDebugLog.swift in Sources */,
 				A15D7DA01025C72CB64CD651 /* IdleTimerLogTrigger.swift in Sources */,
 				BAC6B2B5EFCD400E857BA0D9 /* IdleTimerPolicy.swift in Sources */,
+				54F6F63D746ACE076051DA8B /* JitterMeter.swift in Sources */,
+				F26A59D85749F1838461AB4F /* JitterPairing.swift in Sources */,
 				4D9D97621F765328F7AFDDC1 /* JointFrameLog.swift in Sources */,
 				5FCB2B05990FD65AE1C37350 /* MonitoringEngine.swift in Sources */,
 				FC3B80249D0B669E3CE3BA7C /* MonitoringEvent.swift in Sources */,
@@ -666,6 +680,8 @@
 				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
 				84DC3253816CF7E6E1ECE701 /* IdleTimerLogTriggerTests.swift in Sources */,
 				A3ACDEDF60B18F081F4D78F2 /* IdleTimerTests.swift in Sources */,
+				15C044B577FE320672B1A689 /* JitterMeterTests.swift in Sources */,
+				C46F4B933E72664F6765C9B7 /* JitterPairingTests.swift in Sources */,
 				3D74729205EC245D1F07331B /* KeyPointOverlayMotionTests.swift in Sources */,
 				840419949B94BB40C5D5C6D3 /* MonitoringEngineTests.swift in Sources */,
 				AE174214100AF2D7BABA36DE /* PomodoroEngineTests.swift in Sources */,

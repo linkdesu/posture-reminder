@@ -331,21 +331,6 @@ final class DepthCaptureSource: NSObject, SampleSource {
     return highestShoulder < highestEar
   }
 
-  /// 按槽位配对的平均位移（归一化坐标的欧氏距离）。
-  static func meanSlotShift(from previous: [BodyPoint], to current: [BodyPoint]) -> Double {
-    guard !previous.isEmpty, !current.isEmpty else { return 0 }
-    var bySlot: [Int: BodyPoint] = [:]
-    for point in previous where point.slot >= 0 { bySlot[point.slot] = point }
-    var total = 0.0
-    var count = 0
-    for point in current where point.slot >= 0 {
-      guard let old = bySlot[point.slot] else { continue }
-      total += hypot(point.x - old.x, point.y - old.y)
-      count += 1
-    }
-    return count > 0 ? total / Double(count) : 0
-  }
-
   // MARK: - Depth
 
   /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
@@ -369,6 +354,12 @@ final class DepthCaptureSource: NSObject, SampleSource {
     // 固定网格采样 + 距离平滑：位置不随遮罩变化，帧与帧之间按槽位配对（见 `CloudStabilizer`）。
     let cloud = cloudStabilizer.points(mask: mask, image: image, at: frameTime)
     let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
+
+    #if DEBUG
+    // 点云抖动：按槽位与上一帧配对，只有原始平均位移 ≤0.5% 屏宽的「静止帧」进直方图（AC7）。
+    // 时钟用 `systemUptime`，与 `PerfMonitor` 每秒写 p95 的时钟一致（深度帧自己的呈现时刻是另一个时基）。
+    PerfMonitor.shared.noteCloud(cloud, at: ProcessInfo.processInfo.systemUptime)
+    #endif
 
     let depthGap = lastDepthFrameTime.map { max(0, (frameTime - $0) * 1000) } ?? 0
     let arrivalGap = lastDepthArrival.map { max(0, (t - $0) * 1000) } ?? 0
@@ -404,6 +395,14 @@ final class DepthCaptureSource: NSObject, SampleSource {
     stateLock.lock()
     let visionInfo = latestJoints
     stateLock.unlock()
+    // 同帧（150 ms 内）Vision 的人脸结论；过期或还没推理过就是「不知道」（nil）。
+    let faceDetected: Bool? = visionInfo.flatMap {
+      VisionDepthPairing.isStale(visionT: $0.t, sampleT: t) ? nil : $0.faceDetected
+    }
+    if faceDetected == true && cloud.isEmpty {
+      // AC7 的「检测到脸时点云从不空白」：这一帧 Vision 看到脸、深度却一个点都没取到。
+      PerfMonitor.shared.recordCloudBlankWithFace()
+    }
     FrameLog.shared.begin(FrameLog.Record(
       ts: Int((Date().timeIntervalSince1970 * 1000).rounded()),
       frameS: frameTime,
@@ -422,7 +421,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
       arrivalGapMS: arrivalGap,
       visionMS: visionInfo.map { $0.inferenceSeconds * 1000 },
       // 两个时刻都取会话时钟（`t` 与 Vision 的 `t`）；用 CMTime 的 frameTime 去减会得到上亿毫秒。
-      visionAgeMS: visionInfo.map { max(0, (t - $0.t) * 1000) }),
+      visionAgeMS: visionInfo.map { max(0, (t - $0.t) * 1000) },
+      faceDetected: faceDetected),
       arrivalUptime: arrivalUptime)
     #endif
 
@@ -549,13 +549,15 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
                                     shoulderAboveEar: shoulderAboveEar,
                                     pointsWithoutPerson: pointsWithoutPerson)
+    // AC8：右肩过门槛的帧数与总帧数，整场累计；<50% 时由 verify 与报告如实上报。
+    PerfMonitor.shared.recordShoulderVisibility(rightAvailable: joints[.rightShoulder] != nil)
     #endif
     // 背景轮廓：点数与相对上一帧的平均位移（按槽位配对）。
     stateLock.lock()
     let observation = history.last
     stateLock.unlock()
     let background = observation?.cloud ?? []
-    let shift = Self.meanSlotShift(from: previousBackground, to: background)
+    let shift = JitterPairing.meanShift(from: previousBackground, to: background)
     previousBackground = background
     // Vision 肩线：采集侧已经配对好的肩点，与遮罩肩线并排写进日志供对比（不做判定）。
     let visionShoulders = ShoulderLine.make(left: joints[.leftShoulder],
