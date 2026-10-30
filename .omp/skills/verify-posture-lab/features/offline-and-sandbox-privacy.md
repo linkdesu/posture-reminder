@@ -8,7 +8,7 @@
 - `privacy-offline-runtime`：运行中的 App 不持有 internet socket。
 - `privacy-sandbox-files`：沙盒只允许 JSONL/JSON/TXT 与系统自有缓存；**任何图像后缀（png/jpg/heic/mp4/dng/raw 等）都是失败**，包括应用自绘的调试图。
 - `privacy-rgb`：不展示、不落盘原始 RGB；彩色帧只在内存里交给 Vision（ADR-0008），点云仍是渲染几何，不是相机照片。页面截图只在内存（`FileDebugLogger.latestScreenshot`）。
-- `privacy-colour-boundary`：`VNDetectHumanBodyPose` 只允许出现在 `PostureLab/Input/VisionJointSource.swift`，`AVCaptureVideoDataOutput` 与视频 delegate 只允许出现在 `PostureLab/Input/DepthCaptureSource.swift`；这两处以外的任何文件命中即失败。预览层（`AVCaptureVideoPreviewLayer`）、图片创建与编码（`UIImage(`、`CGImage`、`jpegData(`、`pngData(`、`CIImage`、`CIContext`）、视频文件写入（`AVAssetWriter`、`AVCaptureMovieFileOutput`）与联网 API 在**任何**文件里都不允许。`NSCameraUsageDescription` 必须一字不差是「用于在本机识别坐姿，画面不会显示、保存或上传」，显示名必须是 `PostureLab`。
+- `privacy-colour-boundary`：`VNDetectHumanBodyPose` 只允许出现在 `PostureLab/Input/VisionJointSource.swift`，`AVCaptureVideoDataOutput` 与视频 delegate 只允许出现在 `PostureLab/Input/DepthCaptureSource.swift`；这两处以外的任何文件命中即失败。预览层（`AVCaptureVideoPreviewLayer`）、图片创建与编码（`UIImage(`、`CGImage`、`jpegData(`、`pngData(`、`CIImage`、`CIContext`）、视频文件写入（`AVAssetWriter`、`AVCaptureMovieFileOutput`）与联网 API 在**任何**文件里都不允许。`NSCameraUsageDescription` 必须一字不差是「画面只在手机内存里处理，用于识别坐姿；不保存、不上传，也不显示摄像头画面」，显示名必须是 `PostureLab`。
 - `privacy-log-contract`：每行 JSONL 恰好 43 个键，`ts` 为 epoch 毫秒，缺失值为 `null`；事件词表含 `segment`（识别中段：从点击「开始」到该专注首个姿态样本，段关闭时写一行），该行只有 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds` 这四个键非 `null`；含 `thermal`（v0.6.8 发热降级起止），该行只有 `thermal_degraded` 非 `null`，其余行为 `null`。
 
 ## How to get to it (user POV)

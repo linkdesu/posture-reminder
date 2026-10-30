@@ -21,7 +21,10 @@ final class DebugLogLineTests: XCTestCase {
                         cloudGaps: (TimeInterval, TimeInterval) = (0.033, 0.05),
                         vision: (Int, TimeInterval, TimeInterval) = (10, 0.2, 0.03),
                         assess: (Int, TimeInterval, TimeInterval) = (10, 0.05, 0.01),
-                        degraded: Bool = false) -> String {
+                        degraded: Bool = false,
+                        jitter: PerfMonitor.JitterSummary = .empty,
+                        shoulders: (Int, Int) = (0, 0),
+                        cloudBlankWithFace: Int = 0) -> String {
     PerfMonitor.line(window: window,
                      frames: frames,
                      gap: gap,
@@ -37,7 +40,10 @@ final class DebugLogLineTests: XCTestCase {
                      assess: assess,
                      thermalState: "nominal",
                      battery: 0.82,
-                     degraded: degraded)
+                     degraded: degraded,
+                     jitter: jitter,
+                     shoulders: shoulders,
+                     cloudBlankWithFace: cloudBlankWithFace)
   }
 
   func testPerfLineCarriesOneSecondsNumbers() throws {
@@ -82,6 +88,30 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["degraded"] as? Bool, true)
   }
 
+  /// 抖动与右肩计数：QA 用这四个键判 AC5/AC7 与 AC8，键名与精度一起钉住。
+  func testPerfLineCarriesJitterAndShoulderCounters() throws {
+    let values = try json(perfLine(
+      jitter: PerfMonitor.JitterSummary(keyPointP95: 0.0062, keyPointStillFrames: 900,
+                                        cloudP95: 0.0134, cloudStillFrames: 1200),
+      shoulders: (37, 300),
+      cloudBlankWithFace: 0))
+    XCTAssertEqual(values["keypoint_jitter_p95"] as? Double ?? 0, 0.0062, accuracy: 1e-9)
+    XCTAssertEqual(values["keypoint_still_frames"] as? Int, 900)
+    XCTAssertEqual(values["cloud_jitter_p95"] as? Double ?? 0, 0.0134, accuracy: 1e-9)
+    XCTAssertEqual(values["cloud_still_frames"] as? Int, 1200)
+    XCTAssertEqual(values["right_shoulder_frames"] as? Int, 37)
+    XCTAssertEqual(values["shoulder_frames"] as? Int, 300)
+    XCTAssertEqual(values["cloud_blank_with_face_frames"] as? Int, 0)
+  }
+
+  /// 样本不够时不给 p95：null 而不是 0，否则「还没有数据」会读成「零抖动」。
+  func testPerfLineWritesNullJitterUntilThereIsEnoughEvidence() throws {
+    let values = try json(perfLine())
+    XCTAssertTrue(values["keypoint_jitter_p95"] is NSNull)
+    XCTAssertTrue(values["cloud_jitter_p95"] is NSNull)
+    XCTAssertEqual(values["keypoint_still_frames"] as? Int, 0)
+  }
+
   func testFrameLineCarriesTheRawPerFrameFacts() throws {
     let record = FrameLog.Record(ts: 1_793_000_000_123,
                                  frameS: 12.345,
@@ -121,6 +151,22 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["arrival_gap_ms"] as? Double ?? 0, 34.0, accuracy: 0.01)
     XCTAssertEqual(values["vision_ms"] as? Double ?? 0, 9.1, accuracy: 0.01)
     XCTAssertEqual(values["vision_age_ms"] as? Double ?? 0, 55.0, accuracy: 0.01)
+  }
+
+  /// 点云逐帧记录带同帧人脸证据：AC7 的「检测到脸时点云从不空白」靠它和 `visible_points` 交叉判定。
+  func testFrameLineRecordsWhetherAFaceWasDetected() throws {
+    var record = FrameLog.Record(ts: 1, frameS: 1, arrivalS: 1.01, depthMS: 1, segmentMS: 1,
+                                 cloudMS: 0, points: 312, maskCells: 9000, depthValid: 1.0,
+                                 depthNaN: 0.0, nearestM: 0.6, degraded: false, cloudEmitted: true,
+                                 depthGapMS: 33, arrivalGapMS: 33, visionMS: 8, visionAgeMS: 40)
+    XCTAssertTrue(try json(FrameLog.line(record, renderMS: 0.5, renderLatencyMS: 10))["face_detected"] is NSNull,
+                  "no Vision result yet: unknown, not false")
+    record.faceDetected = true
+    XCTAssertEqual(try json(FrameLog.line(record, renderMS: 0.5, renderLatencyMS: 10))["face_detected"] as? Bool,
+                   true)
+    record.faceDetected = false
+    XCTAssertEqual(try json(FrameLog.line(record, renderMS: 0.5, renderLatencyMS: 10))["face_detected"] as? Bool,
+                   false)
   }
 
   func testAFrameThatNeverReachedTheScreenKeepsItsRenderFieldsNull() throws {

@@ -110,16 +110,17 @@ final class VisionJointSource {
     }
 
     var mouth: [CGPointLike] = []
-    // 只有同帧找到人脸才谈嘴；人脸框本身就是在场判定的证据，取不到嘴轮廓不影响它。
+    // 只有同帧找到人脸、且人脸框置信度过门槛才谈嘴；人脸框本身也是在场的证据，取不到嘴轮廓不影响它。
     var faceDetected = false
     if observation != nil {
       try? handler.perform([faceRequest])
-      if let face = (faceRequest.results ?? []).max(by: { $0.boundingBox.width < $1.boundingBox.width }) {
+      if let face = (faceRequest.results ?? []).max(by: { $0.boundingBox.width < $1.boundingBox.width }),
+         Double(face.confidence) >= VisionPoseMapping.minimumConfidence {
         faceDetected = true
         if let lips = face.landmarks?.outerLips {
-          mouth = lips.normalizedPoints.map { point in
+          mouth = VisionPoseMapping.mouth(points: lips.normalizedPoints.map { point in
             VisionPoseMapping.imagePoint(x: Double(point.x), y: Double(point.y), portrait: portrait)
-          }
+          }, faceConfidence: Double(face.confidence))
         }
       }
     }
