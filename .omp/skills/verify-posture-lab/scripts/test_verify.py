@@ -133,6 +133,18 @@ class Batch(unittest.TestCase):
         self.assertEqual(verify.command_down(self.ns()), 1)  # 缺 mid-focus.png
 
 
+class SnapshotCommit(unittest.TestCase):
+    def test_marker_holds_full_snapshot_sha(self):
+        # 预检在无 .git 的快照里构建：GitCommit 构建阶段读这个文件，所以它必须写完整 hash，
+        # 且不带短 hash / unknown 之类的折算。
+        sha = "af92abfd7d6d7f9be68665db2892536846033d2c"
+        with tempfile.TemporaryDirectory() as root:
+            src = Path(root)
+            path = verify.write_commit_marker(src, sha)
+            self.assertEqual(path, src / ".verify-commit")
+            self.assertEqual(path.read_text(), sha + "\n")
+
+
 class AbandonJudge(unittest.TestCase):
     UI = {"before": "0", "after": "0", "goal": "4", "endTapped": "true", "reset": "true"}
 

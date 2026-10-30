@@ -10,6 +10,8 @@ DerivedData/
 !.omp/skills/verify-posture-lab/**
 tmp/
 artifacts/
+# 验证预检在无 .git 快照里写下的 commit 标记；只属于本地产物。
+.verify-commit
 
 __pycache__/
 *.pyc
