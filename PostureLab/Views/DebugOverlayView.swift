@@ -25,7 +25,8 @@ struct DebugOverlayView: View {
       ZStack(alignment: .bottomLeading) {
         Canvas(rendersAsynchronously: false) { context, size in
           guard let geometry else { return }
-          drawSkeleton(geometry, in: &context, size: size)
+          // 0.6.8 (17)：人形由 AvatarView 用 Vision 画；这里不再画 COCO 骨架（旧的鼻–眼–耳链
+          // 在头上叠出一个 M 形）。只保留右下的指标表。
         }
         VStack(alignment: .leading, spacing: 6) {
           jointTable()
@@ -34,72 +35,6 @@ struct DebugOverlayView: View {
         .padding(16)
       }
       .allowsHitTesting(false)
-    }
-  }
-
-  // MARK: - Skeleton
-
-  /// Nose-eye-ear down each side, neck to both shoulders, arms to the wrists, neck to root and root
-  /// to both hips. The depth source never estimates eyes, ears, elbows or wrists, so those chains
-  /// appear only when the joints behind them exist; the joint table below names all fifteen and marks
-  /// the missing ones 不可用.
-  private static let chains: [(JointID, JointID)] = [
-    (.nose, .leftEye), (.leftEye, .leftEar),
-    (.nose, .rightEye), (.rightEye, .rightEar),
-    (.neck, .leftShoulder), (.neck, .rightShoulder),
-    (.leftShoulder, .leftElbow), (.leftElbow, .leftWrist),
-    (.rightShoulder, .rightElbow), (.rightElbow, .rightWrist),
-    (.neck, .root), (.root, .leftHip), (.root, .rightHip),
-  ]
-
-  /// The joints a child or a parent would name out loud. Eyes and ears stay unlabelled dots so the
-  /// head does not turn into a wall of text.
-  private static let labelled: Set<JointID> = [
-    .nose, .neck, .root,
-    .leftShoulder, .rightShoulder,
-    .leftElbow, .rightElbow,
-    .leftWrist, .rightWrist,
-    .leftHip, .rightHip,
-  ]
-
-  private func drawSkeleton(_ geometry: PoseGeometry,
-                            in context: inout GraphicsContext,
-                            size: CGSize) {
-    let rect = PoseProjection.rect(in: size)
-    guard rect.width > 0, rect.height > 0, !geometry.joints.isEmpty else { return }
-
-    let positions = geometry.joints.mapValues { PoseProjection.point($0.position, in: rect) }
-
-    var lines = Path()
-    for (from, to) in Self.chains {
-      guard let start = positions[from], let end = positions[to] else { continue }
-      lines.move(to: start)
-      lines.addLine(to: end)
-    }
-    context.stroke(lines,
-                   with: .color(.white.opacity(0.65)),
-                   style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-
-    let labelStyle = Text("").font(.system(size: 9, weight: .semibold, design: .rounded))
-    for id in JointID.allCases {
-      guard let joint = geometry.joints[id], let centre = positions[id] else { continue }
-      let radius: CGFloat = 3
-      let dot = Path(ellipseIn: CGRect(x: centre.x - radius,
-                                       y: centre.y - radius,
-                                       width: radius * 2,
-                                       height: radius * 2))
-      if joint.confidence < 0.5 {
-        context.stroke(dot, with: .color(.white.opacity(0.8)), lineWidth: 1.2)
-      } else {
-        context.fill(dot, with: .color(.white.opacity(0.9)))
-      }
-
-      guard Self.labelled.contains(id) else { continue }
-      // Put the name beside the joint, nudged so it never starts off the left edge of the screen.
-      let label = labelStyle + Text(" \(id.debugName)").foregroundColor(.white.opacity(0.9))
-      context.draw(label, at: CGPoint(x: min(max(centre.x + 7, 24), size.width - 24),
-                                      y: centre.y - 9),
-                   anchor: .leading)
     }
   }
 

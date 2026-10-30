@@ -113,7 +113,12 @@ struct PomodoroSettingsView: View {
 
           Toggle(isOn: $settings.avatarEnabled) {
             settingLabel(title: "形象模式",
-                         subtitle: "显示由深度数据生成的人形点云；关闭后隐藏，画面只在本机显示、不保存不上传")
+                         subtitle: "显示 Vision 识别出的人形；关闭后隐藏，画面只在本机显示、不保存不上传")
+          }
+
+          Toggle(isOn: $settings.outlineEnabled) {
+            settingLabel(title: "深度轮廓背景",
+                         subtitle: "人形之后叠一层暗色的深度轮廓；关掉方便对比，深度仍用于距离与前倾")
           }
         }
 

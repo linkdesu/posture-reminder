@@ -491,7 +491,9 @@ final class SessionController: ObservableObject {
       latestGeometry = PoseGeometry(joints: sample.joints,
                                     depth: sample.depth,
                                     cloud: sample.cloud,
-                                    unavailableJoints: sample.unavailableJoints)
+                                    unavailableJoints: sample.unavailableJoints,
+                                    mouth: sample.mouth,
+                                    outlineEnabled: settings.outlineEnabled)
     }
 
     let events = pomodoro.ingest(sample)
@@ -620,7 +622,9 @@ final class SessionController: ObservableObject {
     latestGeometry = PoseGeometry(joints: sample.joints,
                                   depth: sample.depth,
                                   cloud: sample.cloud,
-                                  unavailableJoints: sample.unavailableJoints)
+                                  unavailableJoints: sample.unavailableJoints,
+                                  mouth: sample.mouth,
+                                  outlineEnabled: settings.outlineEnabled)
     latestAssessment = engine.latestAssessment
   }
 
