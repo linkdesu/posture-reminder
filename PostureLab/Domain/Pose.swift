@@ -64,4 +64,7 @@ struct PoseGeometry: Equatable {
   var cloud: [BodyPoint] = []
   /// Joints the source reported as unmeasurable on this frame; the overlay names them 不可用.
   var unavailableJoints: Set<JointID> = []
+  /// 这一帧点云与上一帧之间的实际间隔（秒）。画布的插值用它，而不是写死的 1/30；
+  /// 脚本 rig 的样本没有间隔，保持 nil。
+  var cloudInterval: TimeInterval? = nil
 }
