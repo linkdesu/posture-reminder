@@ -146,8 +146,15 @@ final class SettingsBehaviorUITests: XCTestCase {
   private func resetToDefaults(in app: XCUIApplication) {
     app.first(.button, labelled: "设置页").tap()
     XCTAssertTrue(openSettings(page: app))
+    // 恢复默认设置 是整页的最后一行：先滚到底，再按行读。
+    for _ in 0..<10 {
+      app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.82))
+        .press(forDuration: 0.05,
+               thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.28)))
+      RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+    }
     let reset = app.first(.button, labelled: "恢复默认设置")
-    XCTAssertTrue(reveal(reset, in: app), "no 恢复默认设置 button on the page")
+    XCTAssertTrue(reveal(reset, in: app, attempts: 30), "no 恢复默认设置 button on the page")
     reset.tap()
     let confirm = app.first(.button, labelled: "恢复")
     XCTAssertTrue(confirm.waitForExistence(timeout: 5), "the reset confirmation did not appear")
