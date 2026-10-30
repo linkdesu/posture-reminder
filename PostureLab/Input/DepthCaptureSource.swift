@@ -47,15 +47,12 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private static let processingWidth = 160
 
   /// 一帧深度观测：配对时的全部输入。
-  /// `maskShoulders` 在这一帧的深度队列上算好（`MaskShoulderLine`），随观测存放；
-  /// 彩色队列写关节逐帧日志时取「最近一帧深度观测」的它，与关节配对同源。
   private struct DepthObservation {
     var t: TimeInterval
     var image: DepthImage
     var mask: BodyMask?
     var cloud: [BodyPoint]
     var head: HeadGeometry.Reading
-    var maskShoulders: MaskShoulderLine.Estimate
   }
 
   /// 深度队列写、彩色队列读的东西都在这个锁后面。
@@ -343,11 +340,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
     lastDepthArrival = t
 
     let head = HeadGeometry.measure(depth: image, mask: mask)
-    // 遮罩肩线在这一帧的深度队列上量好（纯函数，无 I/O）：鼻点不在深度队列上，头部参考
-    // 用遮罩头带中点。它随观测存放，彩色队列写日志时取最近一帧的它，与关节配对同源。
-    let maskShoulders = mask.map { MaskShoulderLine.estimate(mask: $0, head: nil) } ?? .unavailable
-    let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head,
-                                     maskShoulders: maskShoulders)
+    let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head)
+
     lastDepthProcessing = captureSeconds + segmentationSeconds + cloudSeconds
 
     #if DEBUG
@@ -473,11 +467,10 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     // 关节的位置来自彩色，距离与俯仰来自同帧深度：配最近的一帧，超过 150 ms 就整帧作废。
     var joints: [JointID: JointSample] = [:]
     var stale = true
-    var maskShoulders = MaskShoulderLine.Estimate.unavailable
+
     if let observation = nearestObservation(to: frame.t),
        !VisionDepthPairing.isStale(visionT: frame.t, sampleT: observation.t) {
       stale = false
-      maskShoulders = observation.maskShoulders
       joints = VisionPoseMapping.attachDepth(frame.joints,
                                              depth: observation.image,
                                              mask: observation.mask)
@@ -508,23 +501,9 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
       visible[joint.rawValue] = sample != nil
     }
     // Vision 肩线：采集侧已经配对好的肩点，与遮罩肩线并排写进日志供对比（不做判定）。
-    let noseY = joints[.nose]?.y
-    if let above = MaskShoulderLine.aboveHead(maskShoulders, noseY: noseY) {
-      maskShoulders.aboveHead = above
-    }
-    let visionShoulders = MaskShoulderLine.Estimate(
-      left: joints[.leftShoulder].map { CGPointLike(x: $0.x, y: $0.y) },
-      right: joints[.rightShoulder].map { CGPointLike(x: $0.x, y: $0.y) },
-      angleDeg: {
-        guard let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
-        return MaskShoulderLine.lineAngleDeg(from: CGPointLike(x: left.x, y: left.y),
-                                            to: CGPointLike(x: right.x, y: right.y))
-      }(),
-      aboveHead: {
-        guard let left = joints[.leftShoulder], let right = joints[.rightShoulder], let nose = joints[.nose] else { return nil }
-        return (left.y + right.y) / 2 < nose.y
-      }(),
-      available: joints[.leftShoulder] != nil && joints[.rightShoulder] != nil)
+    let visionShoulders = ShoulderLine.make(left: joints[.leftShoulder],
+                                            right: joints[.rightShoulder],
+                                            nose: joints[.nose])
     JointFrameLog.shared.write(JointFrameDebugSample(sessionT: frame.t,
                                                      detected: frame.detected,
                                                      stale: stale,
@@ -532,8 +511,7 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
                                                      confidence: confidence,
                                                      rawConfidence: frame.rawConfidence,
                                                      visible: visible,
-                                                     visionShoulders: visionShoulders,
-                                                     maskShoulders: maskShoulders))
+                                                     visionShoulders: visionShoulders))
     #endif
   }
 }
