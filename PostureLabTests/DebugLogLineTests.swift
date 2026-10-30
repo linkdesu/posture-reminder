@@ -95,7 +95,11 @@ final class DebugLogLineTests: XCTestCase {
                                  depthNaN: 0.0,
                                  nearestM: 0.42,
                                  degraded: false,
-                                 cloudEmitted: true)
+                                 cloudEmitted: true,
+                                 depthGapMS: 33.3,
+                                 arrivalGapMS: 34.0,
+                                 visionMS: 9.1,
+                                 visionAgeMS: 55.0)
     let values = try json(FrameLog.line(record, renderMS: 0.4, renderLatencyMS: 21.5))
 
     XCTAssertEqual(values["t"] as? Int, 1_793_000_000_123)
@@ -113,13 +117,18 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["cloud_emitted"] as? Bool, true)
     XCTAssertEqual(values["render_ms"] as? Double ?? 0, 0.4, accuracy: 0.001)
     XCTAssertEqual(values["render_latency_ms"] as? Double ?? 0, 21.5, accuracy: 0.001)
+    XCTAssertEqual(values["depth_gap_ms"] as? Double ?? 0, 33.3, accuracy: 0.01)
+    XCTAssertEqual(values["arrival_gap_ms"] as? Double ?? 0, 34.0, accuracy: 0.01)
+    XCTAssertEqual(values["vision_ms"] as? Double ?? 0, 9.1, accuracy: 0.01)
+    XCTAssertEqual(values["vision_age_ms"] as? Double ?? 0, 55.0, accuracy: 0.01)
   }
 
   func testAFrameThatNeverReachedTheScreenKeepsItsRenderFieldsNull() throws {
     // 没有人体时画布暂停（TimelineView paused），这一帧从没上屏：两个渲染字段必须是 null，而不是 0。
     let record = FrameLog.Record(ts: 1, frameS: 1, arrivalS: 1.01, depthMS: 1, segmentMS: 1,
                                  cloudMS: 0, points: 0, maskCells: 0, depthValid: 0.99,
-                                 depthNaN: 0.0, nearestM: 1.4, degraded: false, cloudEmitted: true)
+                                 depthNaN: 0.0, nearestM: 1.4, degraded: false, cloudEmitted: true,
+                                 depthGapMS: 0, arrivalGapMS: 0, visionMS: nil, visionAgeMS: nil)
     let values = try json(FrameLog.line(record, renderMS: nil, renderLatencyMS: nil))
     XCTAssertTrue(values["render_ms"] is NSNull)
     XCTAssertTrue(values["render_latency_ms"] is NSNull)

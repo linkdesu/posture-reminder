@@ -61,6 +61,9 @@ final class DepthCaptureSource: NSObject, SampleSource {
   /// 当前采集负载。热状态到 `serious` 时降到 Vision 5 Hz、点云 15 Hz（`CaptureLoad`）。
   private var load: CaptureLoad = .normal
   private var lastCloudAt: TimeInterval = 0
+  /// 上一帧深度的呈现时刻与回调到达时刻，用来在逐帧日志里写分阶段间隔。
+  private var lastDepthFrameTime: TimeInterval?
+  private var lastDepthArrival: TimeInterval?
 
   private var startedAt: TimeInterval?
   private var lastEmittedAt: TimeInterval = 0
@@ -322,6 +325,11 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let cloud = cloudStabilizer.points(mask: mask, image: image, at: frameTime)
     let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
 
+    let depthGap = lastDepthFrameTime.map { max(0, (frameTime - $0) * 1000) } ?? 0
+    let arrivalGap = lastDepthArrival.map { max(0, (t - $0) * 1000) } ?? 0
+    lastDepthFrameTime = frameTime
+    lastDepthArrival = t
+
     let head = HeadGeometry.measure(depth: image, mask: mask)
     // 遮罩肩线在这一帧的深度队列上量好（纯函数，无 I/O）：鼻点不在深度队列上，头部参考
     // 用遮罩头带中点。它随观测存放，彩色队列写日志时取最近一帧的它，与关节配对同源。
@@ -351,6 +359,9 @@ final class DepthCaptureSource: NSObject, SampleSource {
 
     #if DEBUG
     // 逐帧原始记录：这一帧深度有没有读数、分割出多少格、点云多少点、上屏没有、上屏多久。
+    stateLock.lock()
+    let visionInfo = latestJoints
+    stateLock.unlock()
     FrameLog.shared.begin(FrameLog.Record(
       ts: Int((Date().timeIntervalSince1970 * 1000).rounded()),
       frameS: frameTime,
@@ -364,7 +375,11 @@ final class DepthCaptureSource: NSObject, SampleSource {
       depthNaN: image.nanFraction,
       nearestM: image.nearestDepth().map { Double($0) },
       degraded: cloudCap < CaptureLoad.normal.cloudHz,
-      cloudEmitted: shouldEmitCloud),
+      cloudEmitted: shouldEmitCloud,
+      depthGapMS: depthGap,
+      arrivalGapMS: arrivalGap,
+      visionMS: visionInfo.map { $0.inferenceSeconds * 1000 },
+      visionAgeMS: visionInfo.map { max(0, (frameTime - $0.t) * 1000) }),
       arrivalUptime: arrivalUptime)
     #endif
 

@@ -13,6 +13,9 @@ import Foundation
 /// - `frame_s`：深度帧自己的呈现时刻（会话时钟，秒），点云相机的真实节奏就是它
 /// - `arrival_s`：回调到达时刻（会话时钟，秒）；与 `frame_s` 的差是这一帧在管线里排队的时间
 /// - `depth_ms` / `segment_ms` / `cloud_ms`：取深度、分割、点云三步各自的耗时
+/// - `depth_gap_ms` / `arrival_gap_ms`：与上一帧深度的呈现间隔、与上一帧的回调到达间隔
+/// - `vision_ms` / `vision_age_ms`：最近一次 Vision 推理耗时、该结果距这一帧的年龄；判断 Vision
+///   是否挤占深度与渲染链路就看这两列
 /// - `points`：这一帧实际生成的点数（0 表示没有分割出人体）
 /// - `mask_cells`：分割遮罩的格数（0 表示 `DepthSegmentation` 判定这一帧没有人）
 /// - `depth_valid`：有效深度读数的占比（0...1）；它接近 1 而 `mask_cells` 是 0，说明传感器好好的，
@@ -44,6 +47,14 @@ final class FrameLog {
     var nearestM: Double?
     var degraded: Bool
     var cloudEmitted: Bool
+    /// 与上一帧深度的间隔（毫秒）。分阶段耗时：深度回调间隔
+    var depthGapMS: Double
+    /// 与上一帧的回调到达间隔（毫秒）。
+    var arrivalGapMS: Double
+    /// 最近一次 Vision 推理耗时（毫秒）；还没有推理过时为 nil。
+    var visionMS: Double?
+    /// 最近一次 Vision 结果距这一帧的年龄（毫秒），用来看 Vision 是否在挤占
+    var visionAgeMS: Double?
   }
 
   private let lock = NSLock()
@@ -121,7 +132,11 @@ final class FrameLog {
       + ",\"cloud_emitted\":\(record.cloudEmitted)"
       + ",\"render_ms\":\(number(renderMS))"
       + ",\"render_latency_ms\":\(number(renderLatencyMS))"
-      + ",\"visible_points\":\(visiblePoints.map(String.init) ?? "null")}"
+      + ",\"visible_points\":\(visiblePoints.map(String.init) ?? "null")"
+      + ",\"depth_gap_ms\":\(fixed(record.depthGapMS, 1))"
+      + ",\"arrival_gap_ms\":\(fixed(record.arrivalGapMS, 1))"
+      + ",\"vision_ms\":\(number(record.visionMS))"
+      + ",\"vision_age_ms\":\(number(record.visionAgeMS))}"
   }
 
   private static func fixed(_ value: Double, _ digits: Int) -> String {
