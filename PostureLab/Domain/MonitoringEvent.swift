@@ -35,6 +35,9 @@ enum MonitoringEvent: Equatable {
   /// all (`no_data`, v0.6.1). Times are Unix epoch seconds, so they sit on the same axis as the
   /// record's `startedAt`.
   case segment(kind: String, start: TimeInterval, end: TimeInterval)
+  /// 发热降级开始或结束：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz。两侧各写一行，
+  /// 读者按 `thermal_degraded` 的翻转切出降级时段；`thermal_state` 仍由写入器按采样值盖上。
+  case thermal(degraded: Bool)
   case paused(t: TimeInterval)
   case resumed(t: TimeInterval)
   case sessionEnded(summary: SessionSummary)
@@ -97,6 +100,7 @@ struct LogRecord: Codable {
     case segment_start
     case segment_end
     case segment_seconds
+    case thermal_degraded
   }
 
   /// Unix epoch milliseconds when the line was produced.
@@ -156,6 +160,9 @@ struct LogRecord: Codable {
   var segment_end: Int64?
   /// The segment's length in seconds, on a `segment` line.
   var segment_seconds: Double?
+  /// Whether a `thermal` line marks the start (`true`) or the end (`false`) of a heat-driven
+  /// degradation of the capture load.
+  var thermal_degraded: Bool?
 
   /// Every key is encoded, absent values as JSON null: an `Optional` value reaching the keyed
   /// container goes through `Optional.encode`, i.e. `encodeNil()`. Do not switch to
@@ -204,6 +211,7 @@ struct LogRecord: Codable {
     try container.encode(segment_start, forKey: .segment_start)
     try container.encode(segment_end, forKey: .segment_end)
     try container.encode(segment_seconds, forKey: .segment_seconds)
+    try container.encode(thermal_degraded, forKey: .thermal_degraded)
   }
 }
 
@@ -311,6 +319,10 @@ extension MonitoringEvent {
       record.segment_start = Int64((start * 1000).rounded())
       record.segment_end = Int64((end * 1000).rounded())
       record.segment_seconds = max(0, end - start)
+
+    case .thermal(let degraded):
+      record.event = "thermal"
+      record.thermal_degraded = degraded
 
     case .paused(let t):
       record.event = "paused"

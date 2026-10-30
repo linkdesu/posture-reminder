@@ -125,6 +125,12 @@ final class SessionController: ObservableObject {
 
   private var engine: MonitoringEngine?
   private var inputSource: SampleSource?
+  /// 每秒采样的热状态与电量：发热降级的唯一来源（`CaptureLoad`）。
+  private let thermal = ThermalSampler()
+  /// 最近一次热状态名，用来在采集源新建时同步负载。
+  private var thermalStateName = "nominal"
+  /// 上一次写进日志的降级结论，只在翻转时写 `thermal` 行。
+  private var thermalDegraded = false
   /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
   /// the visible layers. Reset at the start of every focus.
   private var lastViewMode: (mode: String, overlay: Bool, avatar: Bool)?
@@ -231,6 +237,11 @@ final class SessionController: ObservableObject {
     // samples, not by the screen being visible.
     applyPomodoroAudio(pomodoroSettings.settings)
     startPomodoroTimer()
+    // 热状态从启动起每秒采样：降级不等人开始专注，点云在主页就已经在跑。
+    thermal.onSample = { [weak self] state, battery, degraded in
+      self?.applyThermal(state: state, battery: battery, degraded: degraded)
+    }
+    thermal.start()
     refreshPomodoroSnapshot()
     // The child's screen is the root, so the depth sensor starts with it: the point cloud and the
     // silhouette are the screen's ground, not something a focus has to turn on.
@@ -802,6 +813,23 @@ final class SessionController: ObservableObject {
     refreshPomodoroSnapshot()
   }
 
+  /// 一秒一次的热状态：更新埋点、把负载交给采集源，并在降级翻转时写一行 `thermal`。
+  ///
+  /// 降级只影响采集负载（Vision 5 Hz、点云 15 Hz），不改判定与倒计时：少采几帧不等于少判一次，
+  /// 状态机仍按 10 Hz 的样本走。
+  private func applyThermal(state: String, battery: Double?, degraded: Bool) {
+    thermalStateName = state
+    #if DEBUG
+    PerfMonitor.shared.recordEnvironment(thermalState: state, battery: battery, degraded: degraded)
+    #endif
+    if let source = inputSource as? DepthCaptureSource {
+      source.setLoad(CaptureLoad.load(thermalState: state))
+    }
+    guard degraded != thermalDegraded else { return }
+    thermalDegraded = degraded
+    logger.log(.thermal(degraded: degraded))
+  }
+
   private func startPomodoroInput() {
     // The depth sensor is the child's screen, not the focus's: it runs before the first 开始 so the
     // cloud is already there, and it is only the parent-facing report that gives the sensor up.
@@ -811,6 +839,8 @@ final class SessionController: ObservableObject {
     // 30 Hz 的点云只喂画布：它不动样本时钟、不动判定，也不写日志。
     source.onCloud = { [weak self] frame in self?.applyCloud(frame) }
     inputSource = source
+    // 新采集源按当前热状态起跑：降级期间重建输入不该又回到 30 Hz。
+    (source as? DepthCaptureSource)?.setLoad(CaptureLoad.load(thermalState: thermalStateName))
     // A source counts from zero; the shared clock carries on where the last one stopped. Without this
     // a second source would rewind the countdown and the posture clock with it.
     pomodoroClockOffset = pomodoroLastT

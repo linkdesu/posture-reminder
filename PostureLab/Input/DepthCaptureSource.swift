@@ -48,6 +48,10 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private var history: [DepthObservation] = []
   private var latestJoints: VisionJointFrame?
 
+  /// 当前采集负载。热状态到 `serious` 时降到 Vision 5 Hz、点云 15 Hz（`CaptureLoad`）。
+  private var load: CaptureLoad = .normal
+  private var lastCloudAt: TimeInterval = 0
+
   private var startedAt: TimeInterval?
   private var lastEmittedAt: TimeInterval = 0
   private var watchdog: DispatchSourceTimer?
@@ -63,6 +67,22 @@ final class DepthCaptureSource: NSObject, SampleSource {
     depthOutput.alwaysDiscardsLateDepthData = true
     videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
     videoOutput.alwaysDiscardsLateVideoFrames = true
+    vision.minimumInterval = load.visionInterval
+  }
+
+  /// 热状态采样器的降级开关。Vision 的节流在 `VisionJointSource` 上，点云的节流在这里；深度帧本身
+  /// 仍按传感器给的频率进来，只是降级时有一半点云不推给画布。
+  func setLoad(_ load: CaptureLoad) {
+    stateLock.lock()
+    self.load = load
+    stateLock.unlock()
+    vision.minimumInterval = load.visionInterval
+  }
+
+  private var currentLoad: CaptureLoad {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return load
   }
 
   func start() {
@@ -102,6 +122,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let start = ProcessInfo.processInfo.systemUptime
     startedAt = start
     lastEmittedAt = 0
+    lastCloudAt = 0
     vision.reset()
 
     depthQueue.async { [weak self] in
@@ -215,29 +236,47 @@ final class DepthCaptureSource: NSObject, SampleSource {
 
   // MARK: - Depth
 
-  /// 深度帧：每个都更新点云，样本按 10 Hz 发。
+  /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
   private func handleDepth(_ depthData: AVDepthData, at t: TimeInterval) {
-    let processingStartedAt = ProcessInfo.processInfo.systemUptime
+    let captureStartedAt = ProcessInfo.processInfo.systemUptime
     // Float32 是这条管线唯一能读的格式，转换是深度到深度。
     let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
     guard let image = Self.depthImage(from: converted.depthDataMap)?
       .resampled(maxWidth: Self.processingWidth)
     else { return }
+    let captureSeconds = ProcessInfo.processInfo.systemUptime - captureStartedAt
 
+    let segmentationStartedAt = ProcessInfo.processInfo.systemUptime
     let mask = DepthSegmentation.segment(image)
+    let segmentationSeconds = ProcessInfo.processInfo.systemUptime - segmentationStartedAt
+
+    let cloudStartedAt = ProcessInfo.processInfo.systemUptime
     let cloud = mask.map { DepthCloud.points(mask: $0, image: image) } ?? []
+    let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
+
     let head = HeadGeometry.measure(depth: image, mask: mask)
     let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head)
-    lastDepthProcessing = ProcessInfo.processInfo.systemUptime - processingStartedAt
+    lastDepthProcessing = captureSeconds + segmentationSeconds + cloudSeconds
+
+    #if DEBUG
+    // 分步耗时：采集/分割/点云各自计时，含每帧点数。判定耗时由会话层单独记。
+    PerfMonitor.shared.recordCapture(seconds: captureSeconds)
+    PerfMonitor.shared.recordSegment(seconds: segmentationSeconds)
+    PerfMonitor.shared.recordCloud(seconds: cloudSeconds, points: cloud.count)
+    #endif
 
     stateLock.lock()
     history.append(observation)
     if history.count > Self.depthHistoryCount { history.removeFirst(history.count - Self.depthHistoryCount) }
+    let cloudInterval = load.cloudInterval
     stateLock.unlock()
 
-    // 30 Hz 点云：每个深度帧都推给画布，不等样本节流。
-    DispatchQueue.main.async { [weak self] in
-      self?.onCloud?(CloudFrame(t: t, points: cloud))
+    // 点云按负载上限推给画布（正常 30 Hz，降级 15 Hz），不等 10 Hz 的样本节流。
+    if t - lastCloudAt >= cloudInterval {
+      lastCloudAt = t
+      DispatchQueue.main.async { [weak self] in
+        self?.onCloud?(CloudFrame(t: t, points: cloud))
+      }
     }
 
     guard t - lastEmittedAt >= Self.sampleInterval else { return }
@@ -292,8 +331,10 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
 
     // 关节的位置来自彩色，距离与俯仰来自同帧深度：配最近的一帧，超过 150 ms 就整帧作废。
     var joints: [JointID: JointSample] = [:]
+    var stale = true
     if let observation = nearestObservation(to: frame.t),
        !VisionDepthPairing.isStale(visionT: frame.t, sampleT: observation.t) {
+      stale = false
       joints = VisionPoseMapping.attachDepth(frame.joints,
                                              depth: observation.image,
                                              mask: observation.mask)
@@ -306,5 +347,21 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     stateLock.lock()
     latestJoints = paired
     stateLock.unlock()
+
+    #if DEBUG
+    PerfMonitor.shared.recordVision(seconds: frame.inferenceSeconds)
+    var confidence: [String: Double] = [:]
+    var visible: [String: Bool] = [:]
+    for joint in VisionPoseMapping.deliveredJoints {
+      let sample = joints[joint]
+      confidence[joint.rawValue] = sample?.confidence
+      visible[joint.rawValue] = sample != nil
+    }
+    JointFrameLog.shared.write(JointFrameDebugSample(sessionT: frame.t,
+                                                     stale: stale,
+                                                     shouldersInvalidated: frame.shouldersInvalidated,
+                                                     confidence: confidence,
+                                                     visible: visible))
+    #endif
   }
 }

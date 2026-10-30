@@ -159,12 +159,15 @@ struct MonitoringEngine {
       }
     }
 
+    #if DEBUG
+    // 一次 ingest 正好判定一次，埋点贴在这里才不会漏掉暂停/无人之外的样本；耗时含分类器与基线比对。
+    let assessmentStartedAt = ProcessInfo.processInfo.systemUptime
+    #endif
     let assessment = PostureClassifier.assess(sample,
                                               baseline: baseline,
                                               thresholds: config.thresholds)
     #if DEBUG
-    // 每秒判定的次数：一次 ingest 正好判定一次，埋点贴在这里才不会漏掉暂停/无人之外的样本。
-    PerfMonitor.shared.recordAssessment()
+    PerfMonitor.shared.recordAssessment(seconds: ProcessInfo.processInfo.systemUptime - assessmentStartedAt)
     #endif
     latestAssessment = assessment
 
