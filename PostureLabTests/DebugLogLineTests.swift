@@ -145,7 +145,9 @@ final class DebugLogLineTests: XCTestCase {
       confidence: ["nose": 0.93, "leftShoulder": 0.71, "rightShoulder": 0.68, "neck": 0.9],
       rawConfidence: ["nose": 0.93, "leftShoulder": 0.71, "rightShoulder": 0.68, "neck": 0.9,
                       "leftEye": 0.31],
-      visible: ["nose": true, "leftShoulder": true, "rightShoulder": true, "neck": true]))
+      visible: ["nose": true, "leftShoulder": true, "rightShoulder": true, "neck": true],
+      presencePath: .neckShoulder,
+      faceDetected: false))
     let values = try json(line)
 
     XCTAssertEqual(values["session_t"] as? Double ?? 0, 12.5, accuracy: 0.001)
@@ -153,6 +155,12 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["stale"] as? Bool, false)
     XCTAssertEqual(values["shoulders_invalidated"] as? Bool, false)
     XCTAssertEqual(values["shoulders_available"] as? Bool, true)
+    // 在场路径与三个输入关节：扁平键，与 joints 里的数字一致，不可见时为 null。
+    XCTAssertEqual(values["presence_path"] as? String, "neck_shoulder")
+    XCTAssertEqual(values["face_detected"] as? Bool, false)
+    XCTAssertEqual(values["neck"] as? Double ?? 0, 0.9, accuracy: 0.001)
+    XCTAssertEqual(values["left_shoulder"] as? Double ?? 0, 0.71, accuracy: 0.001)
+    XCTAssertEqual(values["right_shoulder"] as? Double ?? 0, 0.68, accuracy: 0.001)
 
     let joints = try XCTUnwrap(values["joints"] as? [String: Any])
     // 八个关节每个都有条目：可见的带置信度，不可见的写 null 且 v=false。
@@ -177,13 +185,20 @@ final class DebugLogLineTests: XCTestCase {
       shouldersInvalidated: true,
       confidence: [:],
       rawConfidence: [:],
-      visible: [:]))
+      visible: [:],
+      presencePath: .none,
+      faceDetected: false))
     let values = try json(line)
 
     XCTAssertEqual(values["detected"] as? Bool, false, "nobody in frame is not a filtered-out joint")
     XCTAssertEqual(values["stale"] as? Bool, true)
     XCTAssertEqual(values["shoulders_invalidated"] as? Bool, true)
     XCTAssertEqual(values["shoulders_available"] as? Bool, false)
+    // 没有人的一帧：路径是 none，三个颈肩置信度都是 null（不是 0）。
+    XCTAssertEqual(values["presence_path"] as? String, "none")
+    XCTAssertTrue(values["neck"] is NSNull)
+    XCTAssertTrue(values["left_shoulder"] is NSNull)
+    XCTAssertTrue(values["right_shoulder"] is NSNull)
   }
 
   /// `features` 行：未测量的读数写 `"value": null`（键仍在），`over` 是 false，`threshold` 照写。

@@ -24,6 +24,9 @@ struct VisionJointFrame: Equatable {
   /// 模型对八个关节给出的**原始**置信度（`0.5` 门槛之前），键是 `JointID.rawValue`；模型没报这个
   /// 关节时该键为 nil。只用来看模型的表现，不参与任何判定。
   var rawConfidence: [String: Double]
+  /// 同帧是否找到人脸（`VNDetectFaceLandmarksRequest` 报了一个人脸框）。在场判定的
+  /// `.faceEyes` 路径用它：鼻点只是锚点，人脸或双眼才是「这个头真的在」的证据。
+  var faceDetected: Bool = false
   /// 嘴的外轮廓（归一化坐标，按轮廓顺序）；同帧找人脸失败时为空。
   var mouth: [CGPointLike] = []
   /// 双肩因为落在鼻以上被整帧作废。真机上这个计数必须为 0。

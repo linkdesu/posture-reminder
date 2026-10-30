@@ -70,12 +70,21 @@
 ```json
 {"t":1793355411149,"session_t":0.280,"detected":true,"stale":false,
  "shoulders_available":false,"shoulders_invalidated":false,
+ "presence_path":"face_eyes","face_detected":true,
+ "neck":0.62,"left_shoulder":null,"right_shoulder":null,
  "raw":{"nose":0.71,"leftEye":0.52,…, "rightShoulder":0.44},
  "joints":{"nose":{"c":0.71,"v":true},"leftEye":{"c":0.52,"v":true},…,
            "rightShoulder":{"c":null,"v":false}}}
 ```
 
 - `detected`：模型这一帧是否报出了人。`false` = 画面里没人；`true` 而某关节 `v=false`、`raw` 有分数 = 模型看到了但**被 0.5 门槛过滤**。
+- `presence_path`（v0.6.8 (18)）：这一帧的在场证据路径，取值 `face_eyes` / `neck_shoulder` / `none`。在场判定要**连续 3 帧**有证据（`PresenceGate.streakRequired`），任何一帧 `none` 就把连续计数清零。三条规则：
+  1. `face_eyes`：鼻置信度 ≥ 0.5，**并且**同帧找到人脸（`face_detected`）或双眼都过门槛；
+  2. `neck_shoulder`：鼻置信度 ≥ 0.5，**并且**颈/左肩/右肩至少一个过门槛；
+  3. 两条都满足时记 `face_eyes`（头部证据优先）。
+  **只有鼻子过门槛、其余都不在时必须记 `none`**：鼻子是锚点不是证据，只认鼻尖会让计时在孩子离开后继续跑。
+- `face_detected`（v0.6.8 (18)）：同帧 `VNDetectFaceLandmarksRequest` 是否报出人脸框。人脸框存在即算找到脸，与嘴轮廓是否取得到无关。
+- `neck` / `left_shoulder` / `right_shoulder`（v0.6.8 (18)）：这三个关节**过门槛后**的置信度，扁平键便于直接复算 `presence_path`；不可见时为 `null`（不是 0），与 `joints.<名>.c` 一致。
 - `raw`：八个关节在门槛之前的原始分数；模型没报这个关节时为 `null`。它只用于看模型表现，不参与判定。
 - `joints`：过门槛后的置信度 `c` 与可见性 `v`；不可见关节 `c` 为 `null`。
 - `stale`：关节与深度帧的配对超过 150 ms 而过期，这一帧关节全部不可见。
@@ -218,8 +227,8 @@ xcrun devicectl device copy from \
 | `log_header` | 日志第一行：构建身份（`message` = `0.6.8 (16) <commit>`）。键集仍是 45 个，身份放在 `message` 里，QA 的「每行同键集」契约不受影响。 | `message` |
 | `calibration_incomplete` | 校准没有完成（v0.6.8 (16)）：开头 3 秒里有效横滚样本少于 10 个。判定沿用标准直立基线，这一行用 `message` 写原因，绝不把「没校准」写成「校准过了」。 | `message` |
 | `thermal` | 发热降级开始或结束（v0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz，恢复时再写一行结束。降级期间 `thermal_state` 会同时在每行盖上（采样见下文），但只有翻转的那一行带 `thermal_degraded`。 | `thermal_degraded` |
-| `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
-| `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |
+| `paused` | 无人暂停开始（连续 3 秒没有在场证据；在场证据的判据是 `PresenceGate`，见 `joints-*.jsonl` 的 `presence_path`，只有鼻子不算有人）。 | `t` |
+| `resumed` | 无人暂停结束（在场证据连续满 1 秒后重新出现）。 | `t` |
 | `session_ended` | 会话结束；携带汇总。 | `total_seconds`、`good_seconds`、`near_seconds`、`head_down_seconds`、`paused_seconds`、`near_count`、`near_remind_count`、`head_down_count`、`head_down_remind_count`、`longest_good_streak_seconds`、`posture_stats` |
 
 单个 tick 内的顺序遵循引擎：`sample`，然后是 `paused`/`resumed`，然后是 `status_changed`（仅当状态改变），然后是任何 `reminder`，最后当该 tick 是特征样本（每第五个）时写 `features` 行。同一 tick 内多个体态触发 `reminder` 时，它们按 `PostureKind.priority` 升序出现，每个体态一行。
