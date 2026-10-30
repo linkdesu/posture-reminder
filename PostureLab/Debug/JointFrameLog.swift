@@ -1,19 +1,23 @@
 #if DEBUG
 import Foundation
 
-/// 一帧关节结果的调试快照：每个关节的置信度与可见性，加上双肩的两条结论。
+/// 一帧关节结果的调试快照：模型是否看人、每个关节的原始置信度与可见性，加上双肩的两条结论。
 ///
 /// 只写 DEBUG 的 `Documents/debug/joints-*.jsonl`；42 键的 QA 契约与它无关（另一个文件、另一套键）。
 /// QA 用它算三个真机指标：双肩可用帧占比、肩点落在头上的帧数、以及每个关节的置信度分布。
 struct JointFrameDebugSample {
   /// 会话时钟，秒。
   var sessionT: TimeInterval
+  /// 模型这一帧是否报出了人。false = 画面里没人；true 而关节不可见 = 被 0.5 门槛过滤。
+  var detected: Bool
   /// 关节与深度帧的配对是否过期（超过 150 ms）。过期时关节一律不可见。
   var stale: Bool
   /// 双肩因为落在鼻以上被整帧作废。
   var shouldersInvalidated: Bool
-  /// 每个关节的置信度；不可见时为 nil。键是 `JointID.rawValue`。
+  /// 过了门槛、可以进入判定的关节置信度；不可见时为 nil。键是 `JointID.rawValue`。
   var confidence: [String: Double]
+  /// 模型的**原始**置信度（门槛之前）；模型没报这个关节时为 nil。键是 `JointID.rawValue`。
+  var rawConfidence: [String: Double]
   /// 每个关节这一帧是否可见。
   var visible: [String: Bool]
 }
@@ -42,11 +46,19 @@ final class JointFrameLog {
 
     let available = (sample.visible["leftShoulder"] ?? false) && (sample.visible["rightShoulder"] ?? false)
 
+    var raw: [String] = []
+    for joint in VisionPoseMapping.deliveredJoints {
+      let key = joint.rawValue
+      raw.append("\"\(key)\":\(number(sample.rawConfidence[key]))")
+    }
+
     return "{\"t\":\(epochMilliseconds)"
       + ",\"session_t\":\(String(format: "%.3f", sample.sessionT))"
+      + ",\"detected\":\(sample.detected)"
       + ",\"stale\":\(sample.stale)"
       + ",\"shoulders_available\":\(available)"
       + ",\"shoulders_invalidated\":\(sample.shouldersInvalidated)"
+      + ",\"raw\":{\(raw.joined(separator: ","))}"
       + ",\"joints\":{\(entries.joined(separator: ","))}}"
   }
 

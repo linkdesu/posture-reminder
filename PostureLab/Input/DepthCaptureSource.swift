@@ -410,6 +410,8 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
 
     let paired = VisionJointFrame(t: frame.t,
                                   joints: joints,
+                                  detected: frame.detected,
+                                  rawConfidence: frame.rawConfidence,
                                   shouldersInvalidated: frame.shouldersInvalidated,
                                   inferenceSeconds: frame.inferenceSeconds)
     stateLock.lock()
@@ -426,9 +428,11 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
       visible[joint.rawValue] = sample != nil
     }
     JointFrameLog.shared.write(JointFrameDebugSample(sessionT: frame.t,
+                                                     detected: frame.detected,
                                                      stale: stale,
                                                      shouldersInvalidated: frame.shouldersInvalidated,
                                                      confidence: confidence,
+                                                     rawConfidence: frame.rawConfidence,
                                                      visible: visible))
     #endif
   }
