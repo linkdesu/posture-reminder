@@ -11,6 +11,9 @@ enum MonitoringEvent: Equatable {
   /// 校准没有完成（3 秒内有效样本太少）：体态判定沿用标准直立基线，日志里明确写出来，
   /// 不把「没校准」伪装成「校准过了」。
   case calibrationIncomplete(reason: String)
+  /// 日志第一行：构建身份（版本、build、commit）。键集不变，身份放在 `message` 里，这样 QA 的
+  /// 「每行同键集」契约不被破坏，又不必去别处查这是哪个构建。
+  case logHeader(summary: String)
   case screenShown(name: String)
   case sample(t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case statusChanged(to: PostureStatus, t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
@@ -276,6 +279,10 @@ extension MonitoringEvent {
     case .calibrationIncomplete(let reason):
       record.event = "calibration_incomplete"
       record.message = reason
+
+    case .logHeader(let summary):
+      record.event = "log_header"
+      record.message = summary
 
     case .screenShown(let name):
       record.event = "screen_shown"
