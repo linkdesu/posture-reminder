@@ -146,8 +146,8 @@ final class DepthPipelineTests: XCTestCase {
     let mask = try XCTUnwrap(DepthSegmentation.segment(image))
     let cloud = DepthCloud.points(mask: mask, image: image)
 
-    XCTAssertFalse(cloud.isEmpty)
-    XCTAssertLessThanOrEqual(cloud.count, 1200)
+    XCTAssertEqual(cloud.count, DepthCloud.pointBudget,
+                   "every depth frame carries the same number of points")
     for point in cloud {
       XCTAssertEqual(point.z, 0.5, accuracy: 0.001)
       XCTAssertTrue((0...1).contains(point.x))
@@ -160,6 +160,37 @@ final class DepthPipelineTests: XCTestCase {
     let mask = try XCTUnwrap(DepthSegmentation.segment(image))
     XCTAssertEqual(DepthCloud.points(mask: mask, image: image),
                    DepthCloud.points(mask: mask, image: image))
+  }
+
+  /// 点数固定是插值每帧生效的前提：同一个预算下，大身子和小身子都给 600 点。
+  func testEveryFrameFillsTheSamePointBudget() throws {
+    XCTAssertEqual(DepthCloud.pointBudget, 600)
+    for image in [bodyImage(), bodyImage(headRadius: 8, torsoHalfWidth: 10)] {
+      let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+      XCTAssertEqual(DepthCloud.points(mask: mask, image: image).count, 600)
+    }
+  }
+
+  /// 预算比身体的格点还多时（极瘦的轮廓）循环补齐，补齐的点仍来自轮廓本身。
+  func testASparseBodyFillsTheBudgetByRepeatingItsOwnPoints() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    let cloud = DepthCloud.points(mask: mask, image: image, maxPoints: 2000)
+
+    XCTAssertEqual(cloud.count, 2000)
+    for point in cloud {
+      XCTAssertEqual(point.z, 0.5, accuracy: 0.001)
+      XCTAssertTrue((0...1).contains(point.x))
+      XCTAssertTrue((0...1).contains(point.y))
+    }
+  }
+
+  /// 补齐的点按收集顺序重复：同样的遮罩、同样的预算，永远给同一份点。
+  func testThePaddingIsDeterministic() throws {
+    let image = bodyImage()
+    let mask = try XCTUnwrap(DepthSegmentation.segment(image))
+    XCTAssertEqual(DepthCloud.points(mask: mask, image: image, maxPoints: 2000),
+                   DepthCloud.points(mask: mask, image: image, maxPoints: 2000))
   }
 
   func testDownsamplingKeepsTheSilhouetteBoundary() throws {
