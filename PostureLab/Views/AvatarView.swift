@@ -95,8 +95,8 @@ struct AvatarView: View {
         }
 
         let overlay = keyPoints.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
-        if overlay.alpha > 0.01, !overlay.points.isEmpty {
-          drawFigure(overlay.points, mouth: geometry.mouth, alpha: overlay.alpha,
+        if !overlay.points.isEmpty {
+          drawFigure(overlay.points, alphas: overlay.alphas, mouth: geometry.mouth,
                      in: &context, size: size)
         } else if !geometry.outlineEnabled || visible.isEmpty {
           // 既没有人形、也没有背景轮廓时才退回矢量轮廓，绝不空屏。
@@ -253,10 +253,8 @@ struct AvatarView: View {
 
   // MARK: - Empty state
 
-  /// 4 个关键点：头（鼻点，没有鼻点时取双眼中点）、颈、左右肩。缺任何一个就不返回整组，
-  /// 由 `KeyPointOverlayMotion` 决定保持还是淡出。
-  /// 人形的点：鼻、双眼、双耳、颈、双肩——每帧只收这一帧真正测到的，缺的就缺席（由过渡层负责
-  /// 保持与淡出）。嘴是轮廓，单独由 `drawFigure` 画。
+  /// 人形的点：鼻、双眼、双耳、颈、双肩——每帧只收这一帧真正测到的，缺的就缺席（由
+  /// `KeyPointOverlayMotion` 按关节各自保持与淡出）。嘴是轮廓，单独由 `drawFigure` 画。
   static func keyPoints(from joints: [JointID: JointSample]) -> [JointID: CGPoint] {
     var points: [JointID: CGPoint] = [:]
     for id in [JointID.nose, .leftEye, .rightEye, .leftEar, .rightEar, .neck,
@@ -275,41 +273,49 @@ struct AvatarView: View {
   ]
 
   private func drawFigure(_ points: [JointID: CGPoint],
+                          alphas: [JointID: Double],
                           mouth: [CGPointLike],
-                          alpha: Double,
                           in context: inout GraphicsContext,
                           size: CGSize) {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
-    let ink = Self.keyInk.color(opacity: alpha)
+    let lineStyle = StrokeStyle(lineWidth: 1.2, lineCap: .round)
 
-    var lines = Path()
+    // 每条线的透明度取两端点中更淡的那个：任一端在淡出，线跟着淡出，不留下一条悬空的线。
     for (from, to) in Self.figureLines {
-      guard let start = points[from], let end = points[to] else { continue }
-      lines.move(to: PoseProjection.point(start, in: rect))
-      lines.addLine(to: PoseProjection.point(end, in: rect))
+      guard let start = points[from], let end = points[to],
+            let alpha = [alphas[from], alphas[to]].compactMap({ $0 }).min() else { continue }
+      var line = Path()
+      line.move(to: PoseProjection.point(start, in: rect))
+      line.addLine(to: PoseProjection.point(end, in: rect))
+      context.stroke(line, with: .color(Self.keyInk.color(opacity: alpha)), style: lineStyle)
     }
-    context.stroke(lines, with: .color(ink),
-                   style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
 
     // 点半径是人形之外的 3 倍：孩子的部位要一眼认出来。
     let radius = min(rect.width, rect.height) * Self.particleRadiusScale * 3
-    for (_, point) in points {
+    for (id, point) in points {
+      guard let alpha = alphas[id] else { continue }
       let centre = PoseProjection.point(point, in: rect)
       let dot = CGRect(x: centre.x - radius, y: centre.y - radius,
                        width: radius * 2, height: radius * 2)
-      context.fill(Path(ellipseIn: dot), with: .color(ink))
+      context.fill(Path(ellipseIn: dot), with: .color(Self.keyInk.color(opacity: alpha)))
     }
 
-    // 嘴：外轮廓闭合折线（Vision 面部特征；取不到就不画，不伪造）。
-    guard mouth.count >= 3 else { return }
+    // 嘴：外轮廓闭合折线（Vision 面部特征；取不到就不画，不伪造）。透明度跟头部走。
+    guard mouth.count >= 3, let headAlpha = Self.headAlpha(alphas) else { return }
     var lips = Path()
     lips.move(to: PoseProjection.point(CGPoint(x: mouth[0].x, y: mouth[0].y), in: rect))
     for point in mouth.dropFirst() {
       lips.addLine(to: PoseProjection.point(CGPoint(x: point.x, y: point.y), in: rect))
     }
     lips.closeSubpath()
-    context.stroke(lips, with: .color(ink), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+    context.stroke(lips, with: .color(Self.keyInk.color(opacity: headAlpha)),
+                   style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+  }
+
+  /// 头部的透明度：鼻/眼/耳里最不透明的那个。嘴只看头，不看肩。
+  private static func headAlpha(_ alphas: [JointID: Double]) -> Double? {
+    headJoints.compactMap { alphas[$0] }.max()
   }
 
   /// A vector silhouette of a seated upper body — head, neck, shoulders and torso in outline — for
@@ -379,10 +385,13 @@ private struct Ink {
   }
 }
 
-/// 4 个关键点的平滑与出现/消失。
+/// 人形 8 个关节的平滑与出现/消失，**每个关节各自一条时间线**。
 ///
-/// 关键点齐全时坐标按 0.15 s 时间常数做指数平滑（静止时相邻帧位移远小于屏宽 2%）；只要有一个不齐，
-/// 先保持最后已知位置 `hold` 秒，再用 `fade` 秒淡出；从缺失恢复时不瞬亮，同样用 `fade` 秒淡入。
+/// 某个关节这一帧通过了置信度门槛：坐标按 0.15 s 时间常数做指数平滑（静止时相邻帧位移远小于屏宽
+/// 1%）。某个关节这一帧低于门槛：先保持最后已知位置 `hold` 秒，再用 `fade` 秒淡出，**不影响其它
+/// 关节**——颈和右肩常年不过 0.5 的门槛，如果按整组判定，整具人形会永远不显示（0.6.8 (18) 的真机
+/// 缺口）。从缺失恢复时不瞬亮，同样用 `fade` 秒淡入。
+///
 /// 纯值类型、纯函数式的时间查询，画布按显示时钟取当前结果，单测可以直接推进时间。
 struct KeyPointOverlayMotion: Equatable {
   /// 缺失后保持完全可见的时长。
@@ -392,47 +401,69 @@ struct KeyPointOverlayMotion: Equatable {
   /// 坐标平滑的时间常数。
   static let smoothingTau: TimeInterval = 0.15
 
-  private(set) var points: [JointID: CGPoint] = [:]
-  private var missingSince: TimeInterval?
-  private var presentSince: TimeInterval = -TimeInterval.greatestFiniteMagnitude
-  private var lastUpdate: TimeInterval?
-
-  /// 收一帧关键点。`raw` 为空 = 这一帧有部位低于门槛。
-  mutating func update(_ raw: [JointID: CGPoint], at now: TimeInterval) {
-    guard raw.count == 4 else {
-      if missingSince == nil { missingSince = now }
-      lastUpdate = now
-      return
-    }
-    let dt = lastUpdate.map { max(0, now - $0) } ?? 0
-    let alpha = dt > 0 ? 1 - exp(-dt / Self.smoothingTau) : 1
-    for (id, target) in raw {
-      if let previous = points[id] {
-        points[id] = CGPoint(x: previous.x + (target.x - previous.x) * alpha,
-                             y: previous.y + (target.y - previous.y) * alpha)
-      } else {
-        points[id] = target
-      }
-    }
-    if missingSince != nil {
-      presentSince = now
-      missingSince = nil
-    }
-    lastUpdate = now
+  struct Track: Equatable {
+    /// 平滑后、真正画在屏幕上的位置。
+    var point: CGPoint
+    /// 这一帧收到的原始位置（未平滑）。抖动测量用它判「这一帧孩子是不是静止」。
+    var target: CGPoint
+    /// 低于门槛的起始时刻；nil 表示这一帧仍可见。
+    var missingSince: TimeInterval?
+    /// 最近一次开始可见的时刻，淡入用。
+    var presentSince: TimeInterval
+    /// 上一次更新的时刻，平滑的时间步长。
+    var lastUpdate: TimeInterval?
   }
 
-  /// 显示时钟上的透明度：齐全时淡入，缺失时保持 `hold` 再 `fade` 淡出。
-  func alpha(at now: TimeInterval) -> Double {
-    if let missingSince {
+  private(set) var tracks: [JointID: Track] = [:]
+
+  /// 收一帧关键点。`raw` 里没有的关节 = 这一帧低于门槛。
+  mutating func update(_ raw: [JointID: CGPoint], at now: TimeInterval) {
+    for id in tracks.keys where raw[id] == nil {
+      guard var track = tracks[id] else { continue }
+      if track.missingSince == nil { track.missingSince = now }
+      // 缺失期间也推进时间步长：恢复时的第一帧从保持位置缓过去，一步到位地跳会看起来像瞬移。
+      track.lastUpdate = now
+      tracks[id] = track
+    }
+    for (id, target) in raw {
+      var track = tracks[id] ?? Track(point: target, target: target, missingSince: nil,
+                                      presentSince: now, lastUpdate: nil)
+      let dt = track.lastUpdate.map { max(0, now - $0) } ?? 0
+      let alpha = dt > 0 ? 1 - exp(-dt / Self.smoothingTau) : 1
+      track.point = CGPoint(x: track.point.x + (target.x - track.point.x) * alpha,
+                            y: track.point.y + (target.y - track.point.y) * alpha)
+      track.target = target
+      if track.missingSince != nil {
+        track.presentSince = now
+        track.missingSince = nil
+      }
+      track.lastUpdate = now
+      tracks[id] = track
+    }
+  }
+
+  /// 显示时钟上这个关节的透明度：可见时淡入，缺失时保持 `hold` 再 `fade` 淡出。
+  func alpha(for id: JointID, at now: TimeInterval) -> Double {
+    guard let track = tracks[id] else { return 0 }
+    if let missingSince = track.missingSince {
       let gone = now - missingSince
       if gone <= Self.hold { return 1 }
       return max(0, 1 - (gone - Self.hold) / Self.fade)
     }
-    return min(1, max(0, (now - presentSince) / Self.fade))
+    return min(1, max(0, (now - track.presentSince) / Self.fade))
   }
 
-  func displayed(at now: TimeInterval) -> (points: [JointID: CGPoint], alpha: Double) {
-    (points, alpha(at: now))
+  /// 这一刻真正要画的点与每个点的透明度。已经完全淡出的关节不返回。
+  func displayed(at now: TimeInterval) -> (points: [JointID: CGPoint], alphas: [JointID: Double]) {
+    var points: [JointID: CGPoint] = [:]
+    var alphas: [JointID: Double] = [:]
+    for (id, track) in tracks {
+      let value = alpha(for: id, at: now)
+      guard value > 0.001 else { continue }
+      points[id] = track.point
+      alphas[id] = value
+    }
+    return (points, alphas)
   }
 }
 
