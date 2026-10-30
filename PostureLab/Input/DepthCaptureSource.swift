@@ -17,10 +17,14 @@ import Foundation
 final class DepthCaptureSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
   var onCloud: ((CloudFrame) -> Void)?
+  /// 横滚校准有结论时回调一次：拿到基线给数值，样本不足给 nil。
+  var onRollCalibration: ((Double?) -> Void)?
 
   private let vision = VisionJointSource()
   /// 固定网格 + 帧间平滑的点云。只有深度队列碰它。
   private var cloudStabilizer = CloudStabilizer()
+  /// 横滚基线的静默校准（前 3 秒的 Vision 眼线/耳线中位数）。
+  private var rollCalibrator = RollCalibrator()
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
   private let videoOutput = AVCaptureVideoDataOutput()
@@ -38,12 +42,15 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private static let processingWidth = 160
 
   /// 一帧深度观测：配对时的全部输入。
+  /// `maskShoulders` 在这一帧的深度队列上算好（`MaskShoulderLine`），随观测存放；
+  /// 彩色队列写关节逐帧日志时取「最近一帧深度观测」的它，与关节配对同源。
   private struct DepthObservation {
     var t: TimeInterval
     var image: DepthImage
     var mask: BodyMask?
     var cloud: [BodyPoint]
     var head: HeadGeometry.Reading
+    var maskShoulders: MaskShoulderLine.Estimate
   }
 
   /// 深度队列写、彩色队列读的东西都在这个锁后面。
@@ -236,7 +243,32 @@ final class DepthCaptureSource: NSObject, SampleSource {
     return history[index]
   }
 
+  /// 这一时刻的在场结论：Vision 最近一帧没有过期时用它的 `detected`，过期了就不下结论（nil，
+  /// 由样本的距离回退）。
+  private func personPresent(at t: TimeInterval) -> Bool? {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let frame = latestJoints,
+          !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return nil }
+    return frame.detected
+  }
+
   /// 这一时刻还能用的关节：最近一次配对结果没有过期，且双肩没有因为落在头上被作废。
+  /// 横滚：优先用 Vision 的眼线/耳线，并按校准基线取相对角；两者都缺时才退回深度平面。
+  private func calibratedRoll(joints: [JointID: JointSample],
+                              fallback: Double?,
+                              at t: TimeInterval) -> Double? {
+    guard let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
+      ?? VisionPoseMapping.earLineDegrees(joints) else { return fallback }
+    let wasSettled = rollCalibrator.isSettled
+    _ = rollCalibrator.observe(visionRoll, at: t)
+    if !wasSettled, rollCalibrator.isSettled {
+      let baseline = rollCalibrator.baseline
+      DispatchQueue.main.async { [weak self] in self?.onRollCalibration?(baseline) }
+    }
+    return rollCalibrator.relative(visionRoll)
+  }
+
   private func joints(at t: TimeInterval) -> [JointID: JointSample] {
     stateLock.lock()
     defer { stateLock.unlock() }
@@ -252,13 +284,15 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let sample = PostureSample(t: t,
                                distanceCM: head.distanceCM,
                                pitchDeg: head.pitchDeg,
-                               // 眼线 → 耳线 → 深度平面：彩色给的横滚比深度平面准。
-                               rollDeg: VisionPoseMapping.rollDegrees(joints, fallback: head.rollDeg),
+                               // 眼线 → 耳线 → 深度平面；彩色给的横滚比深度平面准，并且减掉这个孩子
+                               // 自己的横滚基线（前 3 秒中位数）。深度兜底不参与校准。
+                               rollDeg: calibratedRoll(joints: joints, fallback: head.rollDeg, at: t),
                                joints: joints,
                                depth: observation?.mask == nil ? nil : observation?.image.downsampled(),
                                depthAvailable: observation?.mask != nil,
                                cloud: observation?.cloud ?? [],
-                               unavailableJoints: Set(JointID.allCases).subtracting(joints.keys))
+                               unavailableJoints: Set(JointID.allCases).subtracting(joints.keys),
+                               personPresent: personPresent(at: t))
     DispatchQueue.main.async { [weak self] in
       self?.onSample?(sample)
     }
@@ -289,7 +323,11 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
 
     let head = HeadGeometry.measure(depth: image, mask: mask)
-    let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head)
+    // 遮罩肩线在这一帧的深度队列上量好（纯函数，无 I/O）：鼻点不在深度队列上，头部参考
+    // 用遮罩头带中点。它随观测存放，彩色队列写日志时取最近一帧的它，与关节配对同源。
+    let maskShoulders = mask.map { MaskShoulderLine.estimate(mask: $0, head: nil) } ?? .unavailable
+    let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head,
+                                     maskShoulders: maskShoulders)
     lastDepthProcessing = captureSeconds + segmentationSeconds + cloudSeconds
 
     #if DEBUG
@@ -407,9 +445,11 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     // 关节的位置来自彩色，距离与俯仰来自同帧深度：配最近的一帧，超过 150 ms 就整帧作废。
     var joints: [JointID: JointSample] = [:]
     var stale = true
+    var maskShoulders = MaskShoulderLine.Estimate.unavailable
     if let observation = nearestObservation(to: frame.t),
        !VisionDepthPairing.isStale(visionT: frame.t, sampleT: observation.t) {
       stale = false
+      maskShoulders = observation.maskShoulders
       joints = VisionPoseMapping.attachDepth(frame.joints,
                                              depth: observation.image,
                                              mask: observation.mask)
@@ -434,13 +474,33 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
       confidence[joint.rawValue] = sample?.confidence
       visible[joint.rawValue] = sample != nil
     }
+    // Vision 肩线：采集侧已经配对好的肩点，与遮罩肩线并排写进日志供对比（不做判定）。
+    let noseY = joints[.nose]?.y
+    if let above = MaskShoulderLine.aboveHead(maskShoulders, noseY: noseY) {
+      maskShoulders.aboveHead = above
+    }
+    let visionShoulders = MaskShoulderLine.Estimate(
+      left: joints[.leftShoulder].map { CGPointLike(x: $0.x, y: $0.y) },
+      right: joints[.rightShoulder].map { CGPointLike(x: $0.x, y: $0.y) },
+      angleDeg: {
+        guard let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+        return MaskShoulderLine.lineAngleDeg(from: CGPointLike(x: left.x, y: left.y),
+                                            to: CGPointLike(x: right.x, y: right.y))
+      }(),
+      aboveHead: {
+        guard let left = joints[.leftShoulder], let right = joints[.rightShoulder], let nose = joints[.nose] else { return nil }
+        return (left.y + right.y) / 2 < nose.y
+      }(),
+      available: joints[.leftShoulder] != nil && joints[.rightShoulder] != nil)
     JointFrameLog.shared.write(JointFrameDebugSample(sessionT: frame.t,
                                                      detected: frame.detected,
                                                      stale: stale,
                                                      shouldersInvalidated: frame.shouldersInvalidated,
                                                      confidence: confidence,
                                                      rawConfidence: frame.rawConfidence,
-                                                     visible: visible))
+                                                     visible: visible,
+                                                     visionShoulders: visionShoulders,
+                                                     maskShoulders: maskShoulders))
     #endif
   }
 }

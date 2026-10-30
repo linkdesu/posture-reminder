@@ -21,7 +21,8 @@ struct PostureBaseline: Equatable {
   /// first frame that has body data, which for the rig — and for any session that opens sitting
   /// upright — is its neutral layout. Keeping those numbers here is what stops the rig and the
   /// baseline from drifting apart.
-  static let uprightHeadHeight = 0.30
+  /// 直立时「肩线中线 − 鼻点」的归一化高度；校准会把它换成孩子自己的中位数。
+  static let uprightHeadHeight = 0.22
   static let uprightHeadDepthM = 0.35
   static let uprightShoulderWidth = 0.20
   static let uprightNeckToRoot = 0.20
@@ -100,6 +101,14 @@ enum PostureClassifier {
                              highlighted: highlighted)
   }
 
+  /// 「头部相对肩线高度」：两肩中线 − 鼻点 y（归一化，正数 = 头比肩线高）。缺肩或缺鼻时 nil。
+  /// 校准与判定读的是同一个量，头高不再依赖写死的 0.30。
+  static func headHeight(joints: [JointID: JointSample]) -> Double? {
+    guard let nose = joints[.nose],
+          let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+    return (left.y + right.y) / 2 - nose.y
+  }
+
   /// The features a kind's rule reads; the highlight is picked from just these.
   static func breachedFeatures(for kind: PostureKind) -> [PostureFeature] {
     switch kind {
@@ -143,9 +152,16 @@ enum PostureClassifier {
               baseline: baseline.shoulderTiltDeg)
     } ?? missing(.shoulderTilt, thresholds.shoulderTiltDeg, baseline: baseline.shoulderTiltDeg))
 
-    readings.append(nose.map {
+    // 头部相对肩线高度：鼻点与两肩中线的归一化距离（正数 = 头比肩线高）。头高不再用写死的 0.30
+    // 当基线——那个常数跟孩子坐姿无关，只取决于头在画面里的位置（r20 诊断）。
+    let headHeight: Double? = {
+      guard let nose,
+            let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+      return (left.y + right.y) / 2 - nose.y
+    }()
+    readings.append(headHeight.map {
       reading(.headHeightDrop,
-              value: $0.y - baseline.headHeight,
+              value: (baseline.headHeight) - $0,
               threshold: thresholds.headHeightDrop,
               baseline: baseline.headHeight)
     } ?? missing(.headHeightDrop, thresholds.headHeightDrop, baseline: baseline.headHeight))
@@ -195,6 +211,7 @@ enum PostureClassifier {
                    value: value,
                    threshold: threshold,
                    baseline: baseline,
+                   isMeasured: true,
                    isOverThreshold: feature.isSmallerWorse ? value < threshold : value > threshold,
                    severity: FeatureReading.severity(feature: feature, value: value, threshold: threshold))
   }
@@ -209,6 +226,7 @@ enum PostureClassifier {
                    value: threshold / 2,
                    threshold: threshold,
                    baseline: baseline,
+                   isMeasured: false,
                    isOverThreshold: false,
                    severity: 0)
   }

@@ -263,7 +263,7 @@ final class SegmentLogTests: XCTestCase {
 
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    XCTAssertEqual(fields.count, 43, "the log contract carries 43 keys from v0.6.8 on (thermal_degraded)")
+    XCTAssertEqual(fields.count, 45, "the log contract carries 45 keys from v0.6.8 (16) on")
     XCTAssertEqual(fields["segment_kind"] as? String, "detecting")
   }
 
@@ -282,7 +282,7 @@ final class SegmentLogTests: XCTestCase {
 
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    XCTAssertEqual(fields.count, 43)
+    XCTAssertEqual(fields.count, 45)
     XCTAssertEqual(fields["segment_kind"] as? String, "no_data")
   }
 
@@ -292,7 +292,7 @@ final class SegmentLogTests: XCTestCase {
     let data = try JSONEncoder().encode(record)
     let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-    XCTAssertEqual(fields.count, 43)
+    XCTAssertEqual(fields.count, 45)
     for key in ["segment_kind", "segment_start", "segment_end", "segment_seconds", "thermal_degraded"] {
       XCTAssertTrue(fields[key] is NSNull, "\(key) should be null on a paused line")
     }

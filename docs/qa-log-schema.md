@@ -4,6 +4,8 @@
 
 **v0.6 是一次破坏性的契约变更：键集从 38 个增至 42 个（新增 `segment_kind`、`segment_start`、`segment_end`、`segment_seconds`），事件表新增 `segment`。** 按 ADR-0002，schema 变更必须先让 QA 知情；本轮由 TL 负责把这次变更写进 `tmp/handoff/omp-questions.md` 告知 QA，本文档只记录契约本身。倒计时与专注起点同时改用墙钟口径（见「ts 与 t 不是一回事」一节末尾），新增的「识别中」段见「识别中段与时间轴不变量」。
 
+**v0.6.8 (16) 再增两个键：`baseline_roll_deg`、`baseline_head_height`（只在 `calibration_done` 行非 null），键集 43 → 45；新增事件 `calibration_incomplete`（3 秒内有效横滚样本不足时写一行，`message` 说明原因），`calibration_done` 保留并携带个人横滚基线。`features` 行的 `feature_values` 里，未测量的读数 `value` 为 `null`（不再写「门槛的一半」），`over` 为 false。**
+
 **v0.6.8 是一次契约变更：键集从 42 个增至 43 个（新增 `thermal_degraded`，布尔），事件表新增 `thermal`（发热降级起止各一行）。** 已经按 42 键读取日志的读者必须接受第 43 个键；不关心发热的读者可以忽略它。按 ADR-0002，这次变更同样由 TL 在报告里告知 QA。
 
 **v0.6.1 不改变键数，也不新增事件：** 只给 `segment_kind` 增加取值 `no_data`（「无数据」段——首样本之后样本流中断的那段墙钟时间）。按取值穷举 `segment_kind` 的读者需要接受这个新值。详见「样本中断与「无数据」段」。
@@ -54,7 +56,8 @@
 - `depth_nan`：NaN 读数占比（0...1）。TrueDepth 的 Float32 深度图用 NaN 表示「这里没有读数」；`depth_valid` 为 0 且 `depth_nan` 为 1 就是整帧 NaN——0.6.8 (15) 关掉深度滤波时真机每次都是这个样子，分割拿不到输入、点云恒为 0。排查「点云为什么是空的」先看这两列：`depth_valid≈1` = 没人，`depth_nan≈1` = 深度图不可用。
 - `nearest_m`：这一帧最近的深度读数，米；没有读数时为 `null`。
 - `degraded` / `cloud_emitted`：这一帧是否处于发热降级、点云是否推给了画布（降级时隔帧推）。
-- `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
+- `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。
+- `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
 
 ### `joints-*.jsonl` 的键
 
@@ -119,6 +122,8 @@ xcrun devicectl device copy from \
 | `pitch_threshold_deg` | Double? | 在 `config` 行：本次会话的“低头”阈值，单位度。 |
 | `baseline_distance_cm` | Double? | 在 `calibration_done` 行：校准后的基线距离（非空校准样本的中位数）。 |
 | `baseline_pitch_deg` | Double? | 在 `calibration_done` 行：校准后的基线俯仰角，即“低头”的参照。 |
+| `baseline_roll_deg` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：校准得到的个人横滚基线（度）。歪头按 `abs(当前横滚 − 这个值) > 15°` 判定。 |
+| `baseline_head_height` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：头部相对肩线高度的基线（归一化），低头规则的第二路信号。 |
 | `total_seconds` | Double? | 在 `session_ended` 行：检测到人脸的在座时间。 |
 | `good_seconds` | Double? | 在 `session_ended` 行：没有任何体态越阈的时间。 |
 | `near_seconds` | Double? | 在 `session_ended` 行：“太近”越阈的累计时间。 |
@@ -159,7 +164,7 @@ xcrun devicectl device copy from \
 }
 ```
 
-- `value`——本样本对该特征的读数，使用特征自己的单位（厘米、度、米或归一化比例；见 `GLOSSARY.md` 中的 `PostureFeature`）。
+- `value`——本样本对该特征的读数，使用特征自己的单位（厘米、度、米或归一化比例；见 `GLOSSARY.md` 中的 `PostureFeature`）。**v0.6.8 (16) 起，缺测的读数写 `null`**（不再写「阈值的一半」）；界面显示「未测量」，不提醒、也不计入良好占比的分母。
 - `threshold`——本次会话判定该值所用的阈值。
 - `over`——该值是否越阈。
 
@@ -200,6 +205,7 @@ xcrun devicectl device copy from \
 | `pomodoro_tick` | 番茄钟倒计时，阶段运行时**每个样本时钟秒**写一行，因此一次运行是一串递减的行，而不是只有一个开始和一个结束。每个样本一行（10 Hz）会淹没日志；这只用于番茄钟流程，暂停或停驻的阶段不写任何行。 | `remaining_seconds`、`phase`（没有 `t`——从每行都有的 `ts` 读取时刻） |
 | `segment` | 一个专注内的非姿态时间轴段关闭：`detecting`（从孩子点击「开始」到该专注**第一个姿态样本**到达）或 `no_data`（v0.6.1：首样本之后样本流中断，直到下一个样本到达或专注结束）。这段墙钟时间不并入任何姿态段、也不丢弃，关闭时写**一行**且只写这一行，之后不再补写；长度为 0 的段不写行。只有 `detecting` 与 `no_data` 段产生这个事件；`good`、各体态、`no_person` 与 `paused` 段不写。 | `segment_kind`（`detecting` 或 `no_data`）、`segment_start`、`segment_end`、`segment_seconds`（两端都是墙钟毫秒，时刻以 `segment_start` / `segment_end` 为准） |
 | `cue_played` | 番茄钟提示音报告它**开始**播放：专注或休息阶段自然结束时的结束提示音。写在片段真正开始的地方，因此无法加载或无法开始的提示音不写任何行，`EndSound.none` 也完全不写；设置页的试听同样不写，因为那不是计时器的声音。与 `speech_played` 一样，它证明播放器开始了片段，不证明房间里有人听到了。 | `message`（提示音名称）；没有 `t`——播放器没有会话时钟 |
+| `calibration_incomplete` | 校准没有完成（v0.6.8 (16)）：开头 3 秒里有效横滚样本少于 10 个。判定沿用标准直立基线，这一行用 `message` 写原因，绝不把「没校准」写成「校准过了」。 | `message` |
 | `thermal` | 发热降级开始或结束（v0.6.8）：`serious`/`critical` 时 Vision 降到 5 Hz、点云降到 15 Hz，恢复时再写一行结束。降级期间 `thermal_state` 会同时在每行盖上（采样见下文），但只有翻转的那一行带 `thermal_degraded`。 | `thermal_degraded` |
 | `paused` | 无人暂停开始（连续 3 秒没有脸）。 | `t` |
 | `resumed` | 无人暂停结束（人脸重新出现）。 | `t` |

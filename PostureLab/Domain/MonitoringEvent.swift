@@ -3,7 +3,14 @@ import Foundation
 enum MonitoringEvent: Equatable {
   case sessionStarted(scenario: String?)
   case config(sensitivity: Sensitivity, distanceThresholdCM: Double, pitchThresholdDeg: Double)
-  case calibrated(baselineDistanceCM: Double, baselinePitchDeg: Double)
+  /// 静默校准完成：3 秒有效样本的中位数成为个人基线（距离、俯仰、横滚、头高）。
+  case calibrated(baselineDistanceCM: Double,
+                  baselinePitchDeg: Double,
+                  baselineRollDeg: Double,
+                  baselineHeadHeight: Double)
+  /// 校准没有完成（3 秒内有效样本太少）：体态判定沿用标准直立基线，日志里明确写出来，
+  /// 不把「没校准」伪装成「校准过了」。
+  case calibrationIncomplete(reason: String)
   case screenShown(name: String)
   case sample(t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
   case statusChanged(to: PostureStatus, t: TimeInterval, distanceCM: Double?, pitchDeg: Double?)
@@ -45,11 +52,20 @@ enum MonitoringEvent: Equatable {
 
 /// One feature's reading on a `features` line, `{"value": …, "threshold": …, "over": …}`.
 /// It is the wire shape of `FeatureReading`: the baseline is dropped because QA can read it off
-/// the `calibration_done` line.
+/// the `calibration_done` line. `value` is `null` when the reading was never measured.
 struct FeatureLogValue: Codable, Equatable {
-  var value: Double
+  var value: Double?
   var threshold: Double
   var over: Bool
+
+  /// The synthesized encoder drops an absent `Double?` key, but the contract says every key is
+  /// written on every entry: an unmeasured reading is `"value": null`, never a missing key.
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(value, forKey: .value)
+    try container.encode(threshold, forKey: .threshold)
+    try container.encode(over, forKey: .over)
+  }
 }
 
 /// One log line, schema v2. Properties are named after their JSON keys because the wire format is
@@ -74,6 +90,8 @@ struct LogRecord: Codable {
     case pitch_threshold_deg
     case baseline_distance_cm
     case baseline_pitch_deg
+    case baseline_roll_deg
+    case baseline_head_height
     case total_seconds
     case good_seconds
     case near_seconds
@@ -121,6 +139,10 @@ struct LogRecord: Codable {
   var pitch_threshold_deg: Double?
   var baseline_distance_cm: Double?
   var baseline_pitch_deg: Double?
+  /// 校准得到的个人横滚基线（度），`calibration_done` 行才有值。
+  var baseline_roll_deg: Double?
+  /// 校准得到的「头部相对肩线高度」基线（归一化），`calibration_done` 行才有值。
+  var baseline_head_height: Double?
   var total_seconds: Double?
   var good_seconds: Double?
   var near_seconds: Double?
@@ -185,6 +207,8 @@ struct LogRecord: Codable {
     try container.encode(pitch_threshold_deg, forKey: .pitch_threshold_deg)
     try container.encode(baseline_distance_cm, forKey: .baseline_distance_cm)
     try container.encode(baseline_pitch_deg, forKey: .baseline_pitch_deg)
+    try container.encode(baseline_roll_deg, forKey: .baseline_roll_deg)
+    try container.encode(baseline_head_height, forKey: .baseline_head_height)
     try container.encode(total_seconds, forKey: .total_seconds)
     try container.encode(good_seconds, forKey: .good_seconds)
     try container.encode(near_seconds, forKey: .near_seconds)
@@ -241,10 +265,17 @@ extension MonitoringEvent {
       record.distance_threshold_cm = distanceThresholdCM
       record.pitch_threshold_deg = pitchThresholdDeg
 
-    case .calibrated(let baselineDistanceCM, let baselinePitchDeg):
+    case .calibrated(let baselineDistanceCM, let baselinePitchDeg,
+                     let baselineRollDeg, let baselineHeadHeight):
       record.event = "calibration_done"
       record.baseline_distance_cm = baselineDistanceCM
       record.baseline_pitch_deg = baselinePitchDeg
+      record.baseline_roll_deg = baselineRollDeg
+      record.baseline_head_height = baselineHeadHeight
+
+    case .calibrationIncomplete(let reason):
+      record.event = "calibration_incomplete"
+      record.message = reason
 
     case .screenShown(let name):
       record.event = "screen_shown"
@@ -269,7 +300,7 @@ extension MonitoringEvent {
       record.highlighted_feature = highlighted?.rawValue
       var values: [String: FeatureLogValue] = [:]
       for reading in readings {
-        values[reading.feature.rawValue] = FeatureLogValue(value: reading.value,
+        values[reading.feature.rawValue] = FeatureLogValue(value: reading.isMeasured ? reading.value : nil,
                                                           threshold: reading.threshold,
                                                           over: reading.isOverThreshold)
       }

@@ -141,10 +141,19 @@ enum VisionPoseMapping {
     lineDegrees(from: joints[.leftEye], to: joints[.rightEye])
   }
 
+  /// 连线相对水平线的角度，折进 (−90°, 90°]。
+  ///
+  /// 前置摄像头是镜像的（`DepthCaptureSource.orient` 打开 `isVideoMirrored`），左右眼在图像里的 x
+  /// 顺序会反过来：坐直时 `dx < 0`，`atan2(≈0, 负数)` 给出 ±180°。0.6.8 (14/15) 直接把这个数当横滚，
+  /// 于是「实测 174° − 基线 0°」永远超过 15°，人坐得再直也判歪头（r20 诊断：session 里 88/133 行
+  /// 落在 164°–180°）。这里把结果折成与水平线的锐角，180° 归一到 0°，170° 归一到 10°。
   private static func lineDegrees(from left: JointSample?, to right: JointSample?) -> Double? {
     guard let left, let right else { return nil }
     guard hypot(right.x - left.x, right.y - left.y) > 0.01 else { return nil }
-    return atan2(right.y - left.y, right.x - left.x) * 180 / .pi
+    let raw = atan2(right.y - left.y, right.x - left.x) * 180 / .pi
+    if raw > 90 { return 180 - raw }
+    if raw < -90 { return -180 - raw }
+    return raw
   }
 }
 
