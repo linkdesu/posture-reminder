@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-RUNS = ROOT / "tmp" / "verify"
+# 自测可以把证据根指到临时目录，避免污染仓库的 tmp/verify。
+RUNS = Path(os.environ.get("PL_VERIFY_RUNS") or (ROOT / "tmp" / "verify"))
 BUNDLE = "me.xieal.posturelab.depth"
 DEFAULT_SIM = ""  # 模拟器一律用 preflight 冻结的固定模拟器 pl-verify
 DEFAULT_DEVICE = "00008110-001271181AD3801E"
@@ -1500,6 +1501,277 @@ def command_list_cases(args) -> int:
     return 0
 
 
+# --- 真机 device-logs：拷容器里的 Debug 日志并判 068 的五条标准 -------------------------
+
+# Vision 只交付这八个关节（ADR-0008）；任何别的关节名出现在 joints 日志里都是失败。
+DELIVERED_JOINTS = {
+    "nose", "leftEye", "rightEye", "leftEar", "rightEar", "neck",
+    "leftShoulder", "rightShoulder",
+}
+# 068-2 的流畅门槛只按未降级时段判。
+CLOUD_P95_LIMIT_MS = 40.0
+CLOUD_MAX_GAP_MS = 200.0
+CLOUD_POINT_BUDGET = 600
+# 068-1 的双肩可用帧占比下限。
+SHOULDER_RATIO_LIMITS = {"good": 0.80, "head_tilt": 0.50, "head_down": 0.50}
+# 068-3/068-4：10 分钟专注里降级时长不得超过 20%。
+DEGRADED_SHARE_LIMIT = 0.20
+DEFAULT_FOCUS_SECONDS = 600.0
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def read_debug_logs(directory: Path) -> dict:
+    return {
+        "sessions": [load_jsonl(p) for p in sorted(directory.glob("session-*.jsonl"))],
+        "perf": [row for p in sorted(directory.glob("perf-*.jsonl")) for row in load_jsonl(p)],
+        "joints": [row for p in sorted(directory.glob("joints-*.jsonl")) for row in load_jsonl(p)],
+    }
+
+
+def iso_from_millis(value: float) -> str:
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def judge_upper_body_only(joints: list[dict]) -> tuple[bool, str]:
+    if not joints:
+        return False, "没有 joints-*.jsonl（真机跑过 Vision 才会有）"
+    unexpected = set()
+    for row in joints:
+        unexpected |= set((row.get("joints") or {}).keys()) - DELIVERED_JOINTS
+    if unexpected:
+        return False, f"出现不属于上半身八个关节的键：{sorted(unexpected)}"
+    return True, f"{len(joints)} 帧关节，只含鼻/眼/耳/颈/双肩"
+
+
+def judge_shoulders_not_on_head(joints: list[dict]) -> tuple[bool, str]:
+    if not joints:
+        return False, "没有 joints-*.jsonl"
+    bad = sum(1 for row in joints if row.get("shoulders_invalidated") is True)
+    if bad:
+        return False, f"{bad} 帧的双肩落在鼻点以上（要求 0）"
+    return True, f"{len(joints)} 帧里 0 帧肩点在鼻上"
+
+
+def shoulder_windows(sessions: list[list[dict]]) -> list[dict]:
+    """按 status_changed 切出 state 窗口，时刻用 epoch 毫秒，与 joints 日志的 t 同一轴。"""
+    windows: list[dict] = []
+    for rows in sessions:
+        current = None
+        for row in rows:
+            if row.get("event") != "status_changed":
+                continue
+            state = row.get("state")
+            ts = row.get("ts")
+            if not isinstance(ts, (int, float)):
+                continue
+            if current is not None:
+                current["end"] = ts
+                windows.append(current)
+            current = {"state": state, "start": ts, "end": None}
+        if current is not None:
+            current["end"] = max((r.get("ts") or 0) for r in rows) if rows else current["start"]
+            windows.append(current)
+    return windows
+
+
+def judge_shoulder_ratio(joints: list[dict], windows: list[dict]) -> tuple[str, str]:
+    """返回 ("PASS"/"FAIL"/"SKIP", 细节)。任一有窗口的档位不达标即 FAIL；三档都没窗口才 SKIP。"""
+    if not joints:
+        return "FAIL", "没有 joints-*.jsonl，无法判双肩可用帧占比"
+    usable = [row for row in joints if row.get("stale") is not True]
+    if not usable:
+        return "FAIL", "所有关节帧都过期，没有可用证据"
+
+    details: list[str] = []
+    failed = False
+    measured = 0
+    for state, limit in SHOULDER_RATIO_LIMITS.items():
+        spans = [w for w in windows if w.get("state") == state]
+        if not spans:
+            details.append(f"{state}: 本轮没有该状态时段（跳过）")
+            continue
+        in_window = [row for row in usable
+                     if any(w["start"] <= (row.get("t") or 0) <= (w["end"] or w["start"]) for w in spans)]
+        if not in_window:
+            details.append(f"{state}: 窗口内没有关节帧（跳过）")
+            continue
+        measured += 1
+        available = sum(1 for row in in_window if row.get("shoulders_available") is True)
+        ratio = available / len(in_window)
+        ok = ratio >= limit
+        failed = failed or not ok
+        details.append(f"{state}: {ratio:.1%}（{available}/{len(in_window)}，要求 ≥{limit:.0%}）"
+                       + ("" if ok else " ✗"))
+    if measured == 0:
+        return "SKIP", "；".join(details) if details else "没有可判的状态窗口"
+    return ("FAIL" if failed else "PASS"), "；".join(details)
+
+
+def judge_cloud_smooth(perf: list[dict]) -> tuple[bool, str]:
+    if not perf:
+        return False, "没有 perf-*.jsonl（DEBUG 构建且跑过采集才会有）"
+    clean = [row for row in perf
+             if row.get("degraded") is not True
+             and row.get("thermal_state") not in ("serious", "critical")
+             and (row.get("cloud_frames") or 0) > 0]
+    if not clean:
+        return False, "没有未降级的点云时段，无法判流畅"
+    worst_p95 = max(row.get("cloud_gap_p95_ms") or 0 for row in clean)
+    worst_gap = max(row.get("cloud_gap_max_ms") or 0 for row in clean)
+    wrong_points = [row.get("cloud_points") for row in clean if row.get("cloud_points") != CLOUD_POINT_BUDGET]
+    detail = (f"未降级 {len(clean)} 秒里 p95 最差 {worst_p95:.1f} ms（要求 ≤{CLOUD_P95_LIMIT_MS:.0f}）、"
+              f"最长间隔 {worst_gap:.1f} ms（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）")
+    if wrong_points:
+        return False, detail + f"；点数不为 600 的秒数：{len(wrong_points)}"
+    if worst_p95 > CLOUD_P95_LIMIT_MS or worst_gap > CLOUD_MAX_GAP_MS:
+        return False, detail
+    return True, detail
+
+
+def degradation_periods(sessions: list[list[dict]], perf: list[dict]) -> list[dict]:
+    """从 thermal 行配对切出降级时段；没有 thermal 行时用 perf 的 degraded 字段兜底。"""
+    periods: list[dict] = []
+    from_thermal = False
+    for rows in sessions:
+        open_at = None
+        last_ts = None
+        for row in rows:
+            ts = row.get("ts")
+            if isinstance(ts, (int, float)):
+                last_ts = ts
+            if row.get("event") != "thermal":
+                continue
+            from_thermal = True
+            if row.get("thermal_degraded") is True and open_at is None:
+                open_at = ts
+            elif row.get("thermal_degraded") is False and open_at is not None:
+                periods.append({"start": open_at, "end": ts, "seconds": (ts - open_at) / 1000,
+                                "source": "thermal"})
+                open_at = None
+        if open_at is not None:
+            end = last_ts if last_ts is not None and last_ts >= open_at else open_at
+            periods.append({"start": open_at, "end": end, "seconds": (end - open_at) / 1000,
+                            "source": "thermal"})
+    if from_thermal:
+        return periods
+
+    open_at = None
+    for row in perf:
+        ts = row.get("t")
+        if not isinstance(ts, (int, float)):
+            continue
+        if row.get("degraded") is True and open_at is None:
+            open_at = ts
+        elif row.get("degraded") is not True and open_at is not None:
+            periods.append({"start": open_at, "end": ts, "seconds": (ts - open_at) / 1000,
+                            "source": "perf"})
+            open_at = None
+    if open_at is not None and perf:
+        end = max((r.get("t") or 0) for r in perf)
+        periods.append({"start": open_at, "end": end, "seconds": max(0, (end - open_at) / 1000),
+                        "source": "perf"})
+    for period in periods:
+        period["startText"] = iso_from_millis(period["start"])
+    return periods
+
+
+def judge_degradation(periods: list[dict], perf: list[dict], focus_seconds: float) -> tuple[bool, str]:
+    total = sum(p["seconds"] for p in periods)
+    share = total / focus_seconds if focus_seconds > 0 else 0
+    detail = (f"降级 {len(periods)} 段、合计 {total:.1f} s，占计划专注 {focus_seconds:.0f} s 的 "
+              f"{share:.1%}（上限 {DEGRADED_SHARE_LIMIT:.0%}）")
+    if total > 0:
+        listing = "；".join(f"{iso_from_millis(p['start'])} 起 {p['seconds']:.1f} s"
+                           f"（{p['source']}）" for p in periods)
+        detail += f"。时段：{listing}"
+    if perf and not periods and any(r.get("degraded") is True for r in perf):
+        return False, detail + "；但 perf 的 degraded 字段显示降级过——两处证据矛盾"
+    return (share <= DEGRADED_SHARE_LIMIT), detail
+
+
+def pull_device_debug(run_id: str, device: str) -> Path:
+    target = run_dir(run_id) / "device" / "Documents"
+    dest = target / "debug"
+    target.mkdir(parents=True, exist_ok=True)
+    r = sh(["xcrun", "devicectl", "device", "copy", "from",
+            "--device", device,
+            "--domain-type", "appDataContainer",
+            "--domain-identifier", BUNDLE,
+            "--source", "Documents/debug",
+            "--destination", str(dest)], check=False)
+    if r.returncode != 0:
+        print(r.stdout + r.stderr)
+        sys.exit(f"devicectl 拷贝失败（{r.returncode}）：设备未连接/未解锁？不作修补，如实记录")
+    return dest
+
+
+def command_device_logs(args) -> int:
+    run_id = resolve_run(args.run)
+    state = read_state(run_id) if state_file(run_id).exists() else {"runId": run_id}
+    device = args.device or state.get("deviceId") or DEFAULT_DEVICE
+    directory = Path(args.dir) if args.dir else pull_device_debug(run_id, device)
+    out = run_dir(run_id) / "device"
+    out.mkdir(parents=True, exist_ok=True)
+
+    logs = read_debug_logs(directory)
+    if not logs["sessions"] and not logs["perf"] and not logs["joints"]:
+        sys.exit(f"{directory} 里没有任何 session-/perf-/joints-*.jsonl；真机没跑过或调试模式没开")
+    ok_upper, detail_upper = judge_upper_body_only(logs["joints"])
+    ok_head, detail_head = judge_shoulders_not_on_head(logs["joints"])
+    ratio_status, detail_ratio = judge_shoulder_ratio(logs["joints"], shoulder_windows(logs["sessions"]))
+    ok_cloud, detail_cloud = judge_cloud_smooth(logs["perf"])
+    periods = degradation_periods(logs["sessions"], logs["perf"])
+    ok_thermal, detail_thermal = judge_degradation(periods, logs["perf"], args.focus_seconds)
+
+    checks = {
+        "upper-body-only": (ok_upper, detail_upper),
+        "shoulders-not-on-head": (ok_head, detail_head),
+        "shoulders-available-ratio": (ratio_status, detail_ratio),
+        "cloud-smooth": (ok_cloud, detail_cloud),
+        "degradation": (ok_thermal, detail_thermal),
+    }
+    def label_of(value) -> str:
+        # 判定值可能是 bool，也可能是 "PASS"/"SKIP"（双肩占比那条要区分「没证据」与「不达标」）。
+        if value is True or value == "PASS":
+            return "PASS"
+        return "SKIP" if value == "SKIP" else "FAIL"
+
+    verdict = {"when": now(), "runId": run_id, "device": device, "sourceDir": str(directory),
+               "focusSeconds": args.focus_seconds,
+               "degradationPeriods": periods,
+               "checks": {name: {"status": label_of(value), "detail": detail}
+                          for name, (value, detail) in checks.items()}}
+    failed = []
+    for name, (value, detail) in checks.items():
+        label = label_of(value)
+        print(f"{label} {name}: {detail}")
+        if label == "FAIL":
+            failed.append(name)
+        check(state, f"device-logs:{name}", label != "FAIL", detail)
+    verdict["ok"] = not failed
+    write_json(out / "verdict.json", verdict)
+    write_state(run_id, state)
+    print(f"\n结论：{'PASS' if not failed else 'FAIL'}"
+          + ("" if not failed else f"（{', '.join(failed)}）")
+          + f"；证据 {out / 'verdict.json'}")
+    # 模拟器测不到的项单列，提醒读者这三条只能真机验。
+    print("模拟器测不到的项：关节准确率（双肩可用帧占比、肩点在鼻上）、点云更新间隔、发热降级时长、"
+          "耗电、真实彩色帧隐私")
+    return 0 if not failed else 1
+
+
 # --- PNG 像素统计（点云占屏比例、叠加层区域；r16.py 沉淀） --------------------
 
 def decode_png(path: Path):
@@ -1652,6 +1924,12 @@ def main() -> int:
     pn = sub.add_parser("png", help="截图像素统计（点云包围盒、占屏比例）")
     pn.add_argument("files", nargs="+")
     pn.add_argument("--json")
+    dl = sub.add_parser("device-logs", help="拷真机 Documents/debug 并判 0.6.8 的五条标准")
+    dl.add_argument("--run", default=None)
+    dl.add_argument("--device", default=None, help=f"UDID，默认 {DEFAULT_DEVICE}")
+    dl.add_argument("--dir", default=None, help="已拷贝好的 debug 目录（跳过 devicectl）")
+    dl.add_argument("--focus-seconds", type=float, default=DEFAULT_FOCUS_SECONDS,
+                    help="计划专注秒数，判降级占比用；默认 600")
     asc = sub.add_parser("ascii", help="截图的 ASCII 密度图")
     asc.add_argument("files", nargs="+")
     asc.add_argument("--cols", type=int, default=60)
@@ -1669,6 +1947,7 @@ def main() -> int:
         "down": command_down,
         "case": command_case,
         "list-cases": command_list_cases,
+        "device-logs": command_device_logs,
         "png": command_png,
         "ascii": command_ascii,
     }[args.command](args)

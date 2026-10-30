@@ -1,6 +1,6 @@
 ---
 name: verify-posture-lab
-description: 驱动 PostureLab iOS 模拟器或 iPhone 13 真机，端到端验证番茄钟、8 种体态监测、预录 WAV 语音提醒、设置页、统计页、离线与沙盒隐私边界及 42-key JSONL 日志契约，并采集可复查证据。
+description: 驱动 PostureLab iOS 模拟器或 iPhone 13 真机，端到端验证番茄钟、8 种体态监测、预录 WAV 语音提醒、设置页、统计页、离线与沙盒隐私边界及 43-key JSONL 日志契约（含真机 device-logs 判定），并采集可复查证据。
 ---
 
 # PostureLab 验证技能
@@ -73,7 +73,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
   --device 00008110-001271181AD3801E /tmp/pl-verify-device/Build/Products/Debug-iphoneos/PostureLab.app
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device process launch \
-  --terminate-existing --device 00008110-001271181AD3801E me.xieal.posturelab
+  --terminate-existing --device 00008110-001271181AD3801E me.xieal.posturelab.depth
 ```
 
 真机拉取沙盒：
@@ -81,7 +81,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device copy from \
   --device 00008110-001271181AD3801E --domain-type appDataContainer \
-  --domain-identifier me.xieal.posturelab --source Documents \
+  --domain-identifier me.xieal.posturelab.depth --source Documents \
   --destination tmp/verify/<run-id>/device
 ```
 
@@ -176,9 +176,50 @@ tmp/verify/<run-id>/
 
 - 驱动真实用户路径（启动参数、真实控件、真实杀进程重启），不用内部 setter 或测试后门。
 - 同时保留动作与结果：截图、JSONL、历史文件、审计 JSON，而不是只看最终屏幕。
-- 逐行校验 42-key JSONL 契约（v0.6 起含事件 `segment`：识别中段关闭时一行，该行只有 `segment_*` 四个键非 `null`）；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
+- 逐行校验 43-key JSONL 契约（v0.6 起含事件 `segment`：识别中段关闭时一行，该行只有 `segment_*` 四个键非 `null`；v0.6.8 起含事件 `thermal`：降级起止各一行，只有 `thermal_degraded` 非 `null`）；用 `scripts/verify-session.py`、`scripts/verify-pomodoro.py`、`scripts/verify-acceptance.py` 复算，不信任应用自报。
 - 隐私用 `scripts/audit-offline.py`（源码）与 `scripts/audit-sandbox.py`（运行时容器）双重审计。
 - 如果当前实现与 `GLOSSARY.md` / ADR-0001..0005 的已确认规则不一致（Q1 默认启动页、Q2 `pausedSeconds` 对账、Q3 静默校准、Q4 点云/实验级提醒），如实报失败并写入对应特性的 `Gotchas`；不要弱化断言来换取通过。
+
+## 真机日志判定（`device-logs`）
+
+0.6.8 起关节来自前置摄像头 Vision，模拟器没有前置彩色摄像头，所以关节准确率、点云帧间隔、发热
+降级、耗电与真实彩色帧的隐私只能真机验。`device-logs` 负责这一段取证与判定：
+
+```sh
+# 拷真机 Documents/debug 并判五条标准（设备 UDID 默认 00008110-001271181AD3801E）
+.omp/skills/verify-posture-lab/scripts/verify.py device-logs --run <run-id> [--focus-seconds 600]
+
+# 已经拷好时直接判本地目录，不连真机
+.omp/skills/verify-posture-lab/scripts/verify.py device-logs --run <run-id> --dir tmp/verify/<run-id>/device/Documents/debug
+```
+
+它把 `Documents/debug` 拷到 `tmp/verify/<run-id>/device/Documents/debug`，读 `session-*.jsonl`、
+`perf-*.jsonl`、`joints-*.jsonl`，按 0.6.8 的验收口径逐条打印 `PASS`/`FAIL`/`SKIP` 并写
+`device/verdict.json`：
+
+| 判定 | 依据 | 门槛 |
+|---|---|---|
+| `upper-body-only` | `joints-*.jsonl` 的 `joints` 键集合 | ⊆ 鼻/双眼/双耳/颈/双肩；出现髋、root、肘、腕即 FAIL |
+| `shoulders-not-on-head` | `shoulders_invalidated` | 帧数 = 0 |
+| `shoulders-available-ratio` | 未过期关节帧按 `status_changed` 窗口分组 | 坐直 ≥ 80%，歪头 ≥ 50%，低头 ≥ 50%；窗口内无证据记 SKIP |
+| `cloud-smooth` | 未降级秒的 `cloud_gap_p95_ms` / `cloud_gap_max_ms` / `cloud_points` | p95 ≤ 40 ms、最长 ≤ 200 ms、点数 = 600 |
+| `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
+
+自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`。
+
+## 验收结论模板
+
+一轮验收的结论按这几节写，最后一节必须单独列「模拟器测不到的项」：
+
+1. 版本与产物：版本号、build 号、二进制哈希、冻结 SHA。
+2. 模拟器证据：`verification.json` 的逐项结果、沙盒审计、离线与彩色帧边界审计。
+3. 真机证据：`device-logs` 五条判定与 `verdict.json`。
+4. **模拟器测不到的项**（只能真机验，模拟器上没有对应硬件，缺这一节等于结论不完整）：
+   - 关节准确率：双肩可用帧占比（坐直 ≥ 80%、歪头与低头各 ≥ 50%）、「肩点落在头上」的帧数（必须为 0）；
+   - 点云更新间隔：未降级时 p95 ≤ 40 ms、最长间隔 ≤ 200 ms；
+   - 发热降级：10 分钟专注里降级时长与占比（> 20% 判失败）、`thermal` 行是否成对；
+   - 耗电：`perf-*.jsonl` 的 `battery_level` 首末差；
+   - 真实彩色帧的隐私：单帧缓冲、无预览、无图片/视频文件、无联网（模拟器没有前置彩色摄像头，只能靠静态审计 + 真机沙盒审计）。
 
 ## Cleanup
 
