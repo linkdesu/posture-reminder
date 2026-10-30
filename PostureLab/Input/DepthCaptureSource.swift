@@ -25,6 +25,11 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private var cloudStabilizer = CloudStabilizer()
   /// 横滚基线的静默校准（前 3 秒的 Vision 眼线/耳线中位数）。
   private var rollCalibrator = RollCalibrator()
+  /// 在场判定的连续帧计数：头部（鼻）置信度过门槛、且同时有人脸（鼻）或双眼，连续
+  /// `presenceStreakRequired` 帧才算在场；任何一帧不满足就归零。0.6.8 (17)：Vision 在近距离会整帧
+  /// 不给 observation，单帧丢失不再直接当作「人不在」。
+  private var presenceStreak = 0
+  private static let presenceStreakRequired = 3
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
   private let videoOutput = AVCaptureVideoDataOutput()
@@ -246,14 +251,21 @@ final class DepthCaptureSource: NSObject, SampleSource {
     return history[index]
   }
 
-  /// 这一时刻的在场结论：Vision 最近一帧没有过期时用它的 `detected`，过期了就不下结论（nil，
-  /// 由样本的距离回退）。
+  /// 这一帧 Vision 是否给出了「有一个人」的可靠证据：头部（鼻）置信度过门槛，并且鼻或双眼在。
+  /// 只靠 `detected` 会把「模型报了人但所有关节都被门槛滤掉」也算在场；只靠鼻子又会在侧脸时抖。
+  static func headEvidence(_ joints: [JointID: JointSample]) -> Bool {
+    guard joints[.nose] != nil else { return false }
+    return joints[.nose] != nil || (joints[.leftEye] != nil && joints[.rightEye] != nil)
+  }
+
+  /// 这一时刻的在场结论：Vision 最近一帧没有过期、且连续 `presenceStreakRequired` 帧都有头部证据。
+  /// 过期时不下结论（nil，由样本的距离回退）。
   private func personPresent(at t: TimeInterval) -> Bool? {
     stateLock.lock()
     defer { stateLock.unlock() }
     guard let frame = latestJoints,
           !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return nil }
-    return frame.detected
+    return presenceStreak >= Self.presenceStreakRequired
   }
 
   /// 这一时刻还能用的关节：最近一次配对结果没有过期，且双肩没有因为落在头上被作废。
@@ -479,6 +491,11 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
                                   inferenceSeconds: frame.inferenceSeconds)
     stateLock.lock()
     latestJoints = paired
+    if Self.headEvidence(paired.joints) {
+      presenceStreak = min(Self.presenceStreakRequired, presenceStreak + 1)
+    } else {
+      presenceStreak = 0
+    }
     stateLock.unlock()
 
     #if DEBUG
