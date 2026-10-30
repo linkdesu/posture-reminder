@@ -17,6 +17,7 @@ final class DebugLogLineTests: XCTestCase {
                         segment: (Int, TimeInterval, TimeInterval) = (30, 0.6, 0.03),
                         cloud: (Int, TimeInterval, TimeInterval) = (30, 0.3, 0.02),
                         cloudPoints: Int = 600,
+                        cloudGaps: (TimeInterval, TimeInterval) = (0.033, 0.05),
                         vision: (Int, TimeInterval, TimeInterval) = (10, 0.2, 0.03),
                         assess: (Int, TimeInterval, TimeInterval) = (10, 0.05, 0.01),
                         degraded: Bool = false) -> String {
@@ -29,6 +30,7 @@ final class DebugLogLineTests: XCTestCase {
                      cloud: cloud,
                      cloudFrames: cloud.0,
                      cloudPoints: cloudPoints,
+                     cloudGaps: cloudGaps,
                      vision: vision,
                      assess: assess,
                      thermalState: "nominal",
@@ -52,6 +54,8 @@ final class DebugLogLineTests: XCTestCase {
     XCTAssertEqual(values["capture_ms_max"] as? Double ?? 0, 50, accuracy: 0.01)
     XCTAssertEqual(values["vision_ms_max"] as? Double ?? 0, 30, accuracy: 0.01)
     XCTAssertEqual(values["cloud_points"] as? Int, 600)
+    XCTAssertEqual(values["cloud_gap_p95_ms"] as? Double ?? 0, 33, accuracy: 0.01)
+    XCTAssertEqual(values["cloud_gap_max_ms"] as? Double ?? 0, 50, accuracy: 0.01)
     XCTAssertEqual(values["cloud_frames"] as? Int, 30)
     XCTAssertEqual(values["vision_calls"] as? Int, 10)
     XCTAssertEqual(values["assess_count"] as? Int, 10)

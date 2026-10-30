@@ -318,6 +318,63 @@ final class PostureClassifierTests: XCTestCase {
     XCTAssertFalse(reading(miss, .slouch).isOverThreshold)
   }
 
+  // MARK: - v0.6.8 判定迁移
+
+  /// 缺肩：双肩都不在时，依赖肩线的两种体态一律缺测、不越阈（宁可漏报，不可误报）。
+  func testWithoutShouldersTheShoulderKindsStayQuiet() {
+    var sample = rigged(.shoulderTilt)
+    sample.joints[.leftShoulder] = nil
+    sample.joints[.rightShoulder] = nil
+    sample.unavailableJoints.insert(.leftShoulder)
+    sample.unavailableJoints.insert(.rightShoulder)
+
+    let assessment = assess(sample)
+    XCTAssertFalse(sample.hasShoulderLine)
+    XCTAssertEqual(assessment.breached[.shoulderTilt], false)
+    XCTAssertEqual(assessment.breached[.slouch], false)
+    XCTAssertFalse(reading(assessment, .shoulderTilt).isOverThreshold)
+    XCTAssertFalse(reading(assessment, .slouch).isOverThreshold)
+    XCTAssertEqual(reading(assessment, .shoulderTilt).severity, 0, accuracy: 0.0001)
+  }
+
+  /// 过期关节：整帧关节作废（一个关节都没有）时，歪头退回深度平面的横滚，肩线体态安静。
+  func testExpiredJointsLeaveOnlyTheDepthRoll() {
+    var sample = rigged(.headTilt, rollDeg: 30)
+    sample.joints = [:]
+    sample.unavailableJoints = Set(JointID.allCases)
+
+    let assessment = assess(sample)
+    XCTAssertEqual(assessment.breached[.headTilt], true, "the depth plane still measures roll")
+    XCTAssertEqual(reading(assessment, .headRoll).value, 30, accuracy: 0.0001)
+    XCTAssertEqual(assessment.breached[.shoulderTilt], false)
+    XCTAssertEqual(assessment.breached[.slouch], false)
+  }
+
+  /// 低头要两路信号：俯仰越阈、头没有比基线更高。头明显抬高时，俯仰读数不再算低头。
+  func testHeadDownIsVetoedWhenTheHeadSitsHigherThanBaseline() {
+    var raised = rigged(.upright, pitchDeg: -30)
+    raised.joints[.nose] = JointSample(x: 0.5,
+                                       y: uprightBaseline.headHeight - 0.1,
+                                       depthM: 0.35,
+                                       confidence: 0.9)
+
+    let assessment = assess(raised)
+    XCTAssertLessThan(reading(assessment, .headHeightDrop).value, 0)
+    XCTAssertTrue(reading(assessment, .headPitch).isOverThreshold)
+    XCTAssertEqual(assessment.breached[.headDown], false)
+  }
+
+  /// 托腮不做：0.6.8 的关节来源不给出腕关节，`hand_to_face` 缺测，托腮永不越阈。
+  func testChinRestCannotFireWithoutWristJoints() {
+    var sample = rigged(.chinRest)
+    sample.joints[.leftWrist] = nil
+    sample.joints[.rightWrist] = nil
+
+    let assessment = assess(sample)
+    XCTAssertFalse(reading(assessment, .handToFace).isOverThreshold)
+    XCTAssertEqual(assessment.breached[.chinRest], false)
+  }
+
   /// A feature that cannot be computed is never over threshold, and reports half its threshold so
   /// the overlay still has a bar to draw.
   func testUncomputableFeaturesAreNeverOverThreshold() {

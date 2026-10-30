@@ -64,13 +64,21 @@ enum PostureClassifier {
 
     var breached: [PostureKind: Bool] = [:]
     breached[.near] = over(.distance)
-    breached[.headDown] = over(.headPitch)
+    // 低头 = 深度平面的俯仰越阈 + 头高没有升高（v0.6.8）。俯仰本身来自同一帧深度；头高是第二路
+    // 信号，用来否掉「下巴上抬却被读成低头」的误判。头高缺测时它不否决——缺测不等于没低头，而
+    // 俯仰已经量到了。
+    let headRaised = (byFeature[.headHeightDrop]?.value ?? 0) < 0
+    breached[.headDown] = over(.headPitch) && !headRaised
+    // 歪头的横滚已在采集侧按 眼线 → 耳线 → 深度平面 选好（`VisionPoseMapping.rollDegrees`），
+    // 这里只读结果：三个来源都没有时 rollDeg 为 nil，这一行自然缺测。
     breached[.headTilt] = over(.headRoll)
     breached[.shoulderTilt] = shoulderLine && over(.shoulderTilt)
     // `bodyPresent` gates the whole rule and not just the face-lost branch: without it a child who got
     // up and walked away would be read as leaning on the desk.
     let deepDip = pitchDrop.map { $0 > 2 * thresholds.pitchDeg } ?? false
     breached[.deskLean] = bodyPresent && over(.headHeightDrop) && (deepDip || !sample.facePresent)
+    // 托腮不做（ADR-0008 第 7 条）：本轮的关节来源不给出腕关节，`hand_to_face` 永远缺测，这个
+    // 体态永远不会越阈。枚举与日志词表保留给历史记录与脚本 rig 的回归用例。
     breached[.chinRest] = over(.handToFace)
     breached[.headForward] = over(.headForward)
     breached[.slouch] = shoulderLine && over(.slouch)

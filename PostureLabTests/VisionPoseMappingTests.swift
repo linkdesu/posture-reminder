@@ -107,6 +107,45 @@ final class VisionPoseMappingTests: XCTestCase {
     XCTAssertNil(offBody[.nose]?.depthM)
   }
 
+  // MARK: - 横滚的三个来源
+
+  func testRollPrefersTheEyeLine() throws {
+    let joints: [JointID: JointSample] = [
+      .leftEye: JointSample(x: 0.4, y: 0.30, depthM: nil, confidence: 0.9),
+      .rightEye: JointSample(x: 0.6, y: 0.30, depthM: nil, confidence: 0.9),
+      .leftEar: JointSample(x: 0.35, y: 0.32, depthM: nil, confidence: 0.9),
+      .rightEar: JointSample(x: 0.65, y: 0.50, depthM: nil, confidence: 0.9),
+    ]
+    let roll = try XCTUnwrap(VisionPoseMapping.rollDegrees(joints, fallback: 42))
+    XCTAssertEqual(roll, 0, accuracy: 0.0001, "a level eye line wins over a tilted ear line")
+  }
+
+  func testRollFallsBackToTheEarLineWhenTheEyesAreMissing() throws {
+    let joints: [JointID: JointSample] = [
+      .leftEar: JointSample(x: 0.35, y: 0.30, depthM: nil, confidence: 0.9),
+      .rightEar: JointSample(x: 0.65, y: 0.30, depthM: nil, confidence: 0.9),
+    ]
+    let roll = try XCTUnwrap(VisionPoseMapping.rollDegrees(joints, fallback: 42))
+    XCTAssertEqual(roll, 0, accuracy: 0.0001)
+  }
+
+  func testRollFallsBackToTheDepthPlaneWhenNoFaceLineIsMeasured() throws {
+    // 关节过期或一个都没测到：只剩深度平面。
+    XCTAssertEqual(try XCTUnwrap(VisionPoseMapping.rollDegrees([:], fallback: -7)), -7, accuracy: 0.0001)
+    XCTAssertNil(VisionPoseMapping.rollDegrees([:], fallback: nil))
+  }
+
+  func testADegenerateEyeLineStillFallsBack() throws {
+    // 两眼落在同一点（模型抖动）时不能用它算角度。
+    let joints: [JointID: JointSample] = [
+      .leftEye: JointSample(x: 0.5, y: 0.3, depthM: nil, confidence: 0.9),
+      .rightEye: JointSample(x: 0.5, y: 0.3, depthM: nil, confidence: 0.9),
+      .leftEar: JointSample(x: 0.35, y: 0.30, depthM: nil, confidence: 0.9),
+      .rightEar: JointSample(x: 0.65, y: 0.30, depthM: nil, confidence: 0.9),
+    ]
+    XCTAssertEqual(try XCTUnwrap(VisionPoseMapping.rollDegrees(joints, fallback: 42)), 0, accuracy: 0.0001)
+  }
+
   // MARK: - 配对窗口
 
   func testTheNearestDepthFrameWins() {

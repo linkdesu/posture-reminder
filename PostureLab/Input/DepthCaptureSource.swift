@@ -221,9 +221,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
                                distanceCM: head.distanceCM,
                                pitchDeg: head.pitchDeg,
                                // 眼线 → 耳线 → 深度平面：彩色给的横滚比深度平面准。
-                               rollDeg: VisionPoseMapping.eyeLineDegrees(joints)
-                                 ?? VisionPoseMapping.earLineDegrees(joints)
-                                 ?? head.rollDeg,
+                               rollDeg: VisionPoseMapping.rollDegrees(joints, fallback: head.rollDeg),
                                joints: joints,
                                depth: observation?.mask == nil ? nil : observation?.image.downsampled(),
                                depthAvailable: observation?.mask != nil,
@@ -274,6 +272,9 @@ final class DepthCaptureSource: NSObject, SampleSource {
     // 点云按负载上限推给画布（正常 30 Hz，降级 15 Hz），不等 10 Hz 的样本节流。
     if t - lastCloudAt >= cloudInterval {
       lastCloudAt = t
+      #if DEBUG
+      PerfMonitor.shared.recordCloudFrame(at: t)
+      #endif
       DispatchQueue.main.async { [weak self] in
         self?.onCloud?(CloudFrame(t: t, points: cloud))
       }

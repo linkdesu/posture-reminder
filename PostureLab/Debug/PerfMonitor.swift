@@ -20,6 +20,8 @@ import Foundation
 /// - `vision_ms_avg` / `vision_ms_max`：一次 Vision 推理 + 关节映射
 /// - `assess_ms_avg` / `assess_ms_max`：一次姿态判定
 /// - `cloud_frames` / `cloud_points`：该秒内发出的点云帧数，以及最后一帧的点数（应恒为 600）
+/// - `cloud_gap_p95_ms` / `cloud_gap_max_ms`：该秒内相邻两帧点云更新间隔的 p95 与最大值；
+///   068-2 的流畅门槛（未降级时 p95 ≤ 40 ms、最大 ≤ 200 ms）就按这两个键判
 /// - `vision_calls` / `assess_count`：该秒内的推理次数与判定次数
 /// - `thermal_state`：`nominal` / `fair` / `serious` / `critical`
 /// - `battery_level`：0...1，设备不报告时为 null
@@ -53,6 +55,8 @@ final class PerfMonitor {
   private var cloudCalls = 0
   private var cloudFrames = 0
   private var cloudPoints = 0
+  private var cloudGaps: [TimeInterval] = []
+  private var lastCloudFrameAt: TimeInterval?
 
   private var visionTotal: TimeInterval = 0
   private var visionMax: TimeInterval = 0
@@ -130,6 +134,16 @@ final class PerfMonitor {
     lock.unlock()
   }
 
+  /// 一次点云帧发出（30 Hz，降级 15 Hz）。相邻两帧的间隔是 068-2 的流畅证据。
+  func recordCloudFrame(at now: TimeInterval) {
+    lock.lock()
+    if let last = lastCloudFrameAt {
+      cloudGaps.append(now - last)
+    }
+    lastCloudFrameAt = now
+    lock.unlock()
+  }
+
   /// 一次点云取样，以及它产出的点数。
   func recordCloud(seconds: TimeInterval, points: Int) {
     lock.lock()
@@ -173,6 +187,8 @@ final class PerfMonitor {
     let now = ProcessInfo.processInfo.systemUptime
     lock.lock()
     let window = max(0.001, now - windowStart)
+    let gaps = cloudGaps.sorted()
+    let p95 = gaps.isEmpty ? 0 : gaps[min(gaps.count - 1, Int((0.95 * Double(gaps.count - 1)).rounded()))]
     let line = Self.line(window: window,
                          frames: frames,
                          gap: maxFrameGap,
@@ -182,6 +198,7 @@ final class PerfMonitor {
                          cloud: (cloudCalls, cloudTotal, cloudMax),
                          cloudFrames: cloudFrames,
                          cloudPoints: cloudPoints,
+                         cloudGaps: (p95, gaps.last ?? 0),
                          vision: (visionCalls, visionTotal, visionMax),
                          assess: (assessments, assessTotal, assessMax),
                          thermalState: thermalState,
@@ -203,6 +220,8 @@ final class PerfMonitor {
     cloudTotal = 0
     cloudMax = 0
     cloudFrames = 0
+    cloudGaps = []
+    lastCloudFrameAt = nil
     visionCalls = 0
     visionTotal = 0
     visionMax = 0
@@ -225,6 +244,7 @@ final class PerfMonitor {
                    cloud: (Int, TimeInterval, TimeInterval),
                    cloudFrames: Int,
                    cloudPoints: Int,
+                   cloudGaps: (TimeInterval, TimeInterval) = (0, 0),
                    vision: (Int, TimeInterval, TimeInterval),
                    assess: (Int, TimeInterval, TimeInterval),
                    thermalState: String = "nominal",
@@ -261,6 +281,8 @@ final class PerfMonitor {
       + ",\"assess_ms_max\":\(milliseconds(assess.2))"
       + ",\"cloud_frames\":\(cloudFrames)"
       + ",\"cloud_points\":\(cloudPoints)"
+      + ",\"cloud_gap_p95_ms\":\(milliseconds(cloudGaps.0))"
+      + ",\"cloud_gap_max_ms\":\(milliseconds(cloudGaps.1))"
       + ",\"vision_calls\":\(vision.0)"
       + ",\"assess_count\":\(assess.0)"
       + ",\"thermal_state\":\"\(thermalState)\""
