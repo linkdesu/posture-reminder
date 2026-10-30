@@ -23,6 +23,10 @@ enum PomodoroEvent: Equatable {
   /// the next focus waits for a `.start`.
   case interrupted(PomodoroRecord)
   case breakSkipped(from: PomodoroPhase)
+  /// A break ran out on its own. A focus that runs out is `.completed` (it also closes a record);
+  /// this is its counterpart for the phase that has no record, reported before the next focus
+  /// starts, so the surface can ring the same end-of-phase sound for both.
+  case phaseEnded(PomodoroPhase)
   /// The session is over; the UI can wind down.
   case finishedAll
 }
@@ -45,6 +49,10 @@ struct PomodoroEngine {
   private static let completionTolerance: Double = 1e-9
   /// B5: an absence longer than this inside one running focus ends that focus as interrupted.
   private static let absenceLimit: Double = 300
+  /// GLOSSARY「无人」: a face that is gone for less than this is a lost frame, not an absence, so the
+  /// countdown keeps running and nothing is credited to a pause. The same three seconds
+  /// `MonitoringEngine` waits before it calls the child away.
+  private static let absencePauseDelay: TimeInterval = 3
 
   private var settings: PomodoroSettings
   /// Unix epoch seconds. The one clock of the engine: commands, samples and the controller's timer
@@ -75,10 +83,14 @@ struct PomodoroEngine {
   private var anchorT: TimeInterval?
   /// The remaining value at `anchorT`.
   private var remainingAtAnchor: Double
-  /// When the absence freezing a running focus began (B1): the sample time the clock last accounted
-  /// for, which is the last sample that reported a face. Non-nil only while that focus is
-  /// suspended; the interval it covers is absence, never focus time.
+  /// When the absence freezing a running focus began (B1): the instant the absence passed
+  /// `absencePauseDelay` and the countdown stopped. Non-nil only while that focus is suspended; the
+  /// interval it covers is absence, never focus time.
   private var absentSince: TimeInterval?
+  /// The first sample of the current run of no-face samples. It is what `absentSince` is decided
+  /// from: the pause only begins once this instant is `absencePauseDelay` behind - the grace the
+  /// domain spec gives a lost frame - and it is where the 300-second B5 limit is measured from.
+  private var absenceStart: TimeInterval?
   /// The presence the last sample reported; nil before the first sample, when the stream has said
   /// nothing yet. Remembered so a command that (re)starts a countdown can honour B1 without a
   /// sample of its own.
@@ -132,9 +144,11 @@ struct PomodoroEngine {
     facePresent = sample.facePresent
 
     var events: [PomodoroEvent]
-    if let since = absentSince, t - since > Self.absenceLimit {
+    if let since = absenceStart, t - since > Self.absenceLimit {
       // B5: the absence has outlived the limit, so this sample ends the focus rather than feeding
       // it. Checked first, and only while a focus is running, which is the whole scope of the rule.
+      // Measured from the first missing face, not from the pause: the grace and the pause are one
+      // absence, and the child was away for all of it.
       events = interruptFocus(at: t)
     } else {
       applyPresence(at: t)
@@ -176,6 +190,7 @@ struct PomodoroEngine {
       // A manual pause freezes the clock on its own, so the absence measurement ends with it: it
       // resumes from wherever the face stands when the focus is started again.
       absentSince = nil
+      absenceStart = nil
       return []
     case .resume:
       // Nothing to resume while a break is waiting for a focus to be started again: only a focus in
@@ -214,6 +229,7 @@ struct PomodoroEngine {
     isRunning = false
     anchorT = nil
     absentSince = nil
+    absenceStart = nil
     remainingAtAnchor = remainingSeconds
     lastSampleT = t
     events.append(.finishedAll)
@@ -281,7 +297,11 @@ struct PomodoroEngine {
       case .focus:
         return completeFocus(at: t)
       case .shortBreak, .longBreak:
-        return enterNextFocus(at: t)
+        // A break that ran out is a phase that ended by itself, exactly like a focus: the surface
+        // owes the child its end sound (GLOSSARY「阶段提示音」). Reported before the next focus so the
+        // two arrive in the order they happened.
+        let ended = phase
+        return [.phaseEnded(ended)] + enterNextFocus(at: t)
       }
     }
     return []
@@ -304,10 +324,15 @@ struct PomodoroEngine {
 
   /// B1: a running focus only burns time while a face is in frame.
   ///
-  /// The absence is dated from the clock's anchor — the last sample time the countdown accounted
-  /// for — so an interval the stream never confirmed as present is never credited as focus: the
-  /// countdown freezes where it stood, and the sample that brings the face back re-anchors it there.
-  /// The child carries on with exactly the time that was left.
+  /// The absence is dated from the first sample that reports the face gone, and it only stops the
+  /// countdown once it has lasted `absencePauseDelay`: a face lost for a frame or two is a camera
+  /// miss, not a child who got up, and pausing on it would freeze the timer - and credit a pause -
+  /// every time Vision dropped a frame. That is the same three seconds the domain spec calls「无人」.
+  /// The grace itself stays focus time: the countdown is still running through it.
+  ///
+  /// The pause therefore begins at the sample that crosses the delay, and it is dated there; the
+  /// countdown is re-anchored so the remaining value is the one the clock had at that instant rather
+  /// than the one a tick earlier.
   private mutating func applyPresence(at t: TimeInterval) {
     guard isRunning, phase == .focus, focusOpen else { return }
 
@@ -315,17 +340,27 @@ struct PomodoroEngine {
       // Still away: the clock stays frozen.
       guard facePresent == true else { return }
       absentSince = nil
+      absenceStart = nil
       anchorT = t
       return
     }
 
-    guard facePresent == false else { return }
-    // Dated from the sample that reports the face gone. Anchoring it on `anchorT`/`lastSampleT`
-    // read as 0 whenever neither had been set yet, which made the B5 check compare the whole
-    // session clock against a zero start and interrupt on the very first absent sample.
-    absentSince = t
+    guard facePresent == false else {
+      // The face is back before the grace ran out, so there was never an absence.
+      absenceStart = nil
+      return
+    }
+
+    if absenceStart == nil { absenceStart = t }
+    guard let start = absenceStart, t - start >= Self.absencePauseDelay else { return }
+
+    // The grace is over: freeze the countdown where it stands right now and start the pause.
+    if let anchor = anchorT {
+      remainingSeconds = max(0, remainingAtAnchor - (t - anchor))
+    }
     remainingAtAnchor = remainingSeconds
     anchorT = nil
+    absentSince = t
   }
 
   /// B5: the absence outlived the limit, so the focus ends as interrupted on the spot.
@@ -378,6 +413,10 @@ struct PomodoroEngine {
                             outcome: .abandoned,
                             focusIndex: focusIndex)
     focusOpen = true
+    // A fresh focus measures its own absences.
+    absentSince = nil
+    absenceStart = nil
+    facePresent = nil
   }
 
   private mutating func close(outcome: PomodoroOutcome,
@@ -389,6 +428,7 @@ struct PomodoroEngine {
     focusOpen = false
     // Nothing is in flight any more, so no absence is being measured either.
     absentSince = nil
+    absenceStart = nil
     return record
   }
 

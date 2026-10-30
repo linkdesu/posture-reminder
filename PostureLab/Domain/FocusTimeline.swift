@@ -70,6 +70,14 @@ struct FocusTimeline: Equatable {
     return current.kind == PostureSegment.noDataKind ? closed : detecting
   }
 
+  /// A sample arrived without drawing a band: the posture engine reports「无人」but the countdown is
+  /// still running, so there is no band for it (`bandKind` answers nil) and the last posture keeps
+  /// the time. The stream is alive all the same, so the sample is recorded here - otherwise the
+  /// ticker would read the silence as a stalled stream and cut a `no_data` band across the grace.
+  mutating func noteSample(at t: TimeInterval) {
+    lastSampleAt = t
+  }
+
   /// The wall clock moved without a sample: if the open band's last sample is more than
   /// `sampleGapThreshold` behind `t`, the band is closed at that sample and a `no_data` band opens
   /// where the evidence ended. Called by the ticker, so the cut lands on the last sample instead of
@@ -119,7 +127,14 @@ struct FocusTimeline: Equatable {
   /// absence rather than the child stopping, and the report names that band 不在画面. Both still
   /// freeze the countdown and both still count into `pausedSeconds` — only the drawing differs.
   static func bandKind(isPaused: Bool, isPausedByAbsence: Bool, status: String?) -> String? {
-    guard isPaused else { return status }
+    guard isPaused else {
+      // A `no_person` from the posture engine while the countdown is still running is the grace a
+      // short absence gets, and the timeline has no band for it: those seconds are inside the focus
+      // (the countdown was counting), so the last posture band keeps them instead of a band that
+      // would sit outside the timeline's sum and read as pause time the child never had. The
+      // 「不在画面」band is the pause, and nothing else.
+      return status == PostureStatus.noPerson.rawValue ? nil : status
+    }
     return isPausedByAbsence ? PostureStatus.noPerson.rawValue : PostureSegment.pausedKind
   }
 

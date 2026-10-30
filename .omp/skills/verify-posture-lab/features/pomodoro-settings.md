@@ -17,6 +17,20 @@
 - `settings-experimental`：「调试」分区——调试模式开关（DEBUG 构建默认开，Release 默认关）+ 实验性体态开关（头前伸和驼背只做记录与调试高亮，不发出声音）。
 - `settings-persist`：杀进程重启后逐项读回原值；「恢复默认设置」只重置 10 项番茄钟设置，不动灵敏度/形象模式/调试开关。
 
+## 五个纯开关的「行为确实改变」（0.6.8 (20)，issue #7）
+
+设置页的纯开关不只是写一个值：改完立刻影响番茄钟。五个开关与它们可观察的效果：
+
+| 开关 | 用户看得见的变化 | 判据 |
+|---|---|---|
+| 自动开始休息 | 关掉后专注走完停在休息的「开始」上，倒计时不走 | `SettingsBehaviorUITests.testTurningOffAutoStartBreakParksTheBreak`（真点开关、真跑 1 分钟专注，截图 `AC1-break-parked`） |
+| 自动开始下一个专注 | 打开后休息走完自己进入第 2 个专注，不需要点「开始专注」 | `SettingsBehaviorUITests.testTurningOnAutoStartFocusStartsTheNextFocusByItself`（截图 `AC1-next-focus-running`） |
+| 形象模式 | 关掉后主页不再画人形（`形象预览` 无障碍元素消失），打开后回来 | `SettingsBehaviorUITests.testTheAvatarSwitchRemovesAndRestoresTheMirror` |
+| 姿态语音提醒 | 关掉后专注里不再有 `speech_played` 行 | 脚本场景：`-scenario deskLean -focusMinutes 1 -presetSettings postureVoiceEnabled=0` 与 `…=1` 各跑 40 秒，比较 `session-*.jsonl` 的 `speech_played` 条数 |
+| 休息时是否监测姿态 | 打开后休息阶段的样本仍产生 `features` 行（姿态在判） | 脚本场景：`-scenario pomodoroDay -focusMinutes 1 -shortBreakMinutes 1 -presetSettings monitorDuringBreak=1`，休息窗口内仍有 `features` 行；`=0` 时没有 |
+
+五个开关的**持久化**由 `SettingsPersistenceUITests`（4 个番茄钟开关 + 音量）与 `SettingsTogglesPersistenceUITests`（形象模式/调试模式/实验性体态/灵敏度）覆盖：真点控件、杀进程、重启后逐行读回。`-presetSettings` 是 DEBUG 专用启动参数，只用于证明「值变了行为就变」，不能用来证明持久化。
+
 已删除：`结束前提醒`（以及它的一分钟提示音与 `warn_before_end` 事件来源）。设置项由 12 项变为 11 项。0.6.4 再删除「屏幕常亮」（`keepScreenAwake`）：专注计时且 App 在前台即无条件常亮，设置项由 11 项变为 10 项；旧版存下的该键读取时被忽略。
 
 ## How to get to it (user POV)
