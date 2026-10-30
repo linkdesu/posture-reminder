@@ -28,6 +28,52 @@
 - `Documents/debug/session-<ISO8601>.jsonl`——每次启动一个 JSONL 文件。文件名是启动时间的 ISO8601 表示并去掉冒号，例如 `2026-10-17T01:23:45Z` 启动会产出 `session-2026-10-17T012345Z.jsonl`。每次新运行写一个新文件；`run-scenarios.sh` 选取最新的那个。
 - 应用容器内**没有任何图像文件**（v0.5 起）：页面截图只在内存里渲染，供调试时查看，不写 PNG。留档截图由验收脚本用 `simctl io screenshot` / 外部命令从设备侧拍摄，它们不在 App 容器里。
 
+同目录（`Documents/debug/`）还有三份 **DEBUG 构建专用**的原始记录，它们与上面那份 43 键契约无关（另一个文件、另一套键名），**不掺进 `session-*.jsonl` 的任何键**：
+
+| 文件 | 频率 | 用途 |
+|---|---|---|
+| `perf-<ISO8601>.jsonl` | 每秒一行 | 汇总：渲染帧数/帧率/最大帧间隔、六步耗时（采集/分割/点云/Vision/判定/渲染）的均值与最大值、点云间隔 p95 与最大值、点数极值、热状态、电量、是否降级 |
+| `frames-<ISO8601>.jsonl` | **每个深度帧一行**（约 30 Hz） | 逐帧原始事实：帧呈现时刻、回调到达时刻、三步耗时、**实际点数**、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟 |
+| `joints-<ISO8601>.jsonl` | **每个 Vision 帧一行**（约 10 Hz） | 每帧关节：`detected`（模型是否看到人）、`raw`（模型原始置信度，0.5 门槛之前）、`joints`（过门槛后的置信度与可见性）、`stale`、`shoulders_available`、`shoulders_invalidated` |
+
+### `frames-*.jsonl` 的键
+
+一行 = 一个深度帧，`0.6.8 (15)` 起才有：
+
+```json
+{"t":1793355411156,"frame_s":12.345,"arrival_s":12.351,"depth_ms":1.87,"segment_ms":8.80,
+ "cloud_ms":0.20,"points":600,"mask_cells":1234,"depth_valid":0.970,"nearest_m":0.42,
+ "degraded":false,"cloud_emitted":true,"render_ms":0.40,"render_latency_ms":21.50}
+```
+
+- `t`：写行时的 epoch 毫秒（这一帧上屏后写，因此晚于帧自己的时刻）；`frame_s` 是深度帧自己的呈现时刻（会话时钟，秒），**判点云节奏用它**；`arrival_s` 是回调到达时刻，两者之差是排队时间。
+- `depth_ms` / `segment_ms` / `cloud_ms`：取深度、分割、点云三步各自的耗时。
+- `points`：这一帧实际生成的点数；`mask_cells`：分割遮罩格数（0 = 这一帧没分割出人体）。
+- `depth_valid`：有效深度读数占比（0...1）。**它接近 1 而 `mask_cells` 为 0，说明传感器正常、只是画面里没有比背景近 10 cm 的连通块；两者都接近 0 才是传感器问题。** 排查「点云为什么是空的」先看这两列。
+- `nearest_m`：这一帧最近的深度读数，米；没有读数时为 `null`。
+- `degraded` / `cloud_emitted`：这一帧是否处于发热降级、点云是否推给了画布（降级时隔帧推）。
+- `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
+
+### `joints-*.jsonl` 的键
+
+一行 = 一个 Vision 帧：
+
+```json
+{"t":1793355411149,"session_t":0.280,"detected":true,"stale":false,
+ "shoulders_available":false,"shoulders_invalidated":false,
+ "raw":{"nose":0.71,"leftEye":0.52,…, "rightShoulder":0.44},
+ "joints":{"nose":{"c":0.71,"v":true},"leftEye":{"c":0.52,"v":true},…,
+           "rightShoulder":{"c":null,"v":false}}}
+```
+
+- `detected`：模型这一帧是否报出了人。`false` = 画面里没人；`true` 而某关节 `v=false`、`raw` 有分数 = 模型看到了但**被 0.5 门槛过滤**。
+- `raw`：八个关节在门槛之前的原始分数；模型没报这个关节时为 `null`。它只用于看模型表现，不参与判定。
+- `joints`：过门槛后的置信度 `c` 与可见性 `v`；不可见关节 `c` 为 `null`。
+- `stale`：关节与深度帧的配对超过 150 ms 而过期，这一帧关节全部不可见。
+- `shoulders_available` / `shoulders_invalidated`：双肩是否可用、是否因为落在鼻点以上被整帧作废（真机要求作废帧数为 0）。
+
+`0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
+
 日志器只在调试模式开启时工作（`FileDebugLogger.isEnabled`）；关闭时不写任何文件。
 
 ### 从设备取出文件
@@ -330,7 +376,7 @@ head_down_count = 1         head_down_remind_count = 1
 
 ## 电量与热状态是趋势线，不是逐样本读数
 
-`battery_level` 与 `thermal_state` 背后没有逐样本事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。会话日志里采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。v0.6.8 起另有每秒一条的 `Documents/debug/perf-*.jsonl`（DEBUG 构建、独立键名）带 `thermal_state`、`battery_level` 与 `degraded`，判「降级时段」与电量曲线用它，不用会话日志的 10 秒采样。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
+`battery_level` 与 `thermal_state` 背后没有逐样本事件：`FileDebugLogger` 从设备本身采样，并在每行盖上最近的值。会话日志里采样**最多每 10 秒刷新一次**，因此连续多行共享同一个值，二者形成粗略趋势。v0.6.8 起另有每秒一条的 `Documents/debug/perf-*.jsonl`（DEBUG 构建、独立键名）带 `thermal_state`、`battery_level` 与 `degraded`，判「降级时段」与电量曲线用它，不用会话日志的 10 秒采样；逐帧原始事实（点数、点云间隔、上屏时间）另见 `frames-*.jsonl`，汇总里的 `cloud_points_min` / `cloud_points_max` 只是趋势，不要拿末值当结论。阅读时比较一次会话的首行与末行；不要把相邻两行的变化当成逐样本读数。设备不报告电量时（例如模拟器），`battery_level` 为 `null`；`thermal_state` 是 `nominal`、`fair`、`serious`、`critical` 之一。
 
 ## 截图
 
