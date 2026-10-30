@@ -544,6 +544,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		8263711A59A893A32BBE225B /* GitCommit */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -555,7 +556,6 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitCommit.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
