@@ -16,10 +16,13 @@ struct PostureSample: Equatable {
   /// Joints the source could not measure on this frame.
   var unavailableJoints: Set<JointID> = []
 
-  /// Whether a head was measured. A depth-only source always has a distance when it has a head;
-  /// pitch may be unavailable on a frame whose head band is too noisy to fit a plane through, and
-  /// that must not turn a sitting child into an absent one.
-  var facePresent: Bool { distanceCM != nil }
+  /// Vision 这一帧是否看到人（模型报出的 observation 存在，且没有过期）。脚本 rig 没有 Vision，
+  /// 保持 nil，由距离回退。0.6.8 (16) 起「在场/暂停」看这个，不看深度：真机日志里出现过 4.9 秒没有
+  /// 检测到人却没有暂停事件的情况，那次深度一直有 600 点，按深度判在场就永远不停表。
+  var personPresent: Bool? = nil
+
+  /// 是否有人在场。有 Vision 结论时以它为准；没有（脚本源、Vision 尚未跑第一帧）才退回距离。
+  var facePresent: Bool { personPresent ?? (distanceCM != nil) }
   /// Whether the body is still in frame. Leaning on the desk has to stay apart from having got up.
   var bodyPresent: Bool { !joints.isEmpty }
 

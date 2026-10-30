@@ -840,6 +840,18 @@ final class SessionController: ObservableObject {
     source.onSample = { [weak self] sample in self?.handlePomodoro(sample) }
     // 30 Hz 的点云只喂画布：它不动样本时钟、不动判定，也不写日志。
     source.onCloud = { [weak self] frame in self?.applyCloud(frame) }
+    // 横滚校准的结论写进 42/45 键日志：完成与未完成各有一个事件，绝不把「没校准」写成「校准过了」。
+    (source as? DepthCaptureSource)?.onRollCalibration = { [weak self] (baseline: Double?) in
+      guard let self else { return }
+      if let baseline {
+        self.logger.log(.calibrated(baselineDistanceCM: self.settings.baselineDistanceCM ?? 0,
+                                    baselinePitchDeg: self.settings.baselinePitchDeg ?? 0,
+                                    baselineRollDeg: baseline,
+                                    baselineHeadHeight: PostureBaseline.uprightHeadHeight))
+      } else {
+        self.logger.log(.calibrationIncomplete(reason: "3 秒内有效横滚样本不足 10 个"))
+      }
+    }
     inputSource = source
     // 新采集源按当前热状态起跑：降级期间重建输入不该又回到 30 Hz。
     (source as? DepthCaptureSource)?.setLoad(CaptureLoad.load(thermalState: thermalStateName))

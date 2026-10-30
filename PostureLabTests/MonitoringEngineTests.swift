@@ -886,7 +886,7 @@ final class MonitoringEngineTests: XCTestCase {
     let events: [MonitoringEvent] = [
       .sessionStarted(scenario: "approach"),
       .config(sensitivity: .medium, distanceThresholdCM: 30, pitchThresholdDeg: 20),
-      .calibrated(baselineDistanceCM: 40, baselinePitchDeg: 0),
+      .calibrated(baselineDistanceCM: 40, baselinePitchDeg: 0, baselineRollDeg: 0, baselineHeadHeight: 0.22),
       .screenShown(name: "monitoring"),
       .sample(t: 1.5, distanceCM: 40, pitchDeg: 0),
       .statusChanged(to: .posture(.headDown), t: 1.5, distanceCM: nil, pitchDeg: nil),
