@@ -789,9 +789,9 @@ final class SessionController: ObservableObject {
                                       isPausedByAbsence: pomodoro?.isPausedByAbsence ?? false,
                                       status: engine?.status.rawValue)
     guard let kind else {
-      // Nobody in frame but the countdown still runs: the grace has not become a pause, so the last
-      // band keeps the time and only the stream's liveness is recorded.
-      pomodoroTimeline.noteSample(at: t)
+      // Nobody in frame but the countdown still runs: the grace before a pause, or the tick after
+      // one. The stream is alive, and a pause that just ended closes its band here.
+      pomodoroTimeline.endPause(at: t)
       return
     }
     logBandSegment(pomodoroTimeline.observe(kind, at: t))

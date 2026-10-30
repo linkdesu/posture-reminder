@@ -53,7 +53,7 @@ final class PomodoroPauseAccountingTests: XCTestCase {
       if let kind {
         _ = timeline.observe(kind, at: t)
       } else {
-        timeline.noteSample(at: t)
+        timeline.endPause(at: t)
       }
     }
 
@@ -137,12 +137,19 @@ final class PomodoroPauseAccountingTests: XCTestCase {
 
     stretch(from: 1_000, to: 1_005, eyesOn: true, status: PostureStatus.good.rawValue, into: &run)
     stretch(from: 1_005, to: 1_010, eyesOn: false, status: PostureStatus.noPerson.rawValue, into: &run)
-    stretch(from: 1_010, to: 1_016, eyesOn: true, status: PostureStatus.good.rawValue, into: &run)
+    // The face is back, but the posture engine holds「无人」for its one-second resume debounce
+    // (`MonitoringEngine`'s `presenceResumeDelay`). Those seconds are focus time and must not extend
+    // the 不在画面 band past the pause they follow - that was the 0.9 s vs 1.9 s mismatch this test
+    // now pins.
+    stretch(from: 1_010, to: 1_011, eyesOn: true, status: PostureStatus.noPerson.rawValue, into: &run)
+    stretch(from: 1_011, to: 1_016, eyesOn: true, status: PostureStatus.good.rawValue, into: &run)
 
     let record = run.finish(at: 1_016)
 
     XCTAssertEqual(record.pausedSeconds, 2, accuracy: 0.15,
                    "the absence pause did not start three seconds in")
+    XCTAssertEqual(run.pausedBandSeconds, 2, accuracy: 0.15,
+                   "the pause band outlived the pause by the resume debounce")
     XCTAssertEqual(run.pausedBandSeconds, record.pausedSeconds, accuracy: 0.15,
                    "the report's pause bands disagree with the record's pausedSeconds")
   }
