@@ -203,6 +203,11 @@ def check_timing(rows, args):
     for row in rows:
         if row.get("event") == "calibration_done":
             baseline_pitch = row.get("baseline_pitch_deg")
+    # 静默校准尚未实现、阅读流程已退役（ADR-0006），所以当前的日志里没有 `calibration_done` 行；
+    # 此时引擎用的基线就是 0（`SessionController` 传 `settings.baselinePitchDeg ?? 0`）。不补这个
+    # 默认值，任何低头提醒都会被误判成「样本里找不到越阈」。
+    if baseline_pitch is None:
+        baseline_pitch = 0.0
 
     def too_close(distance, _pitch):
         return distance is not None and distance_threshold is not None and distance < distance_threshold
@@ -398,6 +403,9 @@ def check_summary(rows, required=False):
         for row in chunk:
             if row.get("event") == "calibration_done":
                 baseline_pitch = row.get("baseline_pitch_deg")
+        # 同 AC2：没有校准行时引擎的基线是 0。
+        if baseline_pitch is None:
+            baseline_pitch = 0.0
         reported = recompute(chunk, samples(chunk), config, baseline_pitch)
         for key, label in SUMMARY_FIELDS.items():
             claimed = ended.get(key)
