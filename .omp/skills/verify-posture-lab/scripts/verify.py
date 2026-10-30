@@ -1532,11 +1532,19 @@ def load_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def read_debug_logs(directory: Path) -> dict:
+def read_debug_logs(directory: Path, *, all_runs: bool = False) -> dict:
+    """读一轮的日志。默认只读最近一次启动的那三份（文件名带启动时刻，字典序即时间序）：
+    容器会累积历史运行的日志，旧构建的 perf 字段语义不同，混在一起判没有意义。"""
+    def files(pattern: str) -> list[Path]:
+        found = sorted(directory.glob(pattern))
+        if not found:
+            return []
+        return found if all_runs else found[-1:]
+
     return {
-        "sessions": [load_jsonl(p) for p in sorted(directory.glob("session-*.jsonl"))],
-        "perf": [row for p in sorted(directory.glob("perf-*.jsonl")) for row in load_jsonl(p)],
-        "joints": [row for p in sorted(directory.glob("joints-*.jsonl")) for row in load_jsonl(p)],
+        "sessions": [load_jsonl(p) for p in files("session-*.jsonl")],
+        "perf": [row for p in files("perf-*.jsonl") for row in load_jsonl(p)],
+        "joints": [row for p in files("joints-*.jsonl") for row in load_jsonl(p)],
     }
 
 
@@ -1630,11 +1638,16 @@ def judge_cloud_smooth(perf: list[dict]) -> tuple[bool, str]:
         return False, "没有未降级的点云时段，无法判流畅"
     worst_p95 = max(row.get("cloud_gap_p95_ms") or 0 for row in clean)
     worst_gap = max(row.get("cloud_gap_max_ms") or 0 for row in clean)
-    wrong_points = [row.get("cloud_points") for row in clean if row.get("cloud_points") != CLOUD_POINT_BUDGET]
+    # 没人时点云是空的（0 点），有人时必须是 600 点；其它任何数字都说明预算没有固定。
+    wrong_points = [row.get("cloud_points") for row in clean
+                    if row.get("cloud_points") not in (0, CLOUD_POINT_BUDGET)]
+    with_body = [row for row in clean if row.get("cloud_points") == CLOUD_POINT_BUDGET]
     detail = (f"未降级 {len(clean)} 秒里 p95 最差 {worst_p95:.1f} ms（要求 ≤{CLOUD_P95_LIMIT_MS:.0f}）、"
               f"最长间隔 {worst_gap:.1f} ms（要求 ≤{CLOUD_MAX_GAP_MS:.0f}）")
+    detail += (f"；{len(with_body)} 秒取到 600 点云" if with_body
+               else "；本轮没有人体入镜，点数固定 600 未取到证据（点云为空，0 点）")
     if wrong_points:
-        return False, detail + f"；点数不为 600 的秒数：{len(wrong_points)}"
+        return False, detail + f"；点数既不是 0 也不是 600 的秒数：{len(wrong_points)}"
     if worst_p95 > CLOUD_P95_LIMIT_MS or worst_gap > CLOUD_MAX_GAP_MS:
         return False, detail
     return True, detail
@@ -1725,7 +1738,7 @@ def command_device_logs(args) -> int:
     out = run_dir(run_id) / "device"
     out.mkdir(parents=True, exist_ok=True)
 
-    logs = read_debug_logs(directory)
+    logs = read_debug_logs(directory, all_runs=args.all_runs)
     if not logs["sessions"] and not logs["perf"] and not logs["joints"]:
         sys.exit(f"{directory} 里没有任何 session-/perf-/joints-*.jsonl；真机没跑过或调试模式没开")
     ok_upper, detail_upper = judge_upper_body_only(logs["joints"])
@@ -1930,6 +1943,8 @@ def main() -> int:
     dl.add_argument("--dir", default=None, help="已拷贝好的 debug 目录（跳过 devicectl）")
     dl.add_argument("--focus-seconds", type=float, default=DEFAULT_FOCUS_SECONDS,
                     help="计划专注秒数，判降级占比用；默认 600")
+    dl.add_argument("--all", dest="all_runs", action="store_true",
+                    help="容器里所有历史日志一起判（默认只判最近一次启动）")
     asc = sub.add_parser("ascii", help="截图的 ASCII 密度图")
     asc.add_argument("files", nargs="+")
     asc.add_argument("--cols", type=int, default=60)
