@@ -635,6 +635,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def write_commit_marker(src: Path, sha: str) -> Path:
+    """快照里没有 .git，Xcode 的 GitCommit 阶段读这个文件来写日志首行的 commit。
+    写完整 hash（短 hash 是构建阶段的展示口径，不在这里折算）。"""
+    path = src / ".verify-commit"
+    path.write_text(sha + "\n")
+    return path
+
+
 def crash_reports() -> list[str]:
     if not CRASH_DIR.exists():
         return []
@@ -824,9 +832,12 @@ def _preflight(args) -> int:
     tarball = base / "snapshot.tar"
     sh(["git", "archive", "--format=tar", "-o", str(tarball), full])
     sh(["tar", "-xf", str(tarball), "-C", str(src)])
+    # 快照没有 .git；把快照对应的 commit 留在源码根，GitCommit 构建阶段据此写日志首行。
+    write_commit_marker(src, full)
     result["frozen"]["snapshotSha256"] = sha256_file(tarball)
     result["frozen"]["buildDir"] = str(base)
-    record("snapshot", (src / "PostureLab.xcodeproj").exists(), f"{tarball} -> {src}")
+    record("snapshot", (src / "PostureLab.xcodeproj").exists()
+           and (src / ".verify-commit").read_text().strip() == full, f"{tarball} -> {src}")
 
     # 0. 开着的模拟器：超过一台，或有不是 pl-verify 的，ENV-BLOCKED，列出名称和 UDID，不动它们。
     blockers = booted_blockers()

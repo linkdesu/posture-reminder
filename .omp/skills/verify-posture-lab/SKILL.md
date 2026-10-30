@@ -24,7 +24,7 @@ scripts/verify-preflight.sh <目标SHA> <预期版本号> <预期build号> <轮�
 1. 记下 `~/Library/Logs/DiagnosticReports/PostureLab*.ips` 崩溃报告基线；
 1a. 若处于 Booted 的模拟器**超过一台**，或有**任何一台不是 `pl-verify`**，判 **ENV-BLOCKED**，在 `preflight.json` 的 `frozen.bootedBlockers` 和输出里列出名称和 UDID，**不自动关、不自动删**，交给人工处理后重跑预检；
 2. 工具链是 Xcode 27（`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）、`simctl` 可用、`/Volumes/Data` 与用户目录剩余空间都不少于 20 GB（`--min-free-gb` 可调）；
-3. 用 `git archive <SHA>` 导出代码快照，解到本轮专属目录 `/Volumes/Data/verify-builds/posture-lab/<run-id>/src` 并在那里构建（DerivedData 在同目录 `dd/`）。不碰共享 worktree 的未提交改动，也不用 `/tmp/pl-verify-build`；
+3. 用 `git archive <SHA>` 导出代码快照，解到本轮专属目录 `/Volumes/Data/verify-builds/posture-lab/<run-id>/src` 并在那里构建（DerivedData 在同目录 `dd/`）。不碰共享 worktree 的未提交改动，也不用 `/tmp/pl-verify-build`。快照里没有 `.git`，所以顺手在源码根写 `.verify-commit`（快照对应 commit 的完整 hash）：Xcode 的 `GitCommit` 构建阶段在没有 git 时读它写进 bundle 的 `GitCommit.txt`（日志首行的 commit 由此而来），缺了它构建会直接失败；该文件是本地产物，已被 `.gitignore` 忽略；
 4. 只用**固定模拟器 `pl-verify`**（iPhone 17，iOS 27.0）：每轮复用，不新建、不删除（不存在时才建一次）；先卸载 App 保证沙盒干净，boot 完成后把 UDID 写进 `state.json`。构建用 `build-for-testing`，同一份冻结产物里带 `.xctestrun`，供 `drive` 的 XCUITest 入口使用；
 5. 产物 `Info.plist` 的版本号与 build 号必须等于预期值；装进模拟器后再读一次已安装的 `Info.plist`，并核对已安装二进制的哈希；
 6. `simctl privacy grant camera` 预授权，无参启动后截图，OCR 确认没有系统权限弹窗；
