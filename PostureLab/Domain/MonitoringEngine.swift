@@ -302,6 +302,12 @@ struct MonitoringEngine {
       summary.pausedSeconds += dt
       return
     }
+    // 未测量的区间不进任何百分比：Vision 说人在场、却一个可判定的身体特征都没测到时（关节全被
+    // 门槛滤掉），既不能算良好、也没有依据算不良。这类区间只出现在真机（脚本 rig 永远有关节），
+    // 所以判定条件要求 `personPresent == true`：脚本源没有 Vision 结论，行为与以前一致。
+    if sample.personPresent == true, !Self.isMeasured(assessment) {
+      return
+    }
     summary.totalSeconds += dt
     let tooClose = assessment.breached[.near] == true
     let headDown = assessment.breached[.headDown] == true
@@ -318,6 +324,15 @@ struct MonitoringEngine {
       if goodStreakSeconds > summary.longestGoodStreakSeconds {
         summary.longestGoodStreakSeconds = goodStreakSeconds
       }
+    }
+  }
+
+  /// 这一帧到底测到了没有：至少一项身体特征（横滚、头高、肩线）有实测值。只有距离/俯仰
+  /// 不算——那两个来自深度，关节全丢时它们照样有值，却不足以判定体态。
+  static func isMeasured(_ assessment: PostureAssessment) -> Bool {
+    assessment.readings.contains { reading in
+      reading.isMeasured
+        && [.headRoll, .headHeightDrop, .shoulderTilt].contains(reading.feature)
     }
   }
 

@@ -45,6 +45,8 @@ final class FileDebugLogger: DebugLogging {
     if enabled {
       UIDevice.current.isBatteryMonitoringEnabled = true
       openLogFile()
+      // 第一行固定是构建身份：一个从手机里拷出来的日志不必再问「这是哪个构建」。
+      log(.logHeader(summary: AppInfo.summary))
     }
   }
 

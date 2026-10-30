@@ -56,6 +56,7 @@
 		87872474D802D4931833A367 /* RollCalibratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1F3CD2FBA55A3EB322DE50 /* RollCalibratorTests.swift */; };
 		8B46FC5F26C523A188889FDD /* SelectAllNumberField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA1B82F3EB68E8CDDD58E02 /* SelectAllNumberField.swift */; };
 		8E1F39B8B7CB4297B4B69AF5 /* head_down.wav in Resources */ = {isa = PBXBuildFile; fileRef = 5F1CEF001EA36F12FB4E1B6F /* head_down.wav */; };
+		8E3B5FD5E74E760941F05AB8 /* UnmeasuredIntervalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B8CE88D404C6990604B567 /* UnmeasuredIntervalTests.swift */; };
 		92D5FE4A613E780A737E0FAF /* PomodoroCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D89124CB90CB32D31F1777E /* PomodoroCopy.swift */; };
 		936FA18086DD4D8A149BF18A /* IdleTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD3107ED24A698BFAF94104 /* IdleTimerController.swift */; };
 		944A76A1C208C2E25A3E0D4B /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */; };
@@ -152,6 +153,7 @@
 		4D597B6333310C45A83D6402 /* ReminderPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPlayer.swift; sourceTree = "<group>"; };
 		4E20FBDAFBE151A6DFA10240 /* shoulder_tilt.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = shoulder_tilt.wav; sourceTree = "<group>"; };
 		4F9B5DA030D37F75C3AA018E /* DebugLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogging.swift; sourceTree = "<group>"; };
+		50B8CE88D404C6990604B567 /* UnmeasuredIntervalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnmeasuredIntervalTests.swift; sourceTree = "<group>"; };
 		52B770E14E689F2A1388F742 /* ThermalSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSampler.swift; sourceTree = "<group>"; };
 		53E77A8FC7B11ACFEBAD635D /* CaptureLoad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureLoad.swift; sourceTree = "<group>"; };
 		58068D70C0C4672F10367EE5 /* SettingsTogglesPersistenceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTogglesPersistenceUITests.swift; sourceTree = "<group>"; };
@@ -314,6 +316,7 @@
 				5EE5AEE7BAB6B89581719950 /* ReminderPlayerTests.swift */,
 				1F1F3CD2FBA55A3EB322DE50 /* RollCalibratorTests.swift */,
 				E4E16DB5D7B4317BDB72C766 /* SmokeTests.swift */,
+				50B8CE88D404C6990604B567 /* UnmeasuredIntervalTests.swift */,
 				CC7ACF7242CF00C1C8985848 /* VisionPoseMappingTests.swift */,
 			);
 			path = PostureLabTests;
@@ -665,6 +668,7 @@
 				DC9E228263CB72442DF4F6D5 /* ReminderPlayerTests.swift in Sources */,
 				87872474D802D4931833A367 /* RollCalibratorTests.swift in Sources */,
 				944A76A1C208C2E25A3E0D4B /* SmokeTests.swift in Sources */,
+				8E3B5FD5E74E760941F05AB8 /* UnmeasuredIntervalTests.swift in Sources */,
 				5173A2809E39EEA36C67E665 /* VisionPoseMappingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
