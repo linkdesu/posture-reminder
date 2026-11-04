@@ -100,8 +100,8 @@ struct DebugOverlayView: View {
 
   private func valueText(_ feature: PostureFeature) -> String {
     guard let reading = reading(feature) else { return "—" }
-    // 「本轮还没有样本」是 `—`；「样本到了但这项没量到」是 未测量。
-    return reading.isMeasured ? format(reading.value, for: feature) : "未测量"
+    // 「本轮还没有样本」是 `—`；「样本到了但这项没量到」是 未测——issue #8 AC6 的用词。
+    return reading.isMeasured ? format(reading.value, for: feature) : "未测"
   }
 
   private func thresholdText(_ feature: PostureFeature) -> String {

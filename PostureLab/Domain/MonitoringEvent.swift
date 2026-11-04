@@ -4,10 +4,10 @@ enum MonitoringEvent: Equatable {
   case sessionStarted(scenario: String?)
   case config(sensitivity: Sensitivity, distanceThresholdCM: Double, pitchThresholdDeg: Double)
   /// 静默校准完成：3 秒有效样本的中位数成为个人基线（距离、俯仰、横滚、头高）。
-  case calibrated(baselineDistanceCM: Double,
-                  baselinePitchDeg: Double,
-                  baselineRollDeg: Double,
-                  baselineHeadHeight: Double)
+  case calibrated(baselineDistanceCM: Double?,
+                  baselinePitchDeg: Double?,
+                  baselineRollDeg: Double?,
+                  baselineHeadHeight: Double?)
   /// 校准没有完成（3 秒内有效样本太少）：体态判定沿用标准直立基线，日志里明确写出来，
   /// 不把「没校准」伪装成「校准过了」。
   case calibrationIncomplete(reason: String)

@@ -59,7 +59,7 @@
 - `depth_gap_ms` / `arrival_gap_ms`：与上一帧深度的呈现间隔、与上一帧的回调到达间隔（毫秒）。这两列是「深度链路本身有没有被挤」的第一手证据。
 - `vision_ms` / `vision_age_ms`：最近一次 Vision 推理耗时、那个结果距这一帧的年龄（毫秒）。Vision 与深度在两条串行队列上（`depthQueue` / `videoQueue`），若 Vision 挤占 CPU，会先看到 `vision_ms` 升高、`vision_age_ms` 变大、`depth_gap_ms` 跟着变成 66 ms。
 - `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。
-- `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17），每秒汇总文件里是**整场累计**）：人形健全性计数。
+- `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17)，每秒汇总文件里是**整场累计**）：人形健全性计数。v0.6.8 (25) 起 `sanity_points_without_person` 只数「模型报告画面里没有人（`detected: false`），却仍然画出了关节」的真正矛盾帧；只有鼻子过门槛的帧是「看到人、在场证据不足」，照常画点，不再计入（旧的「没有在场证据」口径会把正常帧记成缺陷）。
 - `serious_seconds` / `degraded_seconds`（v0.6.8 (17)，整场累计）：`serious` 及以上热状态的秒数与降级节流秒数；会话结束时另在标准输出打印 `[summary] serious=…s degraded=…s`。
 - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
 - `face_detected`（v0.6.8 (19)）：与这一帧配对（150 ms 内）的 Vision 结果是否看到了过 0.5 门槛的人脸；还没有可用结果、或结果过期时为 `null`（「不知道」，不是 false）。AC7 的「检测到脸时点云从不空白」用它与 `points`、`visible_points` 交叉判：有脸的帧里 `points > 0` 且已上屏的帧 `visible_points > 0`，一帧空白即失败。
@@ -101,7 +101,7 @@
 - `right_shoulder_frames` / `shoulder_frames`：Vision 帧里右肩过 0.5 门槛的累计帧数与总帧数。AC8 要求右肩可用帧 < 50% 时**记录并上报**，不改判定门槛。
 - `cloud_blank_with_face_frames`：检测到脸、但这一帧点云为空的累计帧数（AC7 的「从不空白」）。
 
-`verify.py device-logs` 的判定（按此顺序读输出）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 无人在场却画点的累计帧数超过 5 判 FAIL）、`upper-body-only`、`shoulders-not-on-head`、`shoulders-available-ratio`、`cloud-smooth`、`cloud-not-blank`（有脸的帧点云不得空白）、`keypoint-jitter`（滚动 p95 最大值 ≤ 1%）、`cloud-jitter`（≤ 2%）、`degradation`、`thermal`；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。右肩可用帧占比不参与判定，单独打印 `REPORT right-shoulder: …` 并写进 `verdict.json` 的 `rightShoulder`。
+`verify.py device-logs` 的判定（按此顺序读输出）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 模型说没人却画出关节的累计帧数超过 5 判 FAIL；按 0.6.8 (25) 的现行口径）、`upper-body-only`、`shoulders-not-on-head`、`shoulders-available-ratio`、`cloud-smooth`、`cloud-not-blank`（有脸的帧点云不得空白）、`keypoint-jitter`（滚动 p95 最大值 ≤ 1%）、`cloud-jitter`（≤ 2%）、`degradation`、`thermal`；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。右肩可用帧占比不参与判定，单独打印 `REPORT right-shoulder: …` 并写进 `verdict.json` 的 `rightShoulder`。
 
 `0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
 
@@ -148,8 +148,8 @@ xcrun devicectl device copy from \
 | `pitch_threshold_deg` | Double? | 在 `config` 行：本次会话的“低头”阈值，单位度。 |
 | `baseline_distance_cm` | Double? | 在 `calibration_done` 行：校准后的基线距离（非空校准样本的中位数）。 |
 | `baseline_pitch_deg` | Double? | 在 `calibration_done` 行：校准后的基线俯仰角，即“低头”的参照。 |
-| `baseline_roll_deg` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：校准得到的个人横滚基线（度）。歪头按 `abs(当前横滚 − 这个值) > 15°` 判定。 |
-| `baseline_head_height` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：头部相对肩线高度的基线（归一化），低头规则的第二路信号。 |
+| `baseline_roll_deg` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：校准得到的个人横滚基线（度）。歪头按 `abs(当前横滚 − 这个值) > 15°` 判定。v0.6.8 (25) 起这是 `calibration_done` 能否成立的必要条件：它为 `null` 时校准判失败。 |
+| `baseline_head_height` | Double? | 在 `calibration_done` 行（v0.6.8 (25) 起）：同一个 3 秒窗口里「鼻点相对两肩中线高度」的中位数（归一化），趴桌/低头规则的第二路信号，也只记日志、不上屏。双肩在窗口里不足 10 帧时如实写 `null`——没测到不写假的中位数。 |
 | `total_seconds` | Double? | 在 `session_ended` 行：检测到人脸的在座时间。 |
 | `good_seconds` | Double? | 在 `session_ended` 行：没有任何体态越阈的时间。 |
 | `near_seconds` | Double? | 在 `session_ended` 行：“太近”越阈的累计时间。 |
@@ -218,7 +218,7 @@ xcrun devicectl device copy from \
 |---|---|---|
 | `session_started` | 一次会话开始。 | `scenario` |
 | `config` | 本次会话生效的阈值。 | `sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg` |
-| `calibration_done` | 校准结束；基线已设定。旧阅读流程写过这一行；当前无写入路径（静默校准尚未实现），事件与键保留。 | `baseline_distance_cm`、`baseline_pitch_deg` |
+| `calibration_done` | 校准结束（v0.6.8 (25) 起在真机上有写入路径）：输入源启动后收满 3 秒的有效横滚样本，取中位数作为个人横滚基线；同一窗口里的头高中位数一并记录。距离与俯仰的基线仍来自设置，没有校准时写 `null`。 | `baseline_roll_deg`、`baseline_head_height`、`baseline_distance_cm`、`baseline_pitch_deg` |
 | `screen_shown` | 一个界面出现。 | `screen` |
 | `sample` | 一个相机 tick（脚本运行中为 10 Hz）。 | `t`、`distance_cm`、`pitch_deg` |
 | `status_changed` | 显示的体态状态发生变化。 | `t`、`state`、`distance_cm`、`pitch_deg` |

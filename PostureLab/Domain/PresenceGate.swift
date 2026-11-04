@@ -52,6 +52,14 @@ struct PresenceGate {
     return path
   }
 
+  /// 人形健全性：画出了关节，模型却报告画面里没有人。
+  ///
+  /// 只有鼻子过门槛的帧在 0.6.8 (18) 起不算在场证据，但那仍然是模型**看到了人**（`detected`），
+  /// 画出这些点是正确的，不能记成「无人在场却画点」。这一条只抓真正的矛盾帧。
+  static func drawsPointsWithoutPerson(joints: [JointID: JointSample], detected: Bool) -> Bool {
+    !joints.isEmpty && !detected
+  }
+
   /// 相机重开时把计数清掉：上一次会话的连续帧不能算进这一次。
   mutating func reset() {
     streak = 0

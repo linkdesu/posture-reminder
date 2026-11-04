@@ -18,7 +18,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
   var onCloud: ((CloudFrame) -> Void)?
   /// 横滚校准有结论时回调一次：拿到基线给数值，样本不足给 nil。
-  var onRollCalibration: ((Double?) -> Void)?
+  /// 静默校准的结论：(横滚基线, 头高基线)。两个都可以是 nil——没测到就不假装测到了。
+  var onRollCalibration: ((_ roll: Double?, _ headHeight: Double?) -> Void)?
 
   private let vision = VisionJointSource()
   /// 固定网格 + 帧间平滑的点云。只有深度队列碰它。
@@ -274,15 +275,26 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private func calibratedRoll(joints: [JointID: JointSample],
                               fallback: Double?,
                               at t: TimeInterval) -> Double? {
-    guard let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
-      ?? VisionPoseMapping.earLineDegrees(joints) else { return fallback }
     let wasSettled = rollCalibrator.isSettled
-    _ = rollCalibrator.observe(visionRoll, at: t)
-    if !wasSettled, rollCalibrator.isSettled {
-      let baseline = rollCalibrator.baseline
-      DispatchQueue.main.async { [weak self] in self?.onRollCalibration?(baseline) }
+    let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
+      ?? VisionPoseMapping.earLineDegrees(joints)
+    if let visionRoll {
+      // 头高（鼻点相对两肩中线）在同一个 3 秒窗口里取中位数；双肩不够时它是 nil，日志里如实写 null。
+      _ = rollCalibrator.observe(visionRoll,
+                                 headHeight: PostureClassifier.headHeight(joints: joints),
+                                 at: t)
+    } else {
+      // 没有可用的面部连线时窗口仍然要按墙钟关闭：孩子还没坐下也要写「校准没完成」。
+      _ = rollCalibrator.tick(at: t)
     }
-    return rollCalibrator.relative(visionRoll)
+    if !wasSettled, rollCalibrator.isSettled {
+      let roll = rollCalibrator.baseline
+      let headHeight = rollCalibrator.headHeightBaseline
+      DispatchQueue.main.async { [weak self] in
+        self?.onRollCalibration?(roll, headHeight)
+      }
+    }
+    return visionRoll.map(rollCalibrator.relative) ?? fallback
   }
 
   private func joints(at t: TimeInterval) -> [JointID: JointSample] {
@@ -544,7 +556,8 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有在场证据也记一帧。
     let eyeBelowMouth = Self.eyeBelowMouth(joints: joints, mouth: frame.mouth)
     let shoulderAboveEar = Self.shoulderAboveEar(joints: joints)
-    let pointsWithoutPerson = !joints.isEmpty && presencePath == .none
+    let pointsWithoutPerson = PresenceGate.drawsPointsWithoutPerson(joints: joints,
+                                                                    detected: paired.detected)
     #if DEBUG
     PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
                                     shoulderAboveEar: shoulderAboveEar,

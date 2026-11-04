@@ -72,6 +72,17 @@ final class PresenceGateTests: XCTestCase {
     XCTAssertEqual(gate.streak, 0)
   }
 
+  /// 人形健全性只看真正的矛盾帧：模型报「没人」却画了关节。只有鼻子的帧是「看到人、证据不足」，
+  /// 照常画点，不算「无人在场却画点」。
+  func testOnlyAFrameWithoutAPersonCountsAsPointsWithoutPerson() {
+    let noseOnly: [JointID: JointSample] = [
+      .nose: JointSample(x: 0.5, y: 0.3, depthM: 0.4, confidence: 0.9),
+    ]
+    XCTAssertTrue(PresenceGate.drawsPointsWithoutPerson(joints: noseOnly, detected: false))
+    XCTAssertFalse(PresenceGate.drawsPointsWithoutPerson(joints: noseOnly, detected: true))
+    XCTAssertFalse(PresenceGate.drawsPointsWithoutPerson(joints: [:], detected: false))
+  }
+
   // MARK: - 路径二：头部 + 颈/肩
 
   func testNeckOrShoulderPathCountsAsPresenceAfterThreeFrames() {

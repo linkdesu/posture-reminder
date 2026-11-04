@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1463,6 +1464,11 @@ CASES: dict[str, dict] = {
                            "-firstSampleDelay 1.4 -debug 1 -voice 0 -endSound none",
                            "shots": [(20, "focus1-breach.png"), (75, "break1.png"), (140, "focus2.png"),
                                      (250, "focus3.png")], "wait": 375, "end": "break3.png"},
+    # issue #8 AC8：白墙 60 秒（空画面、0 帧有人）与低头阅读 60 秒（人在、头低着、0 次暂停）。
+    "ac8-white-wall": {"args": "-scenario white-wall -focusMinutes 1 -debug 1 -voice 0 -endSound none",
+                       "wait": 65, "end": "white-wall.png"},
+    "ac8-head-down-reading": {"args": "-scenario head-down-reading -focusMinutes 1 -debug 1 "
+                              "-voice 0 -endSound none", "wait": 65, "end": "head-down-reading.png"},
 }
 
 
@@ -1577,6 +1583,9 @@ SHOULDER_RATIO_LIMITS = {"good": 0.80, "head_tilt": 0.50, "head_down": 0.50}
 # 068-3/068-4：10 分钟专注里降级时长不得超过 20%。
 DEGRADED_SHARE_LIMIT = 0.20
 DEFAULT_FOCUS_SECONDS = 600.0
+# issue #8 AC2：冷启动 10 分钟里 serious 及以上热状态占比 > 20% 判失败。
+COLD_START_SECONDS = 600.0
+SERIOUS_SHARE_LIMIT = 0.20
 
 # 三个并列状态：通过、失败、数据不足。数据不足不是通过——只因为「没有证据」才成立的规则
 # （没人体所以没有髋关节、没点云所以点数看起来固定）一律判 INSUFFICIENT_DATA。
@@ -1842,6 +1851,368 @@ def judge_thermal(perf: list[dict], seconds: float) -> tuple[str, str]:
                   f"会话 {seconds:.0f} 秒，serious 占 {share:.0%}（仅记录，不设门槛）")
 
 
+# --- issue #8：日志首行、冷启动发热、校准、歪头、在场路径、未测、停表去抖 ---------------
+
+LOG_HEADER_PATTERN = re.compile(r"^\d+\.\d+\.\d+ \(\d+\) ([0-9a-z][0-9a-z._-]*)$")
+CALIBRATION_MIN_SECONDS = 3.0
+STRAIGHT_WINDOW_MIN_SECONDS = 180.0
+HEAD_ROLL_FOLD_LIMIT = 90.0
+WHITE_WALL_MIN_SECONDS = 60.0
+# 边界误差：10 Hz 采样下第一帧要等到 +0.1 s 才到，「60 秒白墙」允许少一个采样间隔。
+WHITE_WALL_TOLERANCE = 0.15
+PRESENCE_CONFIDENCE = 0.5
+
+
+def session_lines(sessions: list[list[dict]]) -> list[dict]:
+    """把每份日志的行压成一条按 `ts` 排序的时间线；不带 `ts` 的行留在行尾。"""
+    rows = [row for rows in sessions for row in rows]
+    timed = [row for row in rows if isinstance(row.get("ts"), (int, float))]
+    untimed = [row for row in rows if not isinstance(row.get("ts"), (int, float))]
+    return sorted(timed, key=lambda row: row["ts"]) + untimed
+
+
+def judge_log_header(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC1：每份会话日志的第一行写出版本、构建号与 commit，commit 不能是 unknown。"""
+    if not sessions:
+        return INSUFFICIENT, "没有 session-*.jsonl"
+    details: list[str] = []
+    failed = False
+    for index, rows in enumerate(sessions, 1):
+        if not rows:
+            failed = True
+            details.append(f"第 {index} 份日志是空的")
+            continue
+        first = rows[0]
+        message = first.get("message")
+        if first.get("event") != "log_header" or not isinstance(message, str):
+            failed = True
+            details.append(f"第 {index} 份日志首行不是 log_header")
+            continue
+        match = LOG_HEADER_PATTERN.match(message)
+        if match is None or match.group(1) == "unknown":
+            failed = True
+            details.append(f"第 {index} 份首行不能回答构建身份：{message}")
+        else:
+            details.append(f"第 {index} 份：{message}")
+    detail = "；".join(details)
+    return (FAIL if failed else PASS), detail
+
+
+def judge_serious_cold_start(perf: list[dict]) -> tuple[str, str]:
+    """AC2：冷启动 10 分钟里 serious 及以上热状态的占比 > 20% 判失败。
+
+    逐秒的 `thermal_state` 与 `window_s` 在 `perf-*.jsonl` 里；`serious_seconds` 是整场累计，
+    不能用来算前 10 分钟，所以这里按秒重算。窗口没跑满 10 分钟时没有分母，判数据不足。
+    """
+    rows = [row for row in perf
+            if isinstance(row.get("t"), (int, float)) and "window_s" in row]
+    if not rows:
+        return INSUFFICIENT, "没有 perf-*.jsonl（或只有首行、没有逐秒汇总）"
+    if "thermal_state" not in rows[0]:
+        return INSUFFICIENT, "perf 里没有逐秒热状态（0.6.8 前的构建）"
+    start = min(row["t"] for row in rows)
+    window = [row for row in rows if row["t"] < start + COLD_START_SECONDS * 1000]
+    weight = lambda row: float(row.get("window_s") or 1.0)  # noqa: E731
+    total = sum(weight(row) for row in window)
+    if total < COLD_START_SECONDS - 5:
+        return INSUFFICIENT, (f"冷启动窗口只跑了 {total:.0f} s（要求 ≥{COLD_START_SECONDS:.0f} s），"
+                              "serious 占比没有分母")
+    serious = sum(weight(row) for row in window
+                  if row.get("thermal_state") in ("serious", "critical"))
+    degraded = sum(weight(row) for row in window if row.get("degraded") is True)
+    share = serious / total
+    detail = (f"冷启动 {total:.0f} s 里 serious 及以上 {serious:.0f} s（占 {share:.1%}，"
+              f"上限 {SERIOUS_SHARE_LIMIT:.0%}），降级节流 {degraded:.0f} s")
+    return (FAIL if share > SERIOUS_SHARE_LIMIT else PASS), detail
+
+
+def judge_calibration(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC4/AC5：校准满 3 秒，`calibration_done` 同时给出横滚与头高基线。
+
+    只有 `calibration_incomplete`（孩子不在画面里、有效样本不足）或根本没有校准事件时判数据
+    不足——没校准不等于校准错了。校准窗口从该文件第一个非 `log_header` 的行算起。
+    """
+    if not sessions:
+        return INSUFFICIENT, "没有 session-*.jsonl"
+    done = [row for row in session_lines(sessions) if row.get("event") == "calibration_done"]
+    incomplete = [row for row in session_lines(sessions)
+                  if row.get("event") == "calibration_incomplete"]
+    if not done:
+        if incomplete:
+            reason = incomplete[0].get("message") or "没有说明"
+            return INSUFFICIENT, f"只有 calibration_incomplete：{reason}"
+        return INSUFFICIENT, "没有校准事件（脚本场景不校准，这一条只有真机有）"
+    failures: list[str] = []
+    for rows in sessions:
+        timed = [row for row in rows if isinstance(row.get("ts"), (int, float))]
+        starts = [row for row in timed if row.get("event") != "log_header"]
+        start_ts = starts[0]["ts"] if starts else None
+        for row in timed:
+            if row.get("event") != "calibration_done":
+                continue
+            if row.get("baseline_roll_deg") is None:
+                failures.append("baseline_roll_deg 为 null（横滚基线是歪头判定的依据，不能缺）")
+            if start_ts is not None and (row["ts"] - start_ts) / 1000 < CALIBRATION_MIN_SECONDS:
+                failures.append(f"校准窗口只有 {(row['ts'] - start_ts) / 1000:.1f} s（短于 3 秒）")
+    if failures:
+        return FAIL, "；".join(sorted(set(failures)))
+    sample = done[0]
+    head_height = sample.get("baseline_head_height")
+    head_height_text = ("头高基线未测（肩线不够，日志如实写 null）" if head_height is None
+                        else f"头高基线 {head_height}")
+    return PASS, (f"{len(done)} 次 calibration_done；横滚基线 {sample.get('baseline_roll_deg')}°，"
+                  f"{head_height_text}，校准窗口 ≥{CALIBRATION_MIN_SECONDS:.0f} s")
+
+
+def straight_windows(sessions: list[list[dict]]) -> list[dict]:
+    """坐正窗口：`status_changed` 的 good 段。
+
+    不用 DEBUG 分段测试的「坐直」段：那是 20 秒的分段标记，证明不了「坐正 3 分钟」。
+    """
+    return [window for window in shoulder_windows(sessions) if window.get("state") == "good"]
+
+
+def judge_head_tilt(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC5：横滚折回 ±90°，坐正窗口里 3 分钟不产生歪头。
+
+    读数来自 `features` 行的 `feature_values.head_roll`（已经是相对基线、取绝对值的角度）：
+    它必须落在折回区间 [0°, 90°]，并且在坐正窗口里不得超过该行自己的阈值。
+    """
+    rows = session_lines(sessions)
+    calibrated = [row for row in rows
+                  if row.get("event") == "calibration_done"
+                  and row.get("baseline_roll_deg") is not None]
+    if not calibrated:
+        return INSUFFICIENT, "没有带横滚基线的 calibration_done，歪头基线无法判"
+    windows = straight_windows(sessions)
+    straight_seconds = sum((window.get("end") or 0) - (window.get("start") or 0)
+                           for window in windows) / 1000
+    if straight_seconds < STRAIGHT_WINDOW_MIN_SECONDS:
+        return INSUFFICIENT, (f"坐正窗口合计 {straight_seconds:.0f} s（要求 ≥"
+                              f"{STRAIGHT_WINDOW_MIN_SECONDS:.0f} s），3 分钟歪头计时没有证据")
+    inside = [row for row in rows
+              if row.get("event") == "features"
+              and isinstance(row.get("ts"), (int, float))
+              and any((window.get("start") or 0) <= row["ts"] <= (window.get("end") or 0)
+                      for window in windows)]
+    readings = [(row, (row.get("feature_values") or {}).get("head_roll") or {})
+                for row in inside]
+    readings = [(row, entry) for row, entry in readings if isinstance(entry.get("value"), (int, float))]
+    if not readings:
+        return INSUFFICIENT, "坐正窗口里没有 head_roll 读数"
+    unfolded = [value for _row, entry in readings
+                if (value := entry["value"]) > HEAD_ROLL_FOLD_LIMIT]
+    over = [(row["ts"], entry) for row, entry in readings
+            if entry["value"] > float(entry.get("threshold") or 15.0)]
+    if unfolded:
+        return FAIL, (f"{len(unfolded)} 个 head_roll 读数超出折回区间 ±{HEAD_ROLL_FOLD_LIMIT:.0f}°"
+                      f"（最大 {max(unfolded):.1f}°）")
+    if over:
+        return FAIL, (f"坐正窗口里有 {len(over)} 个 head_roll 读数越阈（最大 "
+                      f"{max(entry['value'] for _ts, entry in over):.1f}°），3 分钟内歪头计时不为 0")
+    max_value = max(entry["value"] for _row, entry in readings)
+    return PASS, (f"坐正窗口 {straight_seconds:.0f} s 里 {len(readings)} 个 head_roll 读数，"
+                  f"最大 {max_value:.1f}°（阈值 {readings[0][1].get('threshold')}），全部在 ±90° 内")
+
+
+def expected_presence_path(row: dict) -> str:
+    """按 `PresenceGate.path` 的规则从一帧日志复算在场路径。"""
+    joints = row.get("joints") or {}
+
+    def passed(name: str) -> bool:
+        return float((joints.get(name) or {}).get("c") or 0) >= PRESENCE_CONFIDENCE
+
+    if not passed("nose"):
+        return "none"
+    if row.get("face_detected") is True or (passed("leftEye") and passed("rightEye")):
+        return "face_eyes"
+    flat = ("neck", "left_shoulder", "right_shoulder")
+    if any(float(row.get(name) or 0) >= PRESENCE_CONFIDENCE for name in flat):
+        return "neck_shoulder"
+    return "none"
+
+
+def judge_presence_path(joints: list[dict]) -> tuple[str, str]:
+    """AC7：每帧记录命中哪条在场证据，并给出颈/肩置信度；记录必须与证据一致。"""
+    if not joints:
+        return INSUFFICIENT, "没有 joints-*.jsonl"
+    keyed = [row for row in joints if "presence_path" in row]
+    if len(keyed) < MIN_VISIBLE_JOINT_FRAMES:
+        return INSUFFICIENT, (f"只有 {len(keyed)} 帧带 presence_path（0.6.8 (18) 起才有；"
+                              f"要求 ≥{MIN_VISIBLE_JOINT_FRAMES}）")
+    missing = sum(1 for row in keyed
+                  if any(key not in row for key in
+                         ("face_detected", "neck", "left_shoulder", "right_shoulder")))
+    mismatch = [row for row in keyed if expected_presence_path(row) != row.get("presence_path")]
+    counts: dict[str, int] = {}
+    for row in keyed:
+        counts[row.get("presence_path")] = counts.get(row.get("presence_path"), 0) + 1
+    paths = "、".join(f"{name} {count}" for name, count in sorted(counts.items()))
+    detail = f"{len(keyed)} 帧；路径分布 {paths}"
+    if missing:
+        return FAIL, detail + f"；{missing} 帧缺少 face_detected / 颈 / 肩字段"
+    if mismatch:
+        first = mismatch[0]
+        return FAIL, (detail + f"；{len(mismatch)} 帧的 presence_path 与置信度不一致，"
+                      f"例如 t={first.get('t')} 记 {first.get('presence_path')}、"
+                      f"实算 {expected_presence_path(first)}")
+    return PASS, detail + "；每帧的 presence_path 都能由同一帧的置信度复算"
+
+
+def judge_unmeasured_quiet(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC6：没有数据的检查记「未测」（`value: null`），永远不越阈、不提醒、不进占比。"""
+    features = [row for row in session_lines(sessions) if row.get("event") == "features"]
+    if not features:
+        return INSUFFICIENT, "没有 features 行，缺测口径无从验证"
+    unmeasured = 0
+    wrong: list[str] = []
+    for row in features:
+        for name, entry in (row.get("feature_values") or {}).items():
+            if not isinstance(entry, dict) or entry.get("value") is not None:
+                continue
+            unmeasured += 1
+            if entry.get("over") is True:
+                wrong.append(f"t={row.get('t')} 的 {name}")
+    detail = f"{len(features)} 行 features、{unmeasured} 个未测读数"
+    if wrong:
+        return FAIL, detail + f"；其中 {len(wrong)} 个被记成越阈（{wrong[0]}）"
+    if unmeasured == 0:
+        return INSUFFICIENT, detail + "；一个未测读数都没有，这条规则没有被验证过"
+    return PASS, detail + "；未测读数全部 over=false"
+
+
+def judge_pause_debounce(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC9：停表去抖——paused / resumed 严格交替，离开一次只暂停一次、回来只恢复一次。"""
+    rows = session_lines(sessions)
+    events = [row for row in rows if row.get("event") in ("paused", "resumed")]
+    if not events:
+        return INSUFFICIENT, "没有 paused / resumed 行，去抖没有可判对象"
+    cycles = 0
+    duplicates = 0
+    orphans = 0
+    paused = False
+    for row in events:
+        if row["event"] == "paused":
+            if paused:
+                duplicates += 1
+            paused = True
+        else:
+            if not paused:
+                orphans += 1
+            else:
+                cycles += 1
+            paused = False
+    detail = f"{cycles} 次离开/回来；重复 paused {duplicates}、孤立 resumed {orphans}"
+    if duplicates or orphans:
+        return FAIL, detail
+    if cycles == 0:
+        return INSUFFICIENT, detail + "；没有一次完整的离开/回来，去抖没有被验证过"
+    return PASS, detail
+
+
+def judge_pause_during_head_down(sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC8：低头阅读段不出现无人暂停——人在，头低着，倒计时不该停。"""
+    rows = session_lines(sessions)
+    windows = [window for window in shoulder_windows(sessions) if window.get("state") == "head_down"]
+    windows += [window for window in segment_test_windows(sessions)
+                if window.get("name") == "低头"]
+    total = sum((window.get("end") or 0) - (window.get("start") or 0) for window in windows) / 1000
+    if total < 30:
+        return INSUFFICIENT, (f"低头窗口合计 {total:.0f} s（要求 ≥30 s），"
+                              "「低头阅读段 0 次暂停」没有证据")
+    paused = [row for row in rows
+              if row.get("event") == "paused" and isinstance(row.get("ts"), (int, float))
+              and any((window.get("start") or 0) <= row["ts"] <= (window.get("end") or 0)
+                      for window in windows)]
+    detail = f"低头窗口 {total:.0f} s，其中 paused {len(paused)} 次"
+    if paused:
+        return FAIL, detail + f"（第一次 t={iso_from_millis(paused[0]['ts'])}）"
+    return PASS, detail
+
+
+def judge_white_wall_absence(joints: list[dict], sessions: list[list[dict]]) -> tuple[str, str]:
+    """AC8：白墙 60 秒 0 帧有人——空画面里没有一帧被判成有人。
+
+    证据优先用 `joints-*.jsonl` 的 `presence_path`（0.6.8 (18) 的现行口径：鼻过门槛且有人脸/
+    双眼或颈肩之一；只有鼻子不算有人）。没有关节日志时退回会话日志：`sample` 行的
+    `distance_cm` 为 null 说明相机这一帧没有量到任何脸，连续 60 秒都为空且其间没有把状态推成
+    任何体态，就算白墙段。两种证据都没有时判数据不足。
+    """
+    if not joints:
+        return _judge_white_wall_from_sessions(sessions)
+    keyed = [row for row in joints if "presence_path" in row]
+    if len(keyed) < MIN_VISIBLE_JOINT_FRAMES:
+        return INSUFFICIENT, "没有带 presence_path 的关节点帧（0.6.8 (18) 起才有）"
+    claimed = [row for row in keyed
+               if row.get("detected") is False and row.get("presence_path") != "none"]
+    if claimed:
+        first = claimed[0]
+        return FAIL, (f"{len(claimed)} 帧模型没看到人，却记下了在场证据"
+                      f"（第一次 t={first.get('t')}：{first.get('presence_path')}）")
+    longest = 0.0
+    run = 0.0
+    previous_t: float | None = None
+    for row in sorted(keyed, key=lambda row: row.get("t") or 0):
+        t = row.get("t")
+        if not isinstance(t, (int, float)):
+            continue
+        blank = row.get("presence_path") == "none"
+        if blank:
+            if previous_t is not None and t - previous_t <= 500:
+                run += (t - previous_t) / 1000
+            else:
+                run = 0.1
+            longest = max(longest, run)
+        else:
+            run = 0.0
+        previous_t = t
+    blank_frames = sum(1 for row in keyed if row.get("presence_path") == "none")
+    detail = f"没有在场证据的帧 {blank_frames} 帧，最长连续空镜 {longest:.1f} s（要求 ≥60 s）"
+    if longest + WHITE_WALL_TOLERANCE < WHITE_WALL_MIN_SECONDS:
+        return INSUFFICIENT, detail + "；本轮没有 60 秒白墙段，白墙不误报没有被验证过"
+    return PASS, detail + "；这些帧没有一帧判成有人"
+
+
+def _judge_white_wall_from_sessions(sessions: list[list[dict]]) -> tuple[str, str]:
+    """没有关节日志（脚本场景不跑 Vision）时，用 `sample` 行的空读数判白墙段。"""
+    rows = session_lines(sessions)
+    samples = [row for row in rows
+               if row.get("event") == "sample" and isinstance(row.get("ts"), (int, float))]
+    if not samples:
+        return INSUFFICIENT, "既没有 joints-*.jsonl，也没有 sample 行，白墙段没有证据"
+    blank = [row for row in samples if row.get("distance_cm") is None]
+    if not blank:
+        return INSUFFICIENT, (f"{len(samples)} 行 sample 都有距离读数，本轮没有白墙段")
+    longest = 0.0
+    run_start: float | None = None
+    previous: float | None = None
+    for row in blank:
+        ts = row["ts"]
+        if previous is not None and ts - previous <= 500:
+            longest = max(longest, (ts - run_start) / 1000 + 0.1)
+        else:
+            run_start = ts
+        previous = ts
+    if run_start is not None:
+        tail = (previous - run_start) / 1000 + 0.1
+        session_end = max((row["ts"] for row in rows if isinstance(row.get("ts"), (int, float))),
+                          default=None)
+        # 最后一段空镜可能一直持续到专注结束：结束时刻离最后一个样本不超过 500 ms 时，按结束时刻算。
+        if session_end is not None and session_end - previous <= 500:
+            tail = max(tail, (session_end - run_start) / 1000)
+        longest = max(longest, tail)
+    postures = [row for row in rows
+                if row.get("event") == "status_changed"
+                and row.get("state") not in ("good", "no_person")]
+    detail = (f"没有关节日志；{len(blank)}/{len(samples)} 行 sample 没有距离读数，"
+              f"最长连续空镜 {longest:.1f} s（要求 ≥60 s），其间体态行 {len(postures)} 行")
+    if longest + WHITE_WALL_TOLERANCE < WHITE_WALL_MIN_SECONDS:
+        return INSUFFICIENT, detail + "；本轮没有 60 秒白墙段"
+    if postures:
+        return FAIL, detail + "；空画面里却判出了体态"
+    return PASS, detail + "；空画面没有被判成有人"
+
+
 def judge_cloud_smooth(frames: list[dict]) -> tuple[str, str]:
     """点云流畅 + 点数固定。
 
@@ -2071,6 +2442,16 @@ def command_device_logs(args) -> int:
         "degradation": judge_degradation(degradation_periods(logs["sessions"], logs["perf"]),
                                           logs["perf"], args.focus_seconds, seconds),
         "thermal": judge_thermal(logs["perf"], seconds),
+        # issue #8：日志首行、冷启动 serious 占比、校准、歪头、在场证据、未测与停表去抖。
+        "log-header": judge_log_header(logs["sessions"]),
+        "serious-cold-start": judge_serious_cold_start(logs["perf"]),
+        "calibration": judge_calibration(logs["sessions"]),
+        "head-tilt": judge_head_tilt(logs["sessions"]),
+        "presence-path": judge_presence_path(logs["joints"]),
+        "unmeasured-quiet": judge_unmeasured_quiet(logs["sessions"]),
+        "pause-debounce": judge_pause_debounce(logs["sessions"]),
+        "pause-during-head-down": judge_pause_during_head_down(logs["sessions"]),
+        "white-wall-absence": judge_white_wall_absence(logs["joints"], logs["sessions"]),
     }
     # 整轮没测到人：任何「没人体也成立」的规则都不能算通过，统一判数据不足。
     if detected < MIN_DETECTED_FRAMES:
@@ -2271,7 +2652,7 @@ def main() -> int:
     pn = sub.add_parser("png", help="截图像素统计（点云包围盒、占屏比例）")
     pn.add_argument("files", nargs="+")
     pn.add_argument("--json")
-    dl = sub.add_parser("device-logs", help="拷真机 Documents/debug 并判 0.6.8 的五条标准")
+    dl = sub.add_parser("device-logs", help="拷真机 Documents/debug 并判 0.6.8 (25) 的判定表")
     dl.add_argument("--run", default=None)
     dl.add_argument("--device", default=None, help=f"UDID，默认 {DEFAULT_DEVICE}")
     dl.add_argument("--dir", default=None, help="已拷贝好的 debug 目录（跳过 devicectl）")

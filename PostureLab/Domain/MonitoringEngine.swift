@@ -110,10 +110,12 @@ struct MonitoringEngine {
   init(config: Config,
        baselineDistanceCM: Double? = nil,
        baselinePitchDeg: Double? = nil,
+       baselineHeadHeight: Double? = nil,
        startedAt: Date = Date()) {
     var baseline = config.baseline
     if let baselineDistanceCM { baseline.distanceCM = baselineDistanceCM }
     if let baselinePitchDeg { baseline.pitchDeg = baselinePitchDeg }
+    if let baselineHeadHeight { baseline.headHeight = baselineHeadHeight }
     self.config = config
     self.baseline = baseline
     self.status = .good

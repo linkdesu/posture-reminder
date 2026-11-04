@@ -24,25 +24,96 @@ DURATION = 600          # 计划专注 10 分钟
 
 
 def joint_row(t_ms: int, *, visible: bool = True, detected: bool = True,
-              invalidated: bool = False, extra_joints: dict | None = None) -> dict:
+              invalidated: bool = False, extra_joints: dict | None = None,
+              presence_path: str | None = None, face_detected: bool | None = None) -> dict:
     joints = {name: {"c": 0.9 if visible else None, "v": visible} for name in JOINTS}
     if extra_joints:
         joints.update(extra_joints)
+    path = presence_path if presence_path is not None else ("face_eyes" if visible else "none")
     return {"t": t_ms, "session_t": 0.0, "detected": detected, "stale": False,
             "shoulders_available": visible, "shoulders_invalidated": invalidated,
+            "presence_path": path,
+            "face_detected": face_detected if face_detected is not None else visible,
+            "neck": 0.9 if visible else None,
+            "left_shoulder": 0.9 if visible else None,
+            "right_shoulder": 0.9 if visible else None,
             "raw": {name: (0.9 if visible else None) for name in JOINTS},
             "joints": joints}
 
 
-def session_rows(second: int = DURATION, states=None) -> list[dict]:
-    """一段 10 分钟的会话：`status_changed` 切出体态窗口，最后一个 session_ended 撑满时长。"""
+def header_row(version: str = "0.6.8", build: int = 25, commit: str = "c648a47") -> dict:
+    """0.6.8 起会话日志的第一行：版本、构建号、commit。"""
+    return {"ts": T0 - 1000, "event": "log_header", "message": f"{version} ({build}) {commit}"}
+
+
+def calibration_row(at: float = 3.0, *, roll: float | None = 7.5,
+                    head_height: float | None = 0.28) -> dict:
+    return {"ts": T0 + int(at * 1000), "event": "calibration_done", "state": "good",
+            "baseline_distance_cm": 40.0, "baseline_pitch_deg": 0.0,
+            "baseline_roll_deg": roll, "baseline_head_height": head_height}
+
+
+def feature_rows(seconds: int = DURATION, *, straight_roll: float = 3.0,
+                 tilt_roll: float = 18.0, tilt_windows=((100, 130),)) -> list[dict]:
+    """2 Hz 的特征行：坐正窗口里横滚 3°，歪头窗口里 18°；手到脸永远缺测（value null）。"""
+    rows = []
+    for second in range(0, seconds, 2):
+        roll = tilt_roll if any(start <= second < end for start, end in tilt_windows) else straight_roll
+        rows.append({"ts": T0 + second * 1000, "t": float(second), "event": "features",
+                     "state": "good",
+                     "feature_values": {
+                         "head_roll": {"value": roll, "threshold": 15.0, "over": roll > 15.0},
+                         "head_pitch": {"value": 0.0, "threshold": 20.0, "over": False},
+                         "hand_to_face": {"value": None, "threshold": 0.12, "over": False}}})
+    return rows
+
+
+def null_sample_rows(seconds: int = 60, *, start: int = 0, frames: int | None = None) -> list[dict]:
+    """10 Hz 的 sample 行：没有距离、没有俯仰——相机这一帧没量到任何脸（白墙）。
+
+    `frames` 用来造「最后一个样本在 59.8 s、专注在 60.0 s 结束」这种真机/模拟器都常见的收尾。
+    """
+    count = seconds * 10 if frames is None else frames
+    return [{"ts": T0 + (start + index / 10) * 1000, "event": "sample",
+             "distance_cm": None, "pitch_deg": None, "state": "no_person"}
+            for index in range(count)]
+
+
+def pause_rows(spans: list[tuple[int, int]]) -> list[dict]:
+    rows = []
+    for start, end in spans:
+        rows.append({"ts": T0 + start * 1000, "event": "paused", "state": "no_person"})
+        rows.append({"ts": T0 + end * 1000, "event": "resumed", "state": "good"})
+    return rows
+
+
+def session_rows(second: int = DURATION, states=None, *,
+                 pauses: list[tuple[int, int]] | None = None,
+                 header: dict | None = None,
+                 calibration: dict | None = None) -> list[dict]:
+    """一段 10 分钟的会话：构建身份、静默校准、`status_changed` 体态窗口、最长无人暂停。"""
     windows = states if states is not None else [("head_tilt", 100, 130), ("head_down", 200, 230)]
-    rows = [{"ts": T0, "event": "session_started", "state": "good"}]
+    rows = [header if header is not None else header_row(),
+            {"ts": T0, "event": "session_started", "state": "good"},
+            calibration if calibration is not None else calibration_row()]
     for state, start, end in windows:
         rows.append({"ts": T0 + start * 1000, "event": "status_changed", "state": state})
         rows.append({"ts": T0 + end * 1000, "event": "status_changed", "state": "good"})
-    rows.append({"ts": T0 + second * 1000, "event": "session_ended", "state": "good"})
+    rows += pause_rows([(400, 410)] if pauses is None else pauses)
+    rows.append({"ts": T0 + second * 1000, "event": "session_ended", "state": "good",
+                 "posture_stats": {"head_tilt": {"episodes": 1, "reminders": 0, "seconds": 30.0},
+                                   "head_down": {"episodes": 1, "reminders": 1, "seconds": 30.0}}})
     return sorted(rows, key=lambda row: row["ts"])
+
+
+def joints_window(seconds: int = DURATION, *, blank=((0, 60),)) -> list[dict]:
+    """10 Hz 关节流：`blank` 区间是白墙——模型没有看到人，也没有任何在场证据。"""
+    rows = []
+    for index in range(seconds * 10):
+        second = index / 10
+        blank_now = any(start <= second < end for start, end in blank)
+        rows.append(joint_row(T0 + index * 100, visible=not blank_now, detected=not blank_now))
+    return rows
 
 
 def thermal_rows(periods: list[tuple[int, int]]) -> list[dict]:
@@ -135,8 +206,8 @@ class DeviceLogsTests(unittest.TestCase):
 
     def fixtures(self, *, joints=None, perf=None, frames=None, sessions=None):
         return {
-            "joints": joints if joints is not None else joints_all(),
-            "sessions": sessions if sessions is not None else session_rows(),
+            "joints": joints if joints is not None else joints_window(),
+            "sessions": sessions if sessions is not None else session_rows() + feature_rows(),
             "perf": perf if perf is not None else perf_rows(DURATION),
             "frames": frames if frames is not None else frame_rows(DURATION),
         }
@@ -147,7 +218,10 @@ class DeviceLogsTests(unittest.TestCase):
         r = self.run_device_logs(**self.fixtures())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         for name in ("upper-body-only", "shoulders-not-on-head",
-                     "shoulders-available-ratio", "cloud-smooth", "degradation"):
+                     "shoulders-available-ratio", "cloud-smooth", "degradation",
+                     "log-header", "serious-cold-start", "calibration", "head-tilt",
+                     "presence-path", "unmeasured-quiet", "pause-debounce",
+                     "pause-during-head-down", "white-wall-absence"):
             self.assertIn(f"PASS {name}", r.stdout)
         self.assertIn("模拟器测不到的项", r.stdout)
 
@@ -232,7 +306,7 @@ class DeviceLogsTests(unittest.TestCase):
     def test_degraded_time_under_the_share_passes_when_the_session_is_long_enough(self):
         r = self.run_device_logs(**self.fixtures(
             perf=perf_rows(DURATION, degraded_seconds=set(range(0, 60))),
-            sessions=session_rows() + thermal_rows([(0, 60)])))
+            sessions=session_rows() + thermal_rows([(0, 60)]) + feature_rows()))
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertIn("PASS degradation", r.stdout)
 
@@ -352,7 +426,7 @@ class DeviceLogsTests(unittest.TestCase):
     def test_the_straight_segment_marker_is_the_window_for_the_good_state(self):
         r = self.run_device_logs(**self.fixtures(
             joints=joints_visible_in(self.VISIBLE_ZONES),
-            sessions=session_rows() + segment_rows(self.MARKS)))
+            sessions=session_rows() + segment_rows(self.MARKS) + feature_rows()))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("PASS shoulders-available-ratio", r.stdout)
         self.assertIn("坐直窗口来自 test_segment 段标记", r.stdout)
@@ -363,6 +437,176 @@ class DeviceLogsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("FAIL shoulders-available-ratio", r.stdout)
         self.assertIn("坐直窗口沿用 status_changed", r.stdout)
+
+
+    # --- issue #8：日志首行、冷启动发热、校准、歪头、在场路径、未测、停表去抖 ---
+
+    def test_a_missing_log_header_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=[row for row in session_rows() + feature_rows()
+                      if row["event"] != "log_header"]))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL log-header", r.stdout)
+
+    def test_an_unknown_commit_in_the_log_header_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=[header_row(commit="unknown")] + session_rows()[1:] + feature_rows()))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL log-header", r.stdout)
+        self.assertIn("unknown", r.stdout)
+
+    def test_serious_time_over_the_cold_start_share_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            perf=perf_rows(DURATION, degraded_seconds=set(range(0, 150)))))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL serious-cold-start", r.stdout)
+        self.assertIn("25.0%", r.stdout)
+
+    def test_serious_time_under_the_cold_start_share_passes(self):
+        r = self.run_device_logs(**self.fixtures(
+            perf=perf_rows(DURATION, degraded_seconds=set(range(0, 60)))))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS serious-cold-start", r.stdout)
+
+    def test_a_session_shorter_than_the_cold_start_window_is_insufficient(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(second=120) + feature_rows(120),
+            perf=perf_rows(120),
+            frames=frame_rows(120)))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA serious-cold-start", r.stdout)
+
+    def test_a_calibration_shorter_than_three_seconds_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(calibration=calibration_row(at=2.0)) + feature_rows()))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL calibration", r.stdout)
+        self.assertIn("短于 3 秒", r.stdout)
+
+    def test_a_calibration_without_a_roll_baseline_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(calibration=calibration_row(roll=None)) + feature_rows()))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL calibration", r.stdout)
+        self.assertIn("baseline_roll_deg", r.stdout)
+
+    def test_a_calibration_without_a_measured_head_height_passes_honestly(self):
+        # 肩线不够时头高基线是 null：没测到就写 null，不是失败，也不是假的中位数。
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(calibration=calibration_row(head_height=None)) + feature_rows()))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS calibration", r.stdout)
+        self.assertIn("头高基线未测", r.stdout)
+
+    def test_a_calibration_that_never_finished_is_insufficient(self):
+        rows = [row for row in session_rows() if row["event"] != "calibration_done"]
+        rows.append({"ts": T0 + 3200, "event": "calibration_incomplete",
+                     "message": "3 秒内有效横滚样本不足 10 个"})
+        r = self.run_device_logs(**self.fixtures(sessions=sorted(rows, key=lambda r: r["ts"])
+                                                 + feature_rows()))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA calibration", r.stdout)
+
+    def test_a_straight_three_minute_window_without_tilt_passes(self):
+        r = self.run_device_logs(**self.fixtures())
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS head-tilt", r.stdout)
+        self.assertIn("180", r.stdout)
+
+    def test_tilt_over_the_threshold_while_sitting_straight_fails(self):
+        rows = [row for row in session_rows() if row["event"] != "calibration_done"]
+        rows.append(calibration_row())
+        r = self.run_device_logs(**self.fixtures(
+            sessions=sorted(rows, key=lambda r: r["ts"]) + feature_rows(straight_roll=20.0)))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL head-tilt", r.stdout)
+
+    def test_a_roll_reading_outside_the_folded_range_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows() + feature_rows(straight_roll=120.0)))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL head-tilt", r.stdout)
+        self.assertIn("折回", r.stdout)
+
+    def test_a_wrong_presence_path_fails(self):
+        joints = joints_window()
+        joints[300]["presence_path"] = "neck_shoulder"
+        r = self.run_device_logs(**self.fixtures(joints=joints))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL presence-path", r.stdout)
+
+    def test_frames_without_presence_keys_are_insufficient(self):
+        joints = joints_window()
+        for row in joints:
+            row.pop("presence_path")
+        r = self.run_device_logs(**self.fixtures(joints=joints))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA presence-path", r.stdout)
+
+    def test_an_unmeasured_reading_marked_over_fails(self):
+        rows = feature_rows()
+        rows[3]["feature_values"]["hand_to_face"] = {"value": None, "threshold": 0.12, "over": True}
+        r = self.run_device_logs(**self.fixtures(sessions=session_rows() + rows))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL unmeasured-quiet", r.stdout)
+
+    def test_a_pause_without_a_resume_pair_fails_the_debounce_rule(self):
+        sessions = [row for row in session_rows() if row["event"] != "resumed"]
+        sessions.append({"ts": T0 + 500_000, "event": "paused", "state": "no_person"})
+        r = self.run_device_logs(**self.fixtures(
+            sessions=sorted(sessions, key=lambda r: r["ts"]) + feature_rows()))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL pause-debounce", r.stdout)
+
+    def test_a_pause_inside_a_head_down_window_fails(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(pauses=[(210, 215)]) + feature_rows()))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL pause-during-head-down", r.stdout)
+
+    def test_no_head_down_window_is_insufficient_for_the_pause_rule(self):
+        r = self.run_device_logs(**self.fixtures(
+            sessions=session_rows(states=[("head_tilt", 100, 130)]) + feature_rows()))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA pause-during-head-down", r.stdout)
+
+    def test_a_white_wall_absence_without_false_presence_passes(self):
+        r = self.run_device_logs(**self.fixtures())
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("PASS white-wall-absence", r.stdout)
+        self.assertIn("60", r.stdout)
+
+    def test_a_blank_frame_that_claims_presence_fails(self):
+        joints = joints_window()
+        joints[120]["presence_path"] = "face_eyes"
+        r = self.run_device_logs(**self.fixtures(joints=joints))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("FAIL white-wall-absence", r.stdout)
+
+    def test_white_wall_from_the_session_log_passes_without_joints(self):
+        sessions = session_rows(states=[("no_person", 0, 60)]) + null_sample_rows(60)
+        r = self.run_device_logs(joints=[], sessions=sessions, perf=perf_rows(DURATION),
+                                 frames=frame_rows(DURATION))
+        self.assertIn("PASS white-wall-absence", r.stdout)
+        self.assertIn("60", r.stdout)
+
+    def test_a_blank_stretch_that_runs_to_the_session_end_counts_to_the_end(self):
+        # 59.8 s 的最后一个空样本、60.0 s 专注结束：这段空镜就是 60 秒，不能因为收尾少算一格判数据不足。
+        sessions = session_rows(second=60, states=[("no_person", 0, 60)]) + null_sample_rows(0, frames=599)
+        r = self.run_device_logs(joints=[], sessions=sessions, perf=perf_rows(DURATION),
+                                 frames=frame_rows(DURATION))
+        self.assertIn("PASS white-wall-absence", r.stdout)
+
+    def test_a_posture_inside_the_blank_stretch_fails_the_white_wall_rule(self):
+        sessions = (session_rows(states=[("near", 10, 20)]) + null_sample_rows(60))
+        r = self.run_device_logs(joints=[], sessions=sessions, perf=perf_rows(DURATION),
+                                 frames=frame_rows(DURATION))
+        self.assertIn("FAIL white-wall-absence", r.stdout)
+
+    def test_no_long_absence_window_is_insufficient_for_the_white_wall_rule(self):
+        r = self.run_device_logs(**self.fixtures(joints=joints_window(blank=((0, 10),))))
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("INSUFFICIENT_DATA white-wall-absence", r.stdout)
 
 
 if __name__ == "__main__":

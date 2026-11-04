@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		046691B680564E2D7F4EE523 /* VerifyDriveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C0C8E3EFD057439798567B /* VerifyDriveUITests.swift */; };
+		04FC617579450E9D0B27CC1B /* HeadTiltCalibrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC8D408CFB43A4037F243A5 /* HeadTiltCalibrationTests.swift */; };
 		057E6DF6260A36D7AB617ACC /* ManualPauseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E22981091AC15A0A8AF139 /* ManualPauseUITests.swift */; };
 		07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */; };
 		09098392E94845EDFEC07D5D /* CloudMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C0D2C5446F3C2C911E33F /* CloudMotionTests.swift */; };
@@ -191,6 +192,7 @@
 		6DDC6CDB9B4FF19B9E9B9168 /* IdleTimerPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleTimerPolicy.swift; sourceTree = "<group>"; };
 		6DECA819287056EFAF59B08B /* BodyCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCloud.swift; sourceTree = "<group>"; };
 		72CE5EC22155E8F6C02D413E /* HeadGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadGeometry.swift; sourceTree = "<group>"; };
+		7BC8D408CFB43A4037F243A5 /* HeadTiltCalibrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadTiltCalibrationTests.swift; sourceTree = "<group>"; };
 		7BFCA81828D731A5A20DEC51 /* CloudMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudMotion.swift; sourceTree = "<group>"; };
 		7C8AB58BFD0D5AB1CD248AA1 /* DebugLineFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLineFile.swift; sourceTree = "<group>"; };
 		7E37082B9C3154D095C46336 /* near.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = near.wav; sourceTree = "<group>"; };
@@ -327,6 +329,7 @@
 				6C02404D1DBBF7CE559D7D37 /* DebugLogLineTests.swift */,
 				0BDDB82849ECE4C18E3EBF9E /* DepthPipelineTests.swift */,
 				83FE7B91F656EC8DA9D18119 /* FocusTimelineTests.swift */,
+				7BC8D408CFB43A4037F243A5 /* HeadTiltCalibrationTests.swift */,
 				89FB5BAC46243600AF0A6D22 /* IdleTimerLogTriggerTests.swift */,
 				B2BBDA31DE75D68FB05C98EC /* IdleTimerTests.swift */,
 				1A59C6ECE34282D333581F58 /* JitterMeterTests.swift */,
@@ -696,6 +699,7 @@
 				66F3893B5FC0E50A80A5CF10 /* DebugLogLineTests.swift in Sources */,
 				6BE92E7E8028CC81286C8BEB /* DepthPipelineTests.swift in Sources */,
 				07381B43CC844DB4BAAC9536 /* FocusTimelineTests.swift in Sources */,
+				04FC617579450E9D0B27CC1B /* HeadTiltCalibrationTests.swift in Sources */,
 				84DC3253816CF7E6E1ECE701 /* IdleTimerLogTriggerTests.swift in Sources */,
 				A3ACDEDF60B18F081F4D78F2 /* IdleTimerTests.swift in Sources */,
 				15C044B577FE320672B1A689 /* JitterMeterTests.swift in Sources */,
@@ -838,7 +842,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PostureLab;
@@ -937,7 +941,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = DFA8MZ9MZW;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PostureLab;
