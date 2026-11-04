@@ -21,7 +21,8 @@ struct PostureBaseline: Equatable {
   /// first frame that has body data, which for the rig — and for any session that opens sitting
   /// upright — is its neutral layout. Keeping those numbers here is what stops the rig and the
   /// baseline from drifting apart.
-  static let uprightHeadHeight = 0.30
+  /// 直立时「肩线中线 − 鼻点」的归一化高度；校准会把它换成孩子自己的中位数。
+  static let uprightHeadHeight = 0.22
   static let uprightHeadDepthM = 0.35
   static let uprightShoulderWidth = 0.20
   static let uprightNeckToRoot = 0.20
@@ -64,13 +65,21 @@ enum PostureClassifier {
 
     var breached: [PostureKind: Bool] = [:]
     breached[.near] = over(.distance)
-    breached[.headDown] = over(.headPitch)
+    // 低头 = 深度平面的俯仰越阈 + 头高没有升高（v0.6.8）。俯仰本身来自同一帧深度；头高是第二路
+    // 信号，用来否掉「下巴上抬却被读成低头」的误判。头高缺测时它不否决——缺测不等于没低头，而
+    // 俯仰已经量到了。
+    let headRaised = (byFeature[.headHeightDrop]?.value ?? 0) < 0
+    breached[.headDown] = over(.headPitch) && !headRaised
+    // 歪头的横滚已在采集侧按 眼线 → 耳线 → 深度平面 选好（`VisionPoseMapping.rollDegrees`），
+    // 这里只读结果：三个来源都没有时 rollDeg 为 nil，这一行自然缺测。
     breached[.headTilt] = over(.headRoll)
     breached[.shoulderTilt] = shoulderLine && over(.shoulderTilt)
     // `bodyPresent` gates the whole rule and not just the face-lost branch: without it a child who got
     // up and walked away would be read as leaning on the desk.
     let deepDip = pitchDrop.map { $0 > 2 * thresholds.pitchDeg } ?? false
     breached[.deskLean] = bodyPresent && over(.headHeightDrop) && (deepDip || !sample.facePresent)
+    // 托腮不做（ADR-0008 第 7 条）：本轮的关节来源不给出腕关节，`hand_to_face` 永远缺测，这个
+    // 体态永远不会越阈。枚举与日志词表保留给历史记录与脚本 rig 的回归用例。
     breached[.chinRest] = over(.handToFace)
     breached[.headForward] = over(.headForward)
     breached[.slouch] = shoulderLine && over(.slouch)
@@ -90,6 +99,14 @@ enum PostureClassifier {
                              breached: breached,
                              dominant: dominant,
                              highlighted: highlighted)
+  }
+
+  /// 「头部相对肩线高度」：两肩中线 − 鼻点 y（归一化，正数 = 头比肩线高）。缺肩或缺鼻时 nil。
+  /// 校准与判定读的是同一个量，头高不再依赖写死的 0.30。
+  static func headHeight(joints: [JointID: JointSample]) -> Double? {
+    guard let nose = joints[.nose],
+          let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+    return (left.y + right.y) / 2 - nose.y
   }
 
   /// The features a kind's rule reads; the highlight is picked from just these.
@@ -135,9 +152,16 @@ enum PostureClassifier {
               baseline: baseline.shoulderTiltDeg)
     } ?? missing(.shoulderTilt, thresholds.shoulderTiltDeg, baseline: baseline.shoulderTiltDeg))
 
-    readings.append(nose.map {
+    // 头部相对肩线高度：鼻点与两肩中线的归一化距离（正数 = 头比肩线高）。头高不再用写死的 0.30
+    // 当基线——那个常数跟孩子坐姿无关，只取决于头在画面里的位置（r20 诊断）。
+    let headHeight: Double? = {
+      guard let nose,
+            let left = joints[.leftShoulder], let right = joints[.rightShoulder] else { return nil }
+      return (left.y + right.y) / 2 - nose.y
+    }()
+    readings.append(headHeight.map {
       reading(.headHeightDrop,
-              value: $0.y - baseline.headHeight,
+              value: (baseline.headHeight) - $0,
               threshold: thresholds.headHeightDrop,
               baseline: baseline.headHeight)
     } ?? missing(.headHeightDrop, thresholds.headHeightDrop, baseline: baseline.headHeight))
@@ -187,6 +211,7 @@ enum PostureClassifier {
                    value: value,
                    threshold: threshold,
                    baseline: baseline,
+                   isMeasured: true,
                    isOverThreshold: feature.isSmallerWorse ? value < threshold : value > threshold,
                    severity: FeatureReading.severity(feature: feature, value: value, threshold: threshold))
   }
@@ -201,6 +226,7 @@ enum PostureClassifier {
                    value: threshold / 2,
                    threshold: threshold,
                    baseline: baseline,
+                   isMeasured: false,
                    isOverThreshold: false,
                    severity: 0)
   }

@@ -82,6 +82,22 @@ class AC6(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("AC6 FAIL: no session_ended", out)
 
+    def test_head_down_is_recomputed_without_a_calibration_row(self):
+        # 阅读流程退役后日志里不再有 calibration_done；引擎的基线此时是 0，重算必须照这个口径。
+        rows = [row("session_started", scenario="headDown"),
+                row("config", distance_threshold_cm=30, pitch_threshold_deg=20),
+                row("status_changed", t=0.0, state="head_down")]
+        rows += [row("sample", t=round(i / 10, 2), distance_cm=40.0, pitch_deg=-25.0) for i in range(101)]
+        rows.append(row("session_ended", total_seconds=10.0, good_seconds=0,
+                        near_seconds=0, head_down_seconds=10.0, longest_good_streak_seconds=0,
+                        head_down_count=1, head_down_remind_count=1,
+                        posture_stats={"head_down": {"episodes": 1, "reminders": 1, "seconds": 10.0}}))
+        rows.append(row("reminder", t=5.0, alert_type="head_down", level=1, breach_seconds=5.0))
+        code, out = run(rows, "--expect-level1", "5")
+        self.assertEqual(code, 0, out)
+        self.assertIn("AC6 PASS: head_down_seconds", out)
+        self.assertIn("AC2 PASS: head_down level 1", out)
+
     def test_wrong_summary_still_fails(self):
         rows = pomodoro(0, 60) + break_samples(60, 60) + pomodoro(120, 60, good=40)
         code, out = run(rows)

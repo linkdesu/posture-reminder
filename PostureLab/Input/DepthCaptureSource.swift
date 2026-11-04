@@ -1,48 +1,110 @@
 import AVFoundation
+import Accelerate
 import Foundation
 
-/// Real-device input: the front TrueDepth camera's depth stream, and nothing else.
+/// 真机输入：前置 TrueDepth 的深度流驱动点云与头几何，前置彩色流只交给 Vision 取关节。
 ///
-/// The session has two outputs for one reason: iOS will not stream depth from the TrueDepth camera
-/// unless a video output is attached as well. The video output is created, connected and then left
-/// without a delegate — no sample buffer ever reaches this class, no pixel is read, copied or
-/// stored — while every sample the app sees comes from the depth output. The check script in the
-/// repository greps for a video delegate and for pixel access precisely to keep that true.
+/// 两路输出、两个 delegate、两条串行队列（不用 `AVCaptureDataOutputSynchronizer`：它按两个输出都
+/// 到齐才回调，任何一路卡住都会让另一路一起停，而点云不该被推理的耗时绑住）。
 ///
-/// Depth frames arrive on `queue`; segmentation and joint estimation run there, and only the finished
-/// `PostureSample` hops to the main thread.
+/// - **深度队列（约 30 Hz）**：每个深度帧都重采样、分割、取点云、算头部几何，并把这一帧留在最近八
+///   帧的环形缓冲里给关节配对用。点云经 `onCloud` 直接给画布，不再走 10 Hz 的样本。
+/// - **彩色队列（约 30 fps，推理约 10 Hz）**：`VisionJointSource` 借这一帧推理，返回后立刻丢掉缓冲。
+///   关节按采集时刻与最近一帧深度配对，差超过 150 ms 就整帧作废（`VisionDepthPairing`）。
+/// - **样本（10 Hz）**：由深度帧的节流驱动，带配对后的关节、距离、俯仰与点云，喂给引擎与日志。
+///
+/// 彩色像素在这个类型里只是一个过手的指针：它不进字段、不进日志、不进画面。
 final class DepthCaptureSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
+  var onCloud: ((CloudFrame) -> Void)?
+  /// 横滚校准有结论时回调一次：拿到基线给数值，样本不足给 nil。
+  var onRollCalibration: ((Double?) -> Void)?
 
-  private let jointSource: JointSource
+  private let vision = VisionJointSource()
+  /// 固定网格 + 帧间平滑的点云。只有深度队列碰它。
+  private var cloudStabilizer = CloudStabilizer()
+  /// 横滚基线的静默校准（前 3 秒的 Vision 眼线/耳线中位数）。
+  private var rollCalibrator = RollCalibrator()
+  /// 在场判定：连续 `PresenceGate.streakRequired` 帧有可靠证据才算在场。0.6.8 (17)：Vision 在
+  /// 近距离会整帧不给 observation，单帧丢失不再直接当作「人不在」；0.6.8 (18) 起证据本身更严
+  /// （只有鼻子不算有人，见 `PresenceGate`）。
+  private var presence = PresenceGate()
+  /// 上一帧背景点云，用来算背景平均位移。
+  private var previousBackground: [BodyPoint] = []
+  /// 深度轮廓背景开关（由会话层按设置注入）。
+  var settingsOutlineEnabled = true
   private let session = AVCaptureSession()
   private let depthOutput = AVCaptureDepthDataOutput()
-  /// Attached only so the session will start; it has no delegate and is never read.
   private let videoOutput = AVCaptureVideoDataOutput()
-  private let queue = DispatchQueue(label: "me.xieal.posturelab.depth", qos: .userInitiated)
+  private let depthQueue = DispatchQueue(label: "me.xieal.posturelab.depth", qos: .userInitiated)
+  /// 彩色帧的 delegate 队列就是推理队列：一次只跑一次推理，忙时丢帧。
+  private let videoQueue = DispatchQueue(label: "me.xieal.posturelab.vision", qos: .userInitiated)
+
+  /// 状态机按 10 Hz 调；样本仍按这个间隔发。
+  private static let sampleInterval: TimeInterval = 0.1
+  /// 多久没有深度帧就发一个「没人」的样本，让缺席照样能暂停计时。
+  private static let watchdogInterval: TimeInterval = 0.5
+  /// 关节与深度配对用的最近深度帧数：八帧在 30 Hz 下约 266 ms，够盖住 150 ms 的配对窗口。
+  private static let depthHistoryCount = 8
+  /// 分割在 160 px 宽上跑：30 Hz 下这是 CPU 与轮廓精度的折中（与 0.6.7 的深度管线一致）。
+  private static let processingWidth = 160
+
+  /// 一帧深度观测：配对时的全部输入。
+  private struct DepthObservation {
+    var t: TimeInterval
+    var image: DepthImage
+    var mask: BodyMask?
+    var cloud: [BodyPoint]
+    var head: HeadGeometry.Reading
+  }
+
+  /// 深度队列写、彩色队列读的东西都在这个锁后面。
+  private let stateLock = NSLock()
+  private var history: [DepthObservation] = []
+  private var latestJoints: VisionJointFrame?
+
+  /// 当前采集负载。热状态到 `serious` 时降到 Vision 5 Hz、点云 15 Hz（`CaptureLoad`）。
+  private var load: CaptureLoad = .normal
+  private var lastCloudAt: TimeInterval = 0
+  /// 上一帧深度的呈现时刻与回调到达时刻，用来在逐帧日志里写分阶段间隔。
+  private var lastDepthFrameTime: TimeInterval?
+  private var lastDepthArrival: TimeInterval?
 
   private var startedAt: TimeInterval?
   private var lastEmittedAt: TimeInterval = 0
   private var watchdog: DispatchSourceTimer?
   private var isConfigured = false
 
-  /// The depth stream runs at 30 Hz and the state machine is tuned for 10 Hz; this is the sample
-  /// rate the timer and the posture engine share.
-  private static let sampleInterval: TimeInterval = 0.1
-  /// How long without a depth frame before a "nobody there" sample is emitted, so an absent child
-  /// still pauses the timer.
-  private static let watchdogInterval: TimeInterval = 0.5
+  /// 一个深度帧的耗时（毫秒），只给性能埋点读。
+  private(set) var lastDepthProcessing: TimeInterval = 0
 
-  init(jointSource: JointSource = DepthJointSource()) {
-    self.jointSource = jointSource
+  override init() {
     super.init()
-    depthOutput.setDelegate(self, callbackQueue: queue)
+    depthOutput.setDelegate(self, callbackQueue: depthQueue)
+    // 深度滤波必须开着。0.6.8 (15) 的真机排查：关掉滤波后 TrueDepth 交出的 Float32 深度图整帧都是
+    // NaN（`depth_valid` 0、`depth_nan` 1、最近读数 null），分割因此拿不到任何输入、点云恒为 0 点，
+    // 而同一帧的彩色 Vision 还能看到人的五官。开着滤波时帧在 30 Hz 上稳定（逐帧日志实测间隔 33 ms），
+    // 所以「关滤波省时间」这个假设是错的：省下的几毫秒买不到一张能用的深度图。
     depthOutput.isFilteringEnabled = true
     depthOutput.alwaysDiscardsLateDepthData = true
-    #if DEBUG
-    // 每个样本一行肩部快照，写 Documents/debug/joints-*.jsonl 并打到标准输出。
-    (jointSource as? DepthJointSource)?.onDebugSample = { JointDebugLog.shared.write($0) }
-    #endif
+    videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+    videoOutput.alwaysDiscardsLateVideoFrames = true
+    vision.minimumInterval = load.visionInterval
+  }
+
+  /// 热状态采样器的降级开关。Vision 的节流在 `VisionJointSource` 上，点云的节流在这里；深度帧本身
+  /// 仍按传感器给的频率进来，只是降级时有一半点云不推给画布。
+  func setLoad(_ load: CaptureLoad) {
+    stateLock.lock()
+    self.load = load
+    stateLock.unlock()
+    vision.minimumInterval = load.visionInterval
+  }
+
+  private var currentLoad: CaptureLoad {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return load
   }
 
   func start() {
@@ -66,7 +128,17 @@ final class DepthCaptureSource: NSObject, SampleSource {
   func stop() {
     watchdog?.cancel()
     watchdog = nil
-    queue.async { [session] in
+    vision.reset()
+    stateLock.lock()
+    history.removeAll()
+    latestJoints = nil
+    stateLock.unlock()
+    cloudStabilizer.reset()
+    #if DEBUG
+    // 最后一帧可能还没上屏：写出去，别让它挂在内存里消失。
+    FrameLog.shared.flushPending()
+    #endif
+    depthQueue.async { [session] in
       if session.isRunning { session.stopRunning() }
     }
   }
@@ -77,8 +149,10 @@ final class DepthCaptureSource: NSObject, SampleSource {
     let start = ProcessInfo.processInfo.systemUptime
     startedAt = start
     lastEmittedAt = 0
+    lastCloudAt = 0
+    vision.reset()
 
-    queue.async { [weak self] in
+    depthQueue.async { [weak self] in
       guard let self else { return }
       if !self.isConfigured {
         guard self.configure() else {
@@ -92,7 +166,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
     }
   }
 
-  /// Builds the capture graph. The depth output is the only one with data flowing out of it.
+  /// 建采集图。深度 30 Hz 驱动点云，彩色 30 fps 只喂 Vision。
   private func configure() -> Bool {
     guard let device = AVCaptureDevice.default(.builtInTrueDepthCamera,
                                                for: .video,
@@ -111,16 +185,33 @@ final class DepthCaptureSource: NSObject, SampleSource {
     }
     session.addOutput(videoOutput)
     session.addOutput(depthOutput)
-    // The video output exists for the graph, not for data: no delegate is installed, and this file
-    // contains no access to its buffers.
     orient(depthOutput.connection(with: .depthData))
     orient(videoOutput.connection(with: .video))
     session.commitConfiguration()
+    pinFrameRate(device)
     return true
   }
 
-  /// Portrait, mirrored like a mirror. Best effort: an unsupported connection keeps the sensor's own
-  /// orientation rather than failing the run.
+  /// 把深度与彩色的输出都钉到 30 fps。
+  ///
+  /// 默认的 `activeDepthDataMinFrameDuration` 会跟着预览预设走，真机上实测只有约 25 Hz；点云
+  /// 的流畅门槛（未降级时 p95 ≤ 40 ms）就是按 30 Hz 的帧间隔定的，所以这里显式要求 30 fps。
+  /// 设备不支持时保留默认值，不失败。
+  private func pinFrameRate(_ device: AVCaptureDevice) {
+    guard (try? device.lockForConfiguration()) != nil else { return }
+    defer { device.unlockForConfiguration() }
+    let thirty = CMTime(value: 1, timescale: 30)
+    if device.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 }) {
+      device.activeVideoMinFrameDuration = thirty
+      device.activeVideoMaxFrameDuration = thirty
+    }
+    if device.activeDepthDataFormat != nil,
+       device.activeDepthDataFormat?.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 }) == true {
+      device.activeDepthDataMinFrameDuration = thirty
+    }
+  }
+
+  /// 竖屏、像镜子一样镜像。尽力而为：连接不支持时保留传感器自己的方向，而不是让整次运行失败。
   private func orient(_ connection: AVCaptureConnection?) {
     guard let connection else { return }
     if connection.isVideoRotationAngleSupported(90) {
@@ -133,76 +224,230 @@ final class DepthCaptureSource: NSObject, SampleSource {
 
   private func startWatchdog() {
     guard watchdog == nil else { return }
-    let timer = DispatchSource.makeTimerSource(queue: queue)
+    let timer = DispatchSource.makeTimerSource(queue: depthQueue)
     timer.schedule(deadline: .now() + Self.watchdogInterval,
                    repeating: Self.watchdogInterval)
     timer.setEventHandler { [weak self] in
       guard let self, let startedAt = self.startedAt else { return }
       let t = ProcessInfo.processInfo.systemUptime - startedAt
       guard t - self.lastEmittedAt >= Self.watchdogInterval * 2 else { return }
-      self.emit(.empty, at: t)
+      self.emit(nil, at: t)
     }
     watchdog = timer
     timer.resume()
   }
 
-  /// A frame without a body, or no sensor at all: the timer has to see the absence.
+  /// 一帧都没有深度、或者根本没有传感器：计时器必须看到这个缺席。
   private func reportAbsent() {
     let t = startedAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0
-    emit(.empty, at: t)
+    emit(nil, at: t)
   }
 
-  private func emit(_ estimate: JointEstimate, at t: TimeInterval) {
-    let depth = estimate.mask == nil ? nil : lastDepth?.downsampled()
+  /// 时刻最近的深度观测。配对规则本身在 `VisionDepthPairing` 里，纯函数、可单测。
+  private func nearestObservation(to t: TimeInterval) -> DepthObservation? {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let index = VisionDepthPairing.nearestIndex(to: t, ticks: history.map(\.t)) else { return nil }
+    return history[index]
+  }
+
+  /// 这一时刻的在场结论：Vision 最近一帧没有过期、且连续 `PresenceGate.streakRequired` 帧都有
+  /// 在场的可靠证据（见 `PresenceGate`）。过期时不下结论（nil，由样本的距离回退）。
+  private func mouth(at t: TimeInterval) -> [CGPointLike] {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let frame = latestJoints,
+          !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return [] }
+    return frame.mouth
+  }
+
+  private func personPresent(at t: TimeInterval) -> Bool? {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let frame = latestJoints,
+          !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return nil }
+    return presence.isPresent
+  }
+
+  /// 这一时刻还能用的关节：最近一次配对结果没有过期，且双肩没有因为落在头上被作废。
+  /// 横滚：优先用 Vision 的眼线/耳线，并按校准基线取相对角；两者都缺时才退回深度平面。
+  private func calibratedRoll(joints: [JointID: JointSample],
+                              fallback: Double?,
+                              at t: TimeInterval) -> Double? {
+    guard let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
+      ?? VisionPoseMapping.earLineDegrees(joints) else { return fallback }
+    let wasSettled = rollCalibrator.isSettled
+    _ = rollCalibrator.observe(visionRoll, at: t)
+    if !wasSettled, rollCalibrator.isSettled {
+      let baseline = rollCalibrator.baseline
+      DispatchQueue.main.async { [weak self] in self?.onRollCalibration?(baseline) }
+    }
+    return rollCalibrator.relative(visionRoll)
+  }
+
+  private func joints(at t: TimeInterval) -> [JointID: JointSample] {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let frame = latestJoints else { return [:] }
+    guard !VisionDepthPairing.isStale(visionT: frame.t, sampleT: t) else { return [:] }
+    return frame.joints
+  }
+
+  /// 一个样本。`observation` 是这一帧深度（缺席样本为 nil），关节按采集时刻取还新鲜的那一份。
+  private func emit(_ observation: DepthObservation?, at t: TimeInterval) {
+    let joints = joints(at: t)
+    let head = observation?.head ?? HeadGeometry.Reading(distanceCM: nil, pitchDeg: nil, rollDeg: nil)
     let sample = PostureSample(t: t,
-                               distanceCM: estimate.distanceCM,
-                               pitchDeg: estimate.pitchDeg,
-                               rollDeg: estimate.rollDeg,
-                               joints: estimate.joints,
-                               depth: depth,
-                               depthAvailable: estimate.mask != nil,
-                               cloud: estimate.cloud,
-                               unavailableJoints: estimate.unavailable)
+                               distanceCM: head.distanceCM,
+                               pitchDeg: head.pitchDeg,
+                               // 眼线 → 耳线 → 深度平面；彩色给的横滚比深度平面准，并且减掉这个孩子
+                               // 自己的横滚基线（前 3 秒中位数）。深度兜底不参与校准。
+                               rollDeg: calibratedRoll(joints: joints, fallback: head.rollDeg, at: t),
+                               joints: joints,
+                               depth: observation?.mask == nil ? nil : observation?.image.downsampled(),
+                               depthAvailable: observation?.mask != nil,
+                               cloud: observation?.cloud ?? [],
+                               unavailableJoints: Set(JointID.allCases).subtracting(joints.keys),
+                               personPresent: personPresent(at: t),
+                               mouth: mouth(at: t))
     DispatchQueue.main.async { [weak self] in
       self?.onSample?(sample)
     }
   }
 
-  /// The last processing frame, kept only long enough for `emit` to downsample it. It is a depth
-  /// grid, never a colour image.
-  private var lastDepth: DepthImage?
-}
-
-extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
-  func depthDataOutput(_ output: AVCaptureDepthDataOutput,
-                       didOutput depthData: AVDepthData,
-                       timestamp: CMTime,
-                       connection: AVCaptureConnection) {
-    guard let startedAt else { return }
-    let t = ProcessInfo.processInfo.systemUptime - startedAt
-    guard t - lastEmittedAt >= Self.sampleInterval else { return }
-
-    // Float32 is the only format this pipeline can read; the conversion is depth-to-depth.
-    let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
-    let map = converted.depthDataMap
-    guard let image = Self.depthImage(from: map) else { return }
-
-    lastEmittedAt = t
-    lastDepth = image
-    #if DEBUG
-    // 关节推算单次耗时：起点紧贴调用，终点在返回之后，包含重采样、分割、点云与朝向。
-    let estimateStartedAt = ProcessInfo.processInfo.systemUptime
-    let estimate = jointSource.estimate(from: image)
-    PerfMonitor.shared.recordJointEstimate(seconds: ProcessInfo.processInfo.systemUptime - estimateStartedAt)
-    emit(estimate, at: t)
-    #else
-    emit(jointSource.estimate(from: image), at: t)
-    #endif
+  /// 眼睛低于嘴：任一眼的 y 大于嘴轮廓的最大 y（y 向下，越大越低）。
+  static func eyeBelowMouth(joints: [JointID: JointSample], mouth: [CGPointLike]) -> Bool {
+    guard let lowestMouth = mouth.map(\.y).max() else { return false }
+    let eyes = [JointID.leftEye, .rightEye].compactMap { joints[$0]?.y }
+    guard let lowestEye = eyes.max() else { return false }
+    return lowestEye > lowestMouth
   }
 
-  /// Copies the depth plane into a Swift array, then drops the pixel buffer. One plane, one read:
-  /// there is no second plane to read even if someone wanted to.
-  private static func depthImage(from map: CVPixelBuffer) -> DepthImage? {
+  /// 双肩高于耳朵：任一双肩的 y 小于耳朵 y。
+  static func shoulderAboveEar(joints: [JointID: JointSample]) -> Bool {
+    let ears = [JointID.leftEar, .rightEar].compactMap { joints[$0]?.y }
+    let shoulders = [JointID.leftShoulder, .rightShoulder].compactMap { joints[$0]?.y }
+    guard let highestEar = ears.min(), let highestShoulder = shoulders.min() else { return false }
+    return highestShoulder < highestEar
+  }
+
+  // MARK: - Depth
+
+  /// 深度帧：每个都更新点云（降级时一半），样本按 10 Hz 发。
+  private func handleDepth(_ depthData: AVDepthData, at t: TimeInterval, frameTime: TimeInterval) {
+    let arrivalUptime = ProcessInfo.processInfo.systemUptime
+    let captureStartedAt = arrivalUptime
+    // Float32 是这条管线唯一能读的格式，转换是深度到深度。
+    let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
+    // 一次缩放到处理宽度，省掉「先整帧拷进 Swift 数组、再缩放」的那一遍：640×480 的逐像素
+    // 拷贝在 Debug 构建里就要 40 ms，正好把 30 Hz 拖成 15 Hz（0.6.8 真机实测）。
+    guard let image = Self.depthImage(from: converted.depthDataMap,
+                                      maxWidth: Self.processingWidth)
+    else { return }
+    let captureSeconds = ProcessInfo.processInfo.systemUptime - captureStartedAt
+
+    let segmentationStartedAt = ProcessInfo.processInfo.systemUptime
+    let mask = DepthSegmentation.segment(image)
+    let segmentationSeconds = ProcessInfo.processInfo.systemUptime - segmentationStartedAt
+
+    let cloudStartedAt = ProcessInfo.processInfo.systemUptime
+    // 固定网格采样 + 距离平滑：位置不随遮罩变化，帧与帧之间按槽位配对（见 `CloudStabilizer`）。
+    let cloud = cloudStabilizer.points(mask: mask, image: image, at: frameTime)
+    let cloudSeconds = ProcessInfo.processInfo.systemUptime - cloudStartedAt
+
+    #if DEBUG
+    // 点云抖动：按槽位与上一帧配对，只有原始平均位移 ≤0.5% 屏宽的「静止帧」进直方图（AC7）。
+    // 时钟用 `systemUptime`，与 `PerfMonitor` 每秒写 p95 的时钟一致（深度帧自己的呈现时刻是另一个时基）。
+    PerfMonitor.shared.noteCloud(cloud, at: ProcessInfo.processInfo.systemUptime)
+    #endif
+
+    let depthGap = lastDepthFrameTime.map { max(0, (frameTime - $0) * 1000) } ?? 0
+    let arrivalGap = lastDepthArrival.map { max(0, (t - $0) * 1000) } ?? 0
+    lastDepthFrameTime = frameTime
+    lastDepthArrival = t
+
+    let head = HeadGeometry.measure(depth: image, mask: mask)
+    let observation = DepthObservation(t: t, image: image, mask: mask, cloud: cloud, head: head)
+
+    lastDepthProcessing = captureSeconds + segmentationSeconds + cloudSeconds
+
+    #if DEBUG
+    // 分步耗时（每秒汇总）与逐帧原始记录各一份：汇总只给趋势，逐帧记录才是 QA 判证据的来源。
+    PerfMonitor.shared.recordCapture(seconds: captureSeconds)
+    PerfMonitor.shared.recordSegment(seconds: segmentationSeconds)
+    PerfMonitor.shared.recordCloud(seconds: cloudSeconds, points: cloud.count)
+    #endif
+
+    stateLock.lock()
+    history.append(observation)
+    if history.count > Self.depthHistoryCount { history.removeFirst(history.count - Self.depthHistoryCount) }
+    let cloudInterval = load.cloudInterval
+    let cloudCap = load.cloudHz
+    stateLock.unlock()
+
+    // 点云推给画布：正常负载下**每个深度帧都推**（ADR-0008 第 4 条，不做 30 Hz 的二次节流——
+    // 30 Hz 的节流按固定间隔卡帧，会把 33 ms 的正常间隔偶尔拖成 67 ms，反而破坏流畅）；降级时
+    // 才按 15 Hz 的上限隔一帧推一次。间隔用深度帧自己的呈现时刻量，回调晚到不算掉帧。
+    let shouldEmitCloud = cloudCap >= CaptureLoad.normal.cloudHz || frameTime - lastCloudAt >= cloudInterval * 0.85
+
+    #if DEBUG
+    // 逐帧原始记录：这一帧深度有没有读数、分割出多少格、点云多少点、上屏没有、上屏多久。
+    stateLock.lock()
+    let visionInfo = latestJoints
+    stateLock.unlock()
+    // 同帧（150 ms 内）Vision 的人脸结论；过期或还没推理过就是「不知道」（nil）。
+    let faceDetected: Bool? = visionInfo.flatMap {
+      VisionDepthPairing.isStale(visionT: $0.t, sampleT: t) ? nil : $0.faceDetected
+    }
+    if faceDetected == true && cloud.isEmpty {
+      // AC7 的「检测到脸时点云从不空白」：这一帧 Vision 看到脸、深度却一个点都没取到。
+      PerfMonitor.shared.recordCloudBlankWithFace()
+    }
+    FrameLog.shared.begin(FrameLog.Record(
+      ts: Int((Date().timeIntervalSince1970 * 1000).rounded()),
+      frameS: frameTime,
+      arrivalS: t,
+      depthMS: captureSeconds * 1000,
+      segmentMS: segmentationSeconds * 1000,
+      cloudMS: cloudSeconds * 1000,
+      points: cloud.count,
+      maskCells: mask?.count ?? 0,
+      depthValid: image.validFraction,
+      depthNaN: image.nanFraction,
+      nearestM: image.nearestDepth().map { Double($0) },
+      degraded: cloudCap < CaptureLoad.normal.cloudHz,
+      cloudEmitted: shouldEmitCloud,
+      depthGapMS: depthGap,
+      arrivalGapMS: arrivalGap,
+      visionMS: visionInfo.map { $0.inferenceSeconds * 1000 },
+      // 两个时刻都取会话时钟（`t` 与 Vision 的 `t`）；用 CMTime 的 frameTime 去减会得到上亿毫秒。
+      visionAgeMS: visionInfo.map { max(0, (t - $0.t) * 1000) },
+      faceDetected: faceDetected),
+      arrivalUptime: arrivalUptime)
+    #endif
+
+    if shouldEmitCloud {
+      lastCloudAt = frameTime
+      #if DEBUG
+      PerfMonitor.shared.recordCloudFrame(at: frameTime)
+      #endif
+      DispatchQueue.main.async { [weak self] in
+        self?.onCloud?(CloudFrame(t: t, points: cloud))
+      }
+    }
+
+    guard t - lastEmittedAt >= Self.sampleInterval else { return }
+    lastEmittedAt = t
+    emit(observation, at: t)
+  }
+
+  /// Reads the depth plane straight into the processing grid, then drops the pixel buffer.
+  ///
+  /// vImage 直接从像素缓冲的基地址缩放到目标宽度（`kvImageNoFlags` 的线性插值，与
+  /// `DepthImage.resampled` 同一条路径），所以整帧 640×480 的逐像素拷贝不再发生——那些拷贝在
+  /// Debug 构建里就是 40 ms，把 30 Hz 的深度流拖成 15 Hz。不足目标宽度的帧直接拷这一片。
+  /// 一次性读完、读完即解锁：没有第二遍读取，也没有第二块缓冲被保留。
+  private static func depthImage(from map: CVPixelBuffer, maxWidth: Int) -> DepthImage? {
     let width = CVPixelBufferGetWidth(map)
     let height = CVPixelBufferGetHeight(map)
     guard width > 0, height > 0 else { return nil }
@@ -212,15 +457,129 @@ extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
     guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
 
     let bytesPerRow = CVPixelBufferGetBytesPerRow(map)
-    let floatCount = bytesPerRow / MemoryLayout<Float>.size
-    let buffer = base.assumingMemoryBound(to: Float.self)
-    var metres = [Float](repeating: 0, count: width * height)
-    for y in 0..<height {
-      let row = buffer.advanced(by: y * floatCount)
-      for x in 0..<width {
-        metres[y * width + x] = row[x]
-      }
+    let targetWidth = min(width, max(1, maxWidth))
+    let targetHeight = max(1, Int((Double(height) * Double(targetWidth) / Double(width)).rounded()))
+    var metres = [Float](repeating: 0, count: targetWidth * targetHeight)
+
+    let scaled = metres.withUnsafeMutableBufferPointer { destination -> Bool in
+      guard let destinationBase = destination.baseAddress else { return false }
+      var input = vImage_Buffer(data: base,
+                                height: vImagePixelCount(height),
+                                width: vImagePixelCount(width),
+                                rowBytes: bytesPerRow)
+      var output = vImage_Buffer(data: destinationBase,
+                                 height: vImagePixelCount(targetHeight),
+                                 width: vImagePixelCount(targetWidth),
+                                 rowBytes: targetWidth * MemoryLayout<Float>.stride)
+      return vImageScale_PlanarF(&input, &output, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError
     }
-    return DepthImage(width: width, height: height, metres: metres)
+    guard scaled else { return nil }
+    return DepthImage(width: targetWidth, height: targetHeight, metres: metres)
+  }
+}
+
+extension DepthCaptureSource: AVCaptureDepthDataOutputDelegate {
+  func depthDataOutput(_ output: AVCaptureDepthDataOutput,
+                       didOutput depthData: AVDepthData,
+                       timestamp: CMTime,
+                       connection: AVCaptureConnection) {
+    guard let startedAt else { return }
+    handleDepth(depthData,
+                at: ProcessInfo.processInfo.systemUptime - startedAt,
+                frameTime: CMTimeGetSeconds(timestamp))
+  }
+}
+
+extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
+  /// 彩色帧的完整生命周期就在这两个调用之间：取缓冲、推理、丢掉引用。
+  func captureOutput(_ output: AVCaptureOutput,
+                     didOutput sampleBuffer: CMSampleBuffer,
+                     from connection: AVCaptureConnection) {
+    guard let startedAt else { return }
+    let t = ProcessInfo.processInfo.systemUptime - startedAt
+    guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    guard let frame = vision.joints(in: buffer, at: t) else { return }
+
+    // 关节的位置来自彩色，距离与俯仰来自同帧深度：配最近的一帧，超过 150 ms 就整帧作废。
+    var joints: [JointID: JointSample] = [:]
+    var stale = true
+
+    if let observation = nearestObservation(to: frame.t),
+       !VisionDepthPairing.isStale(visionT: frame.t, sampleT: observation.t) {
+      stale = false
+      joints = VisionPoseMapping.attachDepth(frame.joints,
+                                             depth: observation.image,
+                                             mask: observation.mask)
+    }
+
+    let paired = VisionJointFrame(t: frame.t,
+                                  joints: joints,
+                                  detected: frame.detected,
+                                  rawConfidence: frame.rawConfidence,
+                                  faceDetected: frame.faceDetected,
+                                  shouldersInvalidated: frame.shouldersInvalidated,
+                                  inferenceSeconds: frame.inferenceSeconds)
+    // 在场只看这一帧的证据路径（`PresenceGate`）：只有鼻子不算有人。
+    var jointConfidence: [JointID: Double] = [:]
+    for (joint, sample) in joints { jointConfidence[joint] = sample.confidence }
+    stateLock.lock()
+    latestJoints = paired
+    let presencePath = presence.observe(confidence: jointConfidence,
+                                        faceDetected: paired.faceDetected)
+    stateLock.unlock()
+
+    #if DEBUG
+    PerfMonitor.shared.recordVision(seconds: frame.inferenceSeconds)
+    var confidence: [String: Double] = [:]
+    var visible: [String: Bool] = [:]
+    var pointX: [String: Double] = [:]
+    var pointY: [String: Double] = [:]
+    for joint in VisionPoseMapping.deliveredJoints {
+      let sample = joints[joint]
+      confidence[joint.rawValue] = sample?.confidence
+      visible[joint.rawValue] = sample != nil
+      pointX[joint.rawValue] = sample?.x
+      pointY[joint.rawValue] = sample?.y
+    }
+    // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有在场证据也记一帧。
+    let eyeBelowMouth = Self.eyeBelowMouth(joints: joints, mouth: frame.mouth)
+    let shoulderAboveEar = Self.shoulderAboveEar(joints: joints)
+    let pointsWithoutPerson = !joints.isEmpty && presencePath == .none
+    #if DEBUG
+    PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
+                                    shoulderAboveEar: shoulderAboveEar,
+                                    pointsWithoutPerson: pointsWithoutPerson)
+    // AC8：右肩过门槛的帧数与总帧数，整场累计；<50% 时由 verify 与报告如实上报。
+    PerfMonitor.shared.recordShoulderVisibility(rightAvailable: joints[.rightShoulder] != nil)
+    #endif
+    // 背景轮廓：点数与相对上一帧的平均位移（按槽位配对）。
+    stateLock.lock()
+    let observation = history.last
+    stateLock.unlock()
+    let background = observation?.cloud ?? []
+    let shift = JitterPairing.meanShift(from: previousBackground, to: background)
+    previousBackground = background
+    // Vision 肩线：采集侧已经配对好的肩点，与遮罩肩线并排写进日志供对比（不做判定）。
+    let visionShoulders = ShoulderLine.make(left: joints[.leftShoulder],
+                                            right: joints[.rightShoulder],
+                                            nose: joints[.nose])
+    JointFrameLog.shared.write(JointFrameDebugSample(sessionT: frame.t,
+                                                     detected: frame.detected,
+                                                     stale: stale,
+                                                     shouldersInvalidated: frame.shouldersInvalidated,
+                                                     confidence: confidence,
+                                                     rawConfidence: frame.rawConfidence,
+                                                     visible: visible,
+                                                     presencePath: presencePath,
+                                                     faceDetected: frame.faceDetected,
+                                                     pointX: pointX,
+                                                     pointY: pointY,
+                                                     visionShoulders: visionShoulders,
+                                                     outlineEnabled: settingsOutlineEnabled,
+                                                     backgroundPoints: background.count,
+                                                     backgroundShift: shift,
+                                                     distanceValid: observation?.head.distanceCM != nil,
+                                                     forwardValid: !joints.isEmpty && observation?.head.distanceCM != nil))
+    #endif
   }
 }

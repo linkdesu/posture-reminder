@@ -48,6 +48,8 @@ struct AvatarView: View {
 
   /// The last two samples, so the canvas can draw the frame between them.
   @State private var motion = CloudMotion()
+  /// 4 个关键点（头/颈/双肩）的平滑与出现/消失过渡。
+  @State private var keyPoints = KeyPointOverlayMotion()
 
   init(geometry: PoseGeometry?, assessment: PostureAssessment?) {
     self.geometry = geometry
@@ -58,12 +60,22 @@ struct AvatarView: View {
     TimelineView(.animation(minimumInterval: Self.frameInterval, paused: !hasBody)) { timeline in
       Canvas(opaque: true, rendersAsynchronously: true) { context, size in
         #if DEBUG
-        // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数由 PerfMonitor 加锁。
+        // 一帧一次；`rendersAsynchronously` 让这个闭包不在主线程，计数与逐帧记录都由各自加锁。
+        let renderStartedAt = ProcessInfo.processInfo.systemUptime
+        defer {
+          let seconds = ProcessInfo.processInfo.systemUptime - renderStartedAt
+          PerfMonitor.shared.recordRender(seconds: seconds)
+          // 把这一帧的上屏耗时与延迟补进它对应的深度帧记录（cloud-*.jsonl）。
+          FrameLog.shared.rendered(seconds: seconds)
+        }
         PerfMonitor.shared.recordFrame()
         #endif
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
 
-        guard let geometry, !geometry.joints.isEmpty else {
+        // 点云来自深度，不依赖关节：Vision 一时看不到人（凑近、侧脸）时，点云照样该在。
+        // 0.6.8 (15) 就是在这里把「关节空」当成「没有人」，于是凑近时点云被矢量轮廓顶掉，
+        // 看起来像点云消失（r20：cloud 每帧都有 600 点，深度层没有问题）。
+        guard let geometry else {
           drawSilhouette(in: &context, size: size)
           return
         }
@@ -71,23 +83,44 @@ struct AvatarView: View {
         let points = motion.to.isEmpty
           ? geometry.cloud
           : motion.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
-        let cloud = points.isEmpty ? BodyCloud.points(for: geometry.joints) : points
-        guard !cloud.isEmpty else {
-          drawSilhouette(in: &context, size: size)
-          return
+        // z == 0 是「这一格没有读数」的占位：固定网格的槽位在人体外时会保留旧值直到过期，
+        // 真正的空槽位不参与绘制，也不参与下面的质心计算。
+        let visible = points.filter { $0.z > 0 }
+        #if DEBUG
+        FrameLog.shared.noteVisiblePoints(visible.count)
+        #endif
+        // 0.6.8 (17)：人形由 Vision 画，深度点云只是可选的暗色背景轮廓（设置项默认开）。
+        if geometry.outlineEnabled, !visible.isEmpty {
+          draw(visible, geometry: geometry, in: &context, size: size, dim: Self.outlineDim)
         }
-        draw(cloud, geometry: geometry, in: &context, size: size)
+
+        let overlay = keyPoints.displayed(at: timeline.date.timeIntervalSinceReferenceDate)
+        #if DEBUG
+        // 关键点抖动（AC5）：画到屏幕上的点与上一帧比，只有原始输入没动的静止帧才计入。
+        PerfMonitor.shared.noteKeyPoints(overlay.points,
+                                         rawTargets: keyPoints.targets,
+                                         at: ProcessInfo.processInfo.systemUptime)
+        #endif
+        if !overlay.points.isEmpty {
+          drawFigure(overlay.points, alphas: overlay.alphas, mouth: geometry.mouth,
+                     in: &context, size: size)
+        } else if !geometry.outlineEnabled || visible.isEmpty {
+          // 既没有人形、也没有背景轮廓时才退回矢量轮廓，绝不空屏。
+          drawSilhouette(in: &context, size: size)
+        }
       }
     }
     .allowsHitTesting(false)
     // 新的样本进来时只记下它和时刻，插值本身发生在画布里，主线程不做逐点计算。
     .onChange(of: geometry) { _, newValue in
-      motion.push(newValue?.cloud ?? [], at: Date().timeIntervalSinceReferenceDate)
+      let now = Date().timeIntervalSinceReferenceDate
+      motion.push(newValue?.cloud ?? [], at: now, interval: newValue?.cloudInterval)
+      keyPoints.update(Self.keyPoints(from: newValue?.joints ?? [:]), at: now)
     }
   }
 
   private var hasBody: Bool {
-    !(geometry?.joints.isEmpty ?? true)
+    !(geometry?.joints.isEmpty ?? true) || !(geometry?.cloud.isEmpty ?? true)
   }
 
   // MARK: - Composition
@@ -95,7 +128,8 @@ struct AvatarView: View {
   private func draw(_ points: [BodyPoint],
                     geometry: PoseGeometry,
                     in context: inout GraphicsContext,
-                    size: CGSize) {
+                    size: CGSize,
+                    dim: Double = 1) {
     let rect = PoseProjection.rect(in: size)
     guard rect.width > 0, rect.height > 0 else { return }
 
@@ -156,10 +190,10 @@ struct AvatarView: View {
       let opacity = Self.particleMinOpacity + Self.particleMaxOpacity * nearness
       if !bands[band].isEmpty {
         let ink = Self.farInk.mixed(with: Self.nearInk, nearness)
-        context.fill(bands[band], with: .color(ink.color(opacity: opacity)))
+        context.fill(bands[band], with: .color(ink.color(opacity: opacity * dim)))
       }
       if let alertInk, !alertBands[band].isEmpty {
-        context.fill(alertBands[band], with: .color(alertInk.opacity(opacity)))
+        context.fill(alertBands[band], with: .color(alertInk.opacity(opacity * dim)))
       }
     }
   }
@@ -224,6 +258,71 @@ struct AvatarView: View {
   }
 
   // MARK: - Empty state
+
+  /// 人形的点：鼻、双眼、双耳、颈、双肩——每帧只收这一帧真正测到的，缺的就缺席（由
+  /// `KeyPointOverlayMotion` 按关节各自保持与淡出）。嘴是轮廓，单独由 `drawFigure` 画。
+  static func keyPoints(from joints: [JointID: JointSample]) -> [JointID: CGPoint] {
+    var points: [JointID: CGPoint] = [:]
+    for id in [JointID.nose, .leftEye, .rightEye, .leftEar, .rightEar, .neck,
+               .leftShoulder, .rightShoulder] {
+      if let joint = joints[id] { points[id] = joint.position }
+    }
+    return points
+  }
+
+  /// Vision 人形：鼻/眼/耳/颈/双肩的点、嘴的外轮廓，以及**只限这几种**连线：
+  /// 耳–眼、眼–眼、眼–耳（左右各一段），颈–左肩、颈–右肩。没有别的线（0.6.8 (16) 头上那个 M
+  /// 形来自旧的 COCO 骨架鼻–眼–耳链，已随 DebugOverlay 一起删除）。不画任何文字。
+  static let figureLines: [(JointID, JointID)] = [
+    (.leftEar, .leftEye), (.leftEye, .rightEye), (.rightEye, .rightEar),
+    (.neck, .leftShoulder), (.neck, .rightShoulder),
+  ]
+
+  private func drawFigure(_ points: [JointID: CGPoint],
+                          alphas: [JointID: Double],
+                          mouth: [CGPointLike],
+                          in context: inout GraphicsContext,
+                          size: CGSize) {
+    let rect = PoseProjection.rect(in: size)
+    guard rect.width > 0, rect.height > 0 else { return }
+    let lineStyle = StrokeStyle(lineWidth: 1.2, lineCap: .round)
+
+    // 每条线的透明度取两端点中更淡的那个：任一端在淡出，线跟着淡出，不留下一条悬空的线。
+    for (from, to) in Self.figureLines {
+      guard let start = points[from], let end = points[to],
+            let alpha = [alphas[from], alphas[to]].compactMap({ $0 }).min() else { continue }
+      var line = Path()
+      line.move(to: PoseProjection.point(start, in: rect))
+      line.addLine(to: PoseProjection.point(end, in: rect))
+      context.stroke(line, with: .color(Self.keyInk.color(opacity: alpha)), style: lineStyle)
+    }
+
+    // 点半径是人形之外的 3 倍：孩子的部位要一眼认出来。
+    let radius = min(rect.width, rect.height) * Self.particleRadiusScale * 3
+    for (id, point) in points {
+      guard let alpha = alphas[id] else { continue }
+      let centre = PoseProjection.point(point, in: rect)
+      let dot = CGRect(x: centre.x - radius, y: centre.y - radius,
+                       width: radius * 2, height: radius * 2)
+      context.fill(Path(ellipseIn: dot), with: .color(Self.keyInk.color(opacity: alpha)))
+    }
+
+    // 嘴：外轮廓闭合折线（Vision 面部特征；取不到就不画，不伪造）。透明度跟头部走。
+    guard mouth.count >= 3, let headAlpha = Self.headAlpha(alphas) else { return }
+    var lips = Path()
+    lips.move(to: PoseProjection.point(CGPoint(x: mouth[0].x, y: mouth[0].y), in: rect))
+    for point in mouth.dropFirst() {
+      lips.addLine(to: PoseProjection.point(CGPoint(x: point.x, y: point.y), in: rect))
+    }
+    lips.closeSubpath()
+    context.stroke(lips, with: .color(Self.keyInk.color(opacity: headAlpha)),
+                   style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+  }
+
+  /// 头部的透明度：鼻/眼/耳里最不透明的那个。嘴只看头，不看肩。
+  private static func headAlpha(_ alphas: [JointID: Double]) -> Double? {
+    headJoints.compactMap { alphas[$0] }.max()
+  }
 
   /// A vector silhouette of a seated upper body — head, neck, shoulders and torso in outline — for
   /// the moment before the depth sensor has a body to show. It is drawn with paths, not a picture: it
@@ -292,6 +391,91 @@ private struct Ink {
   }
 }
 
+/// 人形 8 个关节的平滑与出现/消失，**每个关节各自一条时间线**。
+///
+/// 某个关节这一帧通过了置信度门槛：坐标按 0.15 s 时间常数做指数平滑（静止时相邻帧位移远小于屏宽
+/// 1%）。某个关节这一帧低于门槛：先保持最后已知位置 `hold` 秒，再用 `fade` 秒淡出，**不影响其它
+/// 关节**——颈和右肩常年不过 0.5 的门槛，如果按整组判定，整具人形会永远不显示（0.6.8 (18) 的真机
+/// 缺口）。从缺失恢复时不瞬亮，同样用 `fade` 秒淡入。
+///
+/// 纯值类型、纯函数式的时间查询，画布按显示时钟取当前结果，单测可以直接推进时间。
+struct KeyPointOverlayMotion: Equatable {
+  /// 缺失后保持完全可见的时长。
+  static let hold: TimeInterval = 0.3
+  /// 淡出 / 淡入的时长。
+  static let fade: TimeInterval = 0.2
+  /// 坐标平滑的时间常数。
+  static let smoothingTau: TimeInterval = 0.15
+
+  struct Track: Equatable {
+    /// 平滑后、真正画在屏幕上的位置。
+    var point: CGPoint
+    /// 这一帧收到的原始位置（未平滑）。抖动测量用它判「这一帧孩子是不是静止」。
+    var target: CGPoint
+    /// 低于门槛的起始时刻；nil 表示这一帧仍可见。
+    var missingSince: TimeInterval?
+    /// 最近一次开始可见的时刻，淡入用。
+    var presentSince: TimeInterval
+    /// 上一次更新的时刻，平滑的时间步长。
+    var lastUpdate: TimeInterval?
+  }
+
+  private(set) var tracks: [JointID: Track] = [:]
+
+  /// 每个关节这一帧的原始位置（未平滑）：抖动测量用它判「这一帧孩子是否静止」。
+  var targets: [JointID: CGPoint] { tracks.mapValues(\.target) }
+
+  /// 收一帧关键点。`raw` 里没有的关节 = 这一帧低于门槛。
+  mutating func update(_ raw: [JointID: CGPoint], at now: TimeInterval) {
+    for id in tracks.keys where raw[id] == nil {
+      guard var track = tracks[id] else { continue }
+      if track.missingSince == nil { track.missingSince = now }
+      // 缺失期间也推进时间步长：恢复时的第一帧从保持位置缓过去，一步到位地跳会看起来像瞬移。
+      track.lastUpdate = now
+      tracks[id] = track
+    }
+    for (id, target) in raw {
+      var track = tracks[id] ?? Track(point: target, target: target, missingSince: nil,
+                                      presentSince: now, lastUpdate: nil)
+      let dt = track.lastUpdate.map { max(0, now - $0) } ?? 0
+      let alpha = dt > 0 ? 1 - exp(-dt / Self.smoothingTau) : 1
+      track.point = CGPoint(x: track.point.x + (target.x - track.point.x) * alpha,
+                            y: track.point.y + (target.y - track.point.y) * alpha)
+      track.target = target
+      if track.missingSince != nil {
+        track.presentSince = now
+        track.missingSince = nil
+      }
+      track.lastUpdate = now
+      tracks[id] = track
+    }
+  }
+
+  /// 显示时钟上这个关节的透明度：可见时淡入，缺失时保持 `hold` 再 `fade` 淡出。
+  func alpha(for id: JointID, at now: TimeInterval) -> Double {
+    guard let track = tracks[id] else { return 0 }
+    if let missingSince = track.missingSince {
+      let gone = now - missingSince
+      if gone <= Self.hold { return 1 }
+      return max(0, 1 - (gone - Self.hold) / Self.fade)
+    }
+    return min(1, max(0, (now - track.presentSince) / Self.fade))
+  }
+
+  /// 这一刻真正要画的点与每个点的透明度。已经完全淡出的关节不返回。
+  func displayed(at now: TimeInterval) -> (points: [JointID: CGPoint], alphas: [JointID: Double]) {
+    var points: [JointID: CGPoint] = [:]
+    var alphas: [JointID: Double] = [:]
+    for (id, track) in tracks {
+      let value = alpha(for: id, at: now)
+      guard value > 0.001 else { continue }
+      points[id] = track.point
+      alphas[id] = value
+    }
+    return (points, alphas)
+  }
+}
+
 private extension AvatarView {
   static let headJoints: [JointID] = [.nose, .leftEye, .rightEye, .leftEar, .rightEar]
 
@@ -303,6 +487,10 @@ private extension AvatarView {
   /// The cloud's depth ramp, far to near: a dark slate brightening to a near white, so depth reads
   /// from brightness and size without competing with the palette.
   static let farInk = Ink(r: 0.24, g: 0.29, b: 0.37)
+  /// 深度背景轮廓的亮度：人形是主角，点云退到 0.18。
+  static let outlineDim = 0.18
+  /// 关键点的对比色：暖琥珀，和点云的冷灰蓝、以及三种体态配色都能分开。
+  static let keyInk = Ink(r: 1.0, g: 0.78, b: 0.28)
   static let nearInk = Ink(r: 0.86, g: 0.91, b: 0.97)
 
   /// The dominant posture's own colour, straight out of the single palette, so the part that lights

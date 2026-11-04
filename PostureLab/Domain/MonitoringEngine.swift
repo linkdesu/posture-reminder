@@ -13,6 +13,8 @@ struct MonitoringEngine {
     var gentleDelay: TimeInterval
     var voiceDelay: TimeInterval
     var cooldown: TimeInterval
+    /// 连续在场多久才从无人暂停里恢复（0.6.8 (17)：去抖，1 秒）。
+    var presenceResumeDelay: TimeInterval
     var absencePauseDelay: TimeInterval
     /// When on, the experimental tier may emit a level-1 reminder; it never reaches level 2
     /// because `PostureKind.voiceLine` is nil for those kinds. Default off: detect-and-log only.
@@ -23,6 +25,7 @@ struct MonitoringEngine {
          gentleDelay: TimeInterval = 5,
          voiceDelay: TimeInterval = 15,
          cooldown: TimeInterval = 30,
+         presenceResumeDelay: TimeInterval = 1,
          absencePauseDelay: TimeInterval = 3,
          speaksExperimentalPostures: Bool = false) {
       self.thresholds = thresholds
@@ -30,6 +33,7 @@ struct MonitoringEngine {
       self.gentleDelay = gentleDelay
       self.voiceDelay = voiceDelay
       self.cooldown = cooldown
+      self.presenceResumeDelay = presenceResumeDelay
       self.absencePauseDelay = absencePauseDelay
       self.speaksExperimentalPostures = speaksExperimentalPostures
     }
@@ -89,6 +93,8 @@ struct MonitoringEngine {
   /// sample after a resume must not reach the breach accumulators.
   private var previousSampleWasPaused = false
   private var absentSince: TimeInterval?
+  /// 从无人暂停里恢复的起点：连续在场满 `presenceResumeDelay` 才写 `resumed`。
+  private var presentSince: TimeInterval?
   private var goodStreakSeconds: Double = 0
   private var lastEmittedStatus: PostureStatus = .good
 
@@ -146,10 +152,16 @@ struct MonitoringEngine {
     if sample.facePresent {
       absentSince = nil
       if isPaused {
-        isPaused = false
-        events.append(.resumed(t: sample.t))
+        // 去抖：单帧看到人不算恢复，连续在场满 1 秒才恢复；同一段离开只写一条 resumed。
+        if presentSince == nil { presentSince = sample.t }
+        if sample.t - (presentSince ?? sample.t) >= config.presenceResumeDelay {
+          isPaused = false
+          presentSince = nil
+          events.append(.resumed(t: sample.t))
+        }
       }
     } else {
+      presentSince = nil
       if absentSince == nil {
         absentSince = sample.t
       }
@@ -159,12 +171,15 @@ struct MonitoringEngine {
       }
     }
 
+    #if DEBUG
+    // 一次 ingest 正好判定一次，埋点贴在这里才不会漏掉暂停/无人之外的样本；耗时含分类器与基线比对。
+    let assessmentStartedAt = ProcessInfo.processInfo.systemUptime
+    #endif
     let assessment = PostureClassifier.assess(sample,
                                               baseline: baseline,
                                               thresholds: config.thresholds)
     #if DEBUG
-    // 每秒判定的次数：一次 ingest 正好判定一次，埋点贴在这里才不会漏掉暂停/无人之外的样本。
-    PerfMonitor.shared.recordAssessment()
+    PerfMonitor.shared.recordAssessment(seconds: ProcessInfo.processInfo.systemUptime - assessmentStartedAt)
     #endif
     latestAssessment = assessment
 
@@ -299,6 +314,12 @@ struct MonitoringEngine {
       summary.pausedSeconds += dt
       return
     }
+    // 未测量的区间不进任何百分比：Vision 说人在场、却一个可判定的身体特征都没测到时（关节全被
+    // 门槛滤掉），既不能算良好、也没有依据算不良。这类区间只出现在真机（脚本 rig 永远有关节），
+    // 所以判定条件要求 `personPresent == true`：脚本源没有 Vision 结论，行为与以前一致。
+    if sample.personPresent == true, !Self.isMeasured(assessment) {
+      return
+    }
     summary.totalSeconds += dt
     let tooClose = assessment.breached[.near] == true
     let headDown = assessment.breached[.headDown] == true
@@ -315,6 +336,15 @@ struct MonitoringEngine {
       if goodStreakSeconds > summary.longestGoodStreakSeconds {
         summary.longestGoodStreakSeconds = goodStreakSeconds
       }
+    }
+  }
+
+  /// 这一帧到底测到了没有：至少一项身体特征（横滚、头高、肩线）有实测值。只有距离/俯仰
+  /// 不算——那两个来自深度，关节全丢时它们照样有值，却不足以判定体态。
+  static func isMeasured(_ assessment: PostureAssessment) -> Bool {
+    assessment.readings.contains { reading in
+      reading.isMeasured
+        && [.headRoll, .headHeightDrop, .shoulderTilt].contains(reading.feature)
     }
   }
 

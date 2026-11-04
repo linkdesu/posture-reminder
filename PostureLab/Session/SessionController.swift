@@ -125,6 +125,14 @@ final class SessionController: ObservableObject {
 
   private var engine: MonitoringEngine?
   private var inputSource: SampleSource?
+  /// 每秒采样的热状态与电量：发热降级的唯一来源（`CaptureLoad`）。
+  private let thermal = ThermalSampler()
+  /// 最近一次热状态名，用来在采集源新建时同步负载。
+  private var thermalStateName = "nominal"
+  /// 上一次写进日志的降级结论，只在翻转时写 `thermal` 行。
+  private var thermalDegraded = false
+  /// 上一帧点云的时刻（会话时钟），用来给画布算出真实的插值间隔。
+  private var lastCloudTime: TimeInterval?
   /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
   /// the visible layers. Reset at the start of every focus.
   private var lastViewMode: (mode: String, overlay: Bool, avatar: Bool)?
@@ -168,6 +176,15 @@ final class SessionController: ObservableObject {
   private var pomodoroCompletedTodayCount = 0
 
   #if DEBUG
+  /// `-segmentTest 1`：仅 DEBUG 的分段测试模式——语音依次提示「坐直 / 歪肩 / 低头」，每段 20 秒
+  /// 循环，切换时写一行 `test_segment`（`ts` 是毫秒时刻），供真机按姿势切段复盘。
+  var debugSegmentTest = false
+  private var segmentTestTimer: Timer?
+  private var segmentTestIndex = 0
+  /// 分段标签：测试者按语音提示摆姿势；「离开」段要求人离开镜头，用来抓无人暂停。
+  private static let segmentTestPhases: [(name: String, kind: PostureKind)] = [
+    ("坐直", .near), ("歪肩", .shoulderTilt), ("低头", .headDown), ("离开", .near),
+  ]
   /// The timer's proof hook, armed from `-autopause` in `App.swift` before the first frame: the plan
   /// for this run, whether its pause has gone out yet, and whether the run has used it up.
   var debugAutoPause: DebugAutoPause?
@@ -231,6 +248,15 @@ final class SessionController: ObservableObject {
     // samples, not by the screen being visible.
     applyPomodoroAudio(pomodoroSettings.settings)
     startPomodoroTimer()
+    // 热状态从启动起每秒采样：降级不等人开始专注，点云在主页就已经在跑。
+    thermal.onSample = { [weak self] state, battery, degraded in
+      self?.applyThermal(state: state, battery: battery, degraded: degraded)
+    }
+    thermal.start()
+    #if DEBUG
+    // 分段测试模式（`-segmentTest 1`）：启动即开始，与专注无关。
+    startSegmentTestIfNeeded()
+    #endif
     refreshPomodoroSnapshot()
     // The child's screen is the root, so the depth sensor starts with it: the point cloud and the
     // silhouette are the screen's ground, not something a focus has to turn on.
@@ -466,7 +492,9 @@ final class SessionController: ObservableObject {
       latestGeometry = PoseGeometry(joints: sample.joints,
                                     depth: sample.depth,
                                     cloud: sample.cloud,
-                                    unavailableJoints: sample.unavailableJoints)
+                                    unavailableJoints: sample.unavailableJoints,
+                                    mouth: sample.mouth,
+                                    outlineEnabled: settings.outlineEnabled)
     }
 
     let events = pomodoro.ingest(sample)
@@ -595,7 +623,9 @@ final class SessionController: ObservableObject {
     latestGeometry = PoseGeometry(joints: sample.joints,
                                   depth: sample.depth,
                                   cloud: sample.cloud,
-                                  unavailableJoints: sample.unavailableJoints)
+                                  unavailableJoints: sample.unavailableJoints,
+                                  mouth: sample.mouth,
+                                  outlineEnabled: settings.outlineEnabled)
     latestAssessment = engine.latestAssessment
   }
 
@@ -802,13 +832,77 @@ final class SessionController: ObservableObject {
     refreshPomodoroSnapshot()
   }
 
+  /// 一秒一次的热状态：更新埋点、把负载交给采集源，并在降级翻转时写一行 `thermal`。
+  ///
+  /// 降级只影响采集负载（Vision 5 Hz、点云 15 Hz），不改判定与倒计时：少采几帧不等于少判一次，
+  /// 状态机仍按 10 Hz 的样本走。
+  private func applyThermal(state: String, battery: Double?, degraded: Bool) {
+    thermalStateName = state
+    #if DEBUG
+    PerfMonitor.shared.recordEnvironment(thermalState: state, battery: battery, degraded: degraded)
+    #endif
+    if let source = inputSource as? DepthCaptureSource {
+      source.setLoad(CaptureLoad.load(thermalState: state))
+    }
+    #if DEBUG
+    PerfMonitor.shared.recordThermalSecond(serious: CaptureLoad.degraded(thermalState: state),
+                                           degraded: degraded)
+    #endif
+    guard degraded != thermalDegraded else { return }
+    thermalDegraded = degraded
+    logger.log(.thermal(degraded: degraded))
+  }
+
+  #if DEBUG
+  /// 分段测试：启动时立刻进入第一段，之后每 20 秒切下一段并循环。语音走正常的二级播报路径，
+  /// 不写 `speech_played` 之外的额外状态，也不影响判定。
+  private func startSegmentTestIfNeeded() {
+    guard debugSegmentTest, segmentTestTimer == nil else { return }
+    let timer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.advanceSegmentTest() }
+    }
+    segmentTestTimer = timer
+    advanceSegmentTest()
+  }
+
+  private func advanceSegmentTest() {
+    let phase = Self.segmentTestPhases[segmentTestIndex % Self.segmentTestPhases.count]
+    segmentTestIndex += 1
+    logger.log(.testSegment(phase: phase.name))
+    player.play(kind: phase.kind, level: .voice)
+  }
+
+  private func stopSegmentTest() {
+    segmentTestTimer?.invalidate()
+    segmentTestTimer = nil
+    segmentTestIndex = 0
+  }
+  #endif
+
   private func startPomodoroInput() {
     // The depth sensor is the child's screen, not the focus's: it runs before the first 开始 so the
     // cloud is already there, and it is only the parent-facing report that gives the sensor up.
     guard phase != .report, !pomodoroRunFinished, inputSource == nil else { return }
     let source = makeSource()
     source.onSample = { [weak self] sample in self?.handlePomodoro(sample) }
+    // 30 Hz 的点云只喂画布：它不动样本时钟、不动判定，也不写日志。
+    source.onCloud = { [weak self] frame in self?.applyCloud(frame) }
+    // 横滚校准的结论写进 42/45 键日志：完成与未完成各有一个事件，绝不把「没校准」写成「校准过了」。
+    (source as? DepthCaptureSource)?.onRollCalibration = { [weak self] (baseline: Double?) in
+      guard let self else { return }
+      if let baseline {
+        self.logger.log(.calibrated(baselineDistanceCM: self.settings.baselineDistanceCM ?? 0,
+                                    baselinePitchDeg: self.settings.baselinePitchDeg ?? 0,
+                                    baselineRollDeg: baseline,
+                                    baselineHeadHeight: PostureBaseline.uprightHeadHeight))
+      } else {
+        self.logger.log(.calibrationIncomplete(reason: "3 秒内有效横滚样本不足 10 个"))
+      }
+    }
     inputSource = source
+    // 新采集源按当前热状态起跑：降级期间重建输入不该又回到 30 Hz。
+    (source as? DepthCaptureSource)?.setLoad(CaptureLoad.load(thermalState: thermalStateName))
+    (source as? DepthCaptureSource)?.settingsOutlineEnabled = settings.outlineEnabled
     // A source counts from zero; the shared clock carries on where the last one stopped. Without this
     // a second source would rewind the countdown and the posture clock with it.
     pomodoroClockOffset = pomodoroLastT
@@ -923,11 +1017,33 @@ final class SessionController: ObservableObject {
     return DepthCaptureSource()
   }
 
+  /// 一个深度帧的点云（约 30 Hz）。只替换镜子里的点，关节、深度格与判定都不碰；还没有任何样本时
+  /// 直接忽略，画面仍是矢量轮廓。
+  private func applyCloud(_ frame: CloudFrame) {
+    guard latestGeometry != nil else { return }
+    let interval = lastCloudTime.map { max(0, frame.t - $0) }
+    lastCloudTime = frame.t
+    guard latestGeometry?.cloud != frame.points else { return }
+    latestGeometry?.cloud = frame.points
+    latestGeometry?.cloudInterval = interval
+  }
+
+  #if DEBUG
+  /// 整场发热摘要：serious 及以上的秒数与降级节流秒数（0.6.8 (17) 要求如实打印，不靠降温掩盖）。
+  private func printThermalSummary() {
+    print("[summary] \(PerfMonitor.shared.thermalSummary())")
+  }
+  #endif
+
   private func stopInput() {
+    #if DEBUG
+    printThermalSummary()
+    #endif
     inputSource?.stop()
     inputSource = nil
     // No source means no fresh geometry; drop the last frame so a stale avatar cannot linger.
     latestGeometry = nil
     latestAssessment = nil
+    lastCloudTime = nil
   }
 }
