@@ -244,7 +244,7 @@ tmp/verify/<run-id>/
 | `COLD_START_SECONDS` | 600 秒 | `serious-cold-start` 的分母：冷启动窗口没跑满就判数据不足 |
 | `CALIBRATION_MIN_SECONDS` | 3 秒 | `calibration` 的窗口下限；短于 3 秒判失败 |
 | `STRAIGHT_WINDOW_MIN_SECONDS` | 180 秒 | `head-tilt` 需要一段 ≥3 分钟的坐正窗口，不足判数据不足 |
-| `WHITE_WALL_MIN_SECONDS` | 60 秒 | `white-wall-absence` 需要一段 ≥60 秒的连续空镜，不足判数据不足 |
+| `WHITE_WALL_MIN_SECONDS` | 60 秒（容差 0.15 秒） | `white-wall-absence` 需要一段 ≥60 秒的连续空镜，不足判数据不足；10 Hz 下第一帧要等到 +0.1 s，实测 59.9 秒算达成 |
 
 因此这些情形都返回 `INSUFFICIENT_DATA`：关节全部不可见、点云点数恒为 0（没有一帧有点云）、
 会话短于 600 秒、有人在画面的时段里可见关节帧过少。`cloud-smooth` 只读 `cloud-*.jsonl`：这个文件
