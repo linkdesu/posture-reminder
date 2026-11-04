@@ -41,6 +41,11 @@ enum Scenario: String, CaseIterable, Equatable {
   // show. Also referenced by the acceptance runner; do not rename.
   case pomodoroDay
 
+  // issue #8 AC8：白墙 60 秒（整段空画面）与低头阅读 60 秒（人一直在、头一直低着）。
+  // 两段都由 `verify.py case` 驱动；名字被验收脚本引用，不要改名。
+  case whiteWall = "white-wall"
+  case headDownReading = "head-down-reading"
+
   var displayName: String {
     switch self {
     case .approach: return "靠近视距循环"
@@ -68,6 +73,8 @@ enum Scenario: String, CaseIterable, Equatable {
     case .debugOffMonitoring: return "无叠加监测"
     case .longAbsence: return "长时间无人"
     case .pomodoroDay: return "一天三个番茄"
+    case .whiteWall: return "白墙 60 秒"
+    case .headDownReading: return "低头阅读 60 秒"
     }
   }
 
@@ -93,6 +100,8 @@ enum Scenario: String, CaseIterable, Equatable {
     case .longAbsence: return Self.longAbsenceSeconds
     // Three shortened focuses with their breaks, at the runner's `-focusMinutes 1 -shortBreakMinutes 1`.
     case .pomodoroDay: return Self.pomodoroDaySeconds
+    // issue #8 AC8 的两段：白墙 60 秒、低头阅读 60 秒。
+    case .whiteWall, .headDownReading: return Self.absenceProbeSeconds
     }
   }
 
@@ -325,6 +334,18 @@ enum Scenario: String, CaseIterable, Equatable {
                     pitchDeg: Self.baselinePitchDeg,
                     rollDeg: 0)
 
+    // 白墙：相机对着空墙，没有任何面孔、深度与关节。传感器量过并回答「没有人」，所以它应当是
+    // 无人暂停，而不是「识别中」，更不是「有人」。
+    case .whiteWall:
+      return Script(pose: .absent, distanceCM: nil, pitchDeg: nil, rollDeg: nil)
+
+    // 低头阅读：人一直在画面里，头低着 25°。判定要看到低头，倒计时一秒都不许停。
+    case .headDownReading:
+      return Script(pose: .headDown,
+                    distanceCM: Self.baselineDistanceCM,
+                    pitchDeg: Self.headDownPitchDeg,
+                    rollDeg: 0)
+
     // The PRD's three-pomodoro day. The three focuses breach in three different ways — too close,
     // then head down, then chin in hand — with good posture either side of each breach, so the
     // parent's timeline shows a mix of colours instead of one. The breaks carry no posture at all:
@@ -385,6 +406,9 @@ enum Scenario: String, CaseIterable, Equatable {
   /// AC13's run: a five-second lead-in, then an absence that outlives the 300-second limit at
   /// 305 s, leaving time to read the interrupt before the script ends.
   private static let longAbsenceSeconds: TimeInterval = 320
+
+  /// 白墙与低头阅读两段的长度：60 秒，短于 300 秒的无人中断上限，长于所有提醒的升级窗口。
+  private static let absenceProbeSeconds: TimeInterval = 60
 
   private static let pomodoroBreachStart: TimeInterval = 15
   private static let pomodoroBreachEnd: TimeInterval = 45
