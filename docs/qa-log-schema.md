@@ -148,8 +148,8 @@ xcrun devicectl device copy from \
 | `pitch_threshold_deg` | Double? | 在 `config` 行：本次会话的“低头”阈值，单位度。 |
 | `baseline_distance_cm` | Double? | 在 `calibration_done` 行：校准后的基线距离（非空校准样本的中位数）。 |
 | `baseline_pitch_deg` | Double? | 在 `calibration_done` 行：校准后的基线俯仰角，即“低头”的参照。 |
-| `baseline_roll_deg` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：校准得到的个人横滚基线（度）。歪头按 `abs(当前横滚 − 这个值) > 15°` 判定。 |
-| `baseline_head_height` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：头部相对肩线高度的基线（归一化），低头规则的第二路信号。 |
+| `baseline_roll_deg` | Double? | 在 `calibration_done` 行（v0.6.8 (16)）：校准得到的个人横滚基线（度）。歪头按 `abs(当前横滚 − 这个值) > 15°` 判定。v0.6.8 (25) 起这是 `calibration_done` 能否成立的必要条件：它为 `null` 时校准判失败。 |
+| `baseline_head_height` | Double? | 在 `calibration_done` 行（v0.6.8 (25) 起）：同一个 3 秒窗口里「鼻点相对两肩中线高度」的中位数（归一化），趴桌/低头规则的第二路信号，也只记日志、不上屏。双肩在窗口里不足 10 帧时如实写 `null`——没测到不写假的中位数。 |
 | `total_seconds` | Double? | 在 `session_ended` 行：检测到人脸的在座时间。 |
 | `good_seconds` | Double? | 在 `session_ended` 行：没有任何体态越阈的时间。 |
 | `near_seconds` | Double? | 在 `session_ended` 行：“太近”越阈的累计时间。 |
@@ -218,7 +218,7 @@ xcrun devicectl device copy from \
 |---|---|---|
 | `session_started` | 一次会话开始。 | `scenario` |
 | `config` | 本次会话生效的阈值。 | `sensitivity`、`distance_threshold_cm`、`pitch_threshold_deg` |
-| `calibration_done` | 校准结束；基线已设定。旧阅读流程写过这一行；当前无写入路径（静默校准尚未实现），事件与键保留。 | `baseline_distance_cm`、`baseline_pitch_deg` |
+| `calibration_done` | 校准结束（v0.6.8 (25) 起在真机上有写入路径）：输入源启动后收满 3 秒的有效横滚样本，取中位数作为个人横滚基线；同一窗口里的头高中位数一并记录。距离与俯仰的基线仍来自设置，没有校准时写 `null`。 | `baseline_roll_deg`、`baseline_head_height`、`baseline_distance_cm`、`baseline_pitch_deg` |
 | `screen_shown` | 一个界面出现。 | `screen` |
 | `sample` | 一个相机 tick（脚本运行中为 10 Hz）。 | `t`、`distance_cm`、`pitch_deg` |
 | `status_changed` | 显示的体态状态发生变化。 | `t`、`state`、`distance_cm`、`pitch_deg` |

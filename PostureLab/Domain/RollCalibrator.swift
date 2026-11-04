@@ -16,20 +16,35 @@ struct RollCalibrator: Equatable {
 
   private var start: TimeInterval?
   private var samples: [Double] = []
+  private var headHeights: [Double] = []
   private(set) var baseline: Double?
+  /// 同一个 3 秒窗口里「鼻点相对肩线高度」的中位数；肩线不够就保持 nil，绝不写一个假的中位数。
+  private(set) var headHeightBaseline: Double?
   /// 校准是否已经有结论：要么得到了基线，要么样本不够而放弃（此时 `baseline` 仍为 nil）。
   private(set) var isSettled = false
 
   /// 收一个角度；返回是否应当把它记入校准（false = 校准已结束）。
   mutating func observe(_ angle: Double, at t: TimeInterval) -> Bool {
+    observe(angle, headHeight: nil, at: t)
+  }
+
+  /// 收一帧的横滚与（可选的）头高；两者共用同一个 3 秒窗口与同一个结论时刻。
+  @discardableResult
+  mutating func observe(_ angle: Double, headHeight: Double?, at t: TimeInterval) -> Bool {
     guard !isSettled else { return false }
     if start == nil { start = t }
     samples.append(angle)
+    if let headHeight { headHeights.append(headHeight) }
     guard let start, t - start >= Self.duration else { return true }
     isSettled = true
-    guard samples.count >= Self.minimumSamples else { return true }
-    let sorted = samples.sorted()
-    baseline = sorted[sorted.count / 2]
+    if samples.count >= Self.minimumSamples {
+      let sorted = samples.sorted()
+      baseline = sorted[sorted.count / 2]
+    }
+    if headHeights.count >= Self.minimumSamples {
+      let sorted = headHeights.sorted()
+      headHeightBaseline = sorted[sorted.count / 2]
+    }
     return true
   }
 

@@ -135,6 +135,8 @@ final class SessionController: ObservableObject {
   private var thermalStateName = "nominal"
   /// 上一次写进日志的降级结论，只在翻转时写 `thermal` 行。
   private var thermalDegraded = false
+  /// 静默校准测到的头高基线；没测到（肩线不够）时保持 nil，引擎用直立参考值。
+  private var calibratedHeadHeight: Double?
   /// 上一帧点云的时刻（会话时钟），用来给画布算出真实的插值间隔。
   private var lastCloudTime: TimeInterval?
   /// Last `view_mode` layer state written, so a settings change only logs when it actually changed
@@ -642,7 +644,8 @@ final class SessionController: ObservableObject {
   private func makePostureEngine() -> MonitoringEngine {
     MonitoringEngine(config: settings.engineConfig,
                      baselineDistanceCM: settings.baselineDistanceCM ?? 0,
-                     baselinePitchDeg: settings.baselinePitchDeg ?? 0)
+                     baselinePitchDeg: settings.baselinePitchDeg ?? 0,
+                     baselineHeadHeight: calibratedHeadHeight)
   }
 
   /// A focus is what a record covers, so its posture session starts and ends with it. A different
@@ -907,13 +910,14 @@ final class SessionController: ObservableObject {
     // 30 Hz 的点云只喂画布：它不动样本时钟、不动判定，也不写日志。
     source.onCloud = { [weak self] frame in self?.applyCloud(frame) }
     // 横滚校准的结论写进 42/45 键日志：完成与未完成各有一个事件，绝不把「没校准」写成「校准过了」。
-    (source as? DepthCaptureSource)?.onRollCalibration = { [weak self] (baseline: Double?) in
+    (source as? DepthCaptureSource)?.onRollCalibration = { [weak self] roll, headHeight in
       guard let self else { return }
-      if let baseline {
-        self.logger.log(.calibrated(baselineDistanceCM: self.settings.baselineDistanceCM ?? 0,
-                                    baselinePitchDeg: self.settings.baselinePitchDeg ?? 0,
-                                    baselineRollDeg: baseline,
-                                    baselineHeadHeight: PostureBaseline.uprightHeadHeight))
+      if let roll {
+        self.calibratedHeadHeight = headHeight
+        self.logger.log(.calibrated(baselineDistanceCM: self.settings.baselineDistanceCM,
+                                    baselinePitchDeg: self.settings.baselinePitchDeg,
+                                    baselineRollDeg: roll,
+                                    baselineHeadHeight: headHeight))
       } else {
         self.logger.log(.calibrationIncomplete(reason: "3 秒内有效横滚样本不足 10 个"))
       }

@@ -18,7 +18,8 @@ final class DepthCaptureSource: NSObject, SampleSource {
   var onSample: ((PostureSample) -> Void)?
   var onCloud: ((CloudFrame) -> Void)?
   /// 横滚校准有结论时回调一次：拿到基线给数值，样本不足给 nil。
-  var onRollCalibration: ((Double?) -> Void)?
+  /// 静默校准的结论：(横滚基线, 头高基线)。两个都可以是 nil——没测到就不假装测到了。
+  var onRollCalibration: ((_ roll: Double?, _ headHeight: Double?) -> Void)?
 
   private let vision = VisionJointSource()
   /// 固定网格 + 帧间平滑的点云。只有深度队列碰它。
@@ -277,10 +278,16 @@ final class DepthCaptureSource: NSObject, SampleSource {
     guard let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
       ?? VisionPoseMapping.earLineDegrees(joints) else { return fallback }
     let wasSettled = rollCalibrator.isSettled
-    _ = rollCalibrator.observe(visionRoll, at: t)
+    // 头高（鼻点相对两肩中线）在同一个 3 秒窗口里取中位数；双肩不够时它是 nil，日志里如实写 null。
+    _ = rollCalibrator.observe(visionRoll,
+                               headHeight: PostureClassifier.headHeight(joints: joints),
+                               at: t)
     if !wasSettled, rollCalibrator.isSettled {
-      let baseline = rollCalibrator.baseline
-      DispatchQueue.main.async { [weak self] in self?.onRollCalibration?(baseline) }
+      let roll = rollCalibrator.baseline
+      let headHeight = rollCalibrator.headHeightBaseline
+      DispatchQueue.main.async { [weak self] in
+        self?.onRollCalibration?(roll, headHeight)
+      }
     }
     return rollCalibrator.relative(visionRoll)
   }
