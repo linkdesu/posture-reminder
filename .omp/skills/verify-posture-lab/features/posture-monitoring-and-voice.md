@@ -13,10 +13,11 @@
 - `posture-cloud-never-blank`（0.6.8 (19)）：检测到脸时点云从不空白。`cloud-*.jsonl` 每帧带 `face_detected` 与 `visible_points`，`device-logs` 的 `cloud-not-blank` 判「有脸的帧 `points > 0`、已上屏的帧 `visible_points > 0`」。任一项（不空白、p95 ≤ 2%）不达标时，按 issue #6 的约定去掉点云、只保留火柴人。
 - `posture-right-shoulder-report`（0.6.8 (19)）：右肩可用帧 < 50% 时记录并上报，不改 0.5 置信度门槛。`perf-*.jsonl` 累计 `right_shoulder_frames` / `shoulder_frames`，`device-logs` 打印 `REPORT right-shoulder: 右肩可用 x/y 帧 = z%` 并写进 `verdict.json` 的 `rightShoulder`。
 - `posture-frames-log`（0.6.8 (15)）：`Documents/debug/cloud-*.jsonl` 每个深度帧一行（帧呈现时刻、回调到达时刻、取深度/分割/点云耗时、实际点数、遮罩格数、有效深度占比、最近读数、是否降级、是否推给画布、上屏渲染耗时与延迟）；`joints-*.jsonl` 每帧带 `detected` 与模型原始置信度 `raw`，用来区分「没人」与「被 0.5 门槛过滤」；v0.6.8 (18) 起另带在场判定的证据：`presence_path`（`face_eyes` / `neck_shoulder` / `none`）、`face_detected`，以及 `neck`/`left_shoulder`/`right_shoulder` 三个过门槛后的置信度（详见 qa-log-schema.md 的 `joints-*.jsonl` 一节）。
-- `posture-baseline`：专注启动后前 3 秒有效人脸样本中位数建立距离/俯仰基线。
+- `posture-baseline`（0.6.8 (25)）：输入源启动后**前 3 秒**的有效横滚样本（眼线 → 耳线）中位数成为个人横滚基线，同一窗口里「鼻点相对两肩中线高度」的中位数成为头高基线；两者各要 ≥10 个样本，不够就不写。校准完成写一行 `calibration_done`（`baseline_roll_deg`、`baseline_head_height`），不够写 `calibration_incomplete` 并说明原因。头高只在日志里、屏幕上不显示（调试叠加层没有这一行）。distance/pitch 基线仍来自设置。判定：`verify.py device-logs` 的 `calibration`（窗口 ≥3 秒、横滚基线必须存在）与 `head-tilt`（坐正窗口 ≥3 分钟里 `head_roll` 不越阈且落在 ±90° 内）。
 - `posture-kinds`：识别 `desk_lean`、`near`、`head_forward`、`slouch`、`head_down`、`head_tilt`、`shoulder_tilt`、`chin_rest`。
 - `posture-tiers`：稳定级、 中度级可发声；实验级只记录与调试高亮，永不触发任何提醒。
 - `posture-voice`：可发声体态连续越阈 15 秒后播放预录 WAV；多体态按 `priority` 1..8 串行。
+- `posture-white-wall`（0.6.8 (25)）：白墙 60 秒与低头阅读 60 秒两段由 `verify.py case ac8-white-wall` / `ac8-head-down-reading` 驱动。白墙段要求 0 帧被判定成有人、0 次体态；低头阅读段要求人在、低头窗口 ≥30 秒且 0 次无人暂停。判定用现行口径：`joints-*.jsonl` 的 `presence_path`（鼻 + 人脸/双眼或颈肩之一，只有鼻子不算有人），没有关节日志时退回 `sample` 行的空距离读数；两者都不看旧的背景/平滑规则。
 - `posture-absence`：连续 3 秒无人自动停表（中文文档与验收统一写作「无人」，不叫「离开」；统计页/历史图例文案写「不在画面」）；「在场」的判据是连续 3 帧有可靠证据（鼻过门槛且【找到人脸或双眼】或【颈/双肩】；只有鼻子不算有人，见 `PresenceGate`），日志写 `state: "no_person"` 与 `paused`/`resumed`，单次超过 300 秒转 `interrupted`。它与「离开」按钮是两件事：按钮只写历史 `abandoned`。
 - `posture-overlay`：`debugEnabled` 开启时主页随时显示骨架（中文关节名：头/左眼/右眼/左耳/右耳/颈/躯干/左肩/右肩/左肘/右肘/左腕/右腕/左髋/右髋，只画到髋因为 JointID 没有膝/踝）与特征读数，每个指标带一行算法来源（距离=脸到相机距离；低头角度=基线俯仰−当前脸俯仰；歪头=|当前脸滚转−基线滚转|；肩线=左肩-右肩连线与水平夹角−基线；头高=鼻尖 y−基线头高；手到脸=min(左腕、右腕到鼻尖的距离)；头前伸=基线鼻深−当前鼻深；驼背=max(肩宽缩短比, 颈-躯干缩短比)），未开始专注时数值列显示 `—`，不遮挡操作按钮。
 
@@ -50,7 +51,7 @@ Preconditions：
 
 ## Gotchas
 
-- Q3 已确认专注启动后静默采集前 3 秒有效样本；当前代码尚未实现该路径，仍沿用持久化 `PostureBaseline` 或直立参考。验证时按实际日志记录 `baseline_*`，不要伪造“已静默校准”。
+- Q3 的静默校准 0.6.8 (25) 起已落地：只有横滚与头高来自这 3 秒窗口，距离/俯仰仍取设置值。日志里 `baseline_roll_deg` 为 `null` 是失败，`baseline_head_height` 为 `null` 是「肩线不够、如实未测」，不是同一种错。
 - Q4 已确认点云由 TrueDepth 深度图与人像分割遮罩合成；当前代码由关节点几何生成，真机 `ARFaceSampleSource` 只产出距离/俯仰，点云可能为空态。截图为空态时如实记录。
 - Q4 已确认实验级 `head_forward` / `slouch` 永不触发任何提醒；当前代码在旧 `experimentalPostures` 开关打开时仍可能发一级事件。若日志出现 `reminder`/`speech_played`，按失败报告。
 - Q2 已确认手动与无人暂停都计入 `pausedSeconds`；v0.5 起无人暂停的整段也累加（`PomodoroEngine` 在 `absentSince != nil` 时按样本间隔计入），与灰色 `paused` 段时间轴对账。
@@ -62,4 +63,5 @@ Preconditions：
 ## 扩展用例（`verify.py case`）
 
 - `ac10-debug-on` / `ac10-debug-off`：调试叠加层开/关，「暂停/离开」坐标不变；`ac10-debug-on` 顺带取首页 foreground=false。
+- `ac8-white-wall` / `ac8-head-down-reading`（issue #8）：分别跑 `-scenario white-wall` 与 `-scenario head-down-reading` 60 秒。白墙段看 `session-*.jsonl`：`sample` 行没有距离、`state` 只出现 `no_person`、一条 `paused` 且没有 `resumed`、0 次体态；低头阅读段看 `head_down` 窗口 ≥30 秒且 `paused` 为 0。两个用例都用 `verify.py device-logs --dir` 现判（会话级判定即可，不需要关节日志）。
 - `ac9-parked`：`-holdStart 1` 停驻主页只有两个图标按钮；自动写 `cloud-geometry.json`（点云包围盒占屏比）与 `cloud-ascii.txt`。也可单独 `verify.py png|ascii <png>`。

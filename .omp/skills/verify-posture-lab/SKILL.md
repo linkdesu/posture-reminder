@@ -207,6 +207,17 @@ tmp/verify/<run-id>/
 | `keypoint-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `keypoint_jitter_p95`（滚动 10 秒、只算「连续静止 0.3 s」的帧） | 整场最大值 ≤ 1% 屏宽；没有任何值（旧构建或整轮都在动）判数据不足 |
 | `cloud-jitter`（v0.6.8 (19)） | `perf-*.jsonl` 的 `cloud_jitter_p95` | 整场最大值 ≤ 2% 屏宽；没有静止帧判数据不足 |
 | `degradation` | `thermal` 行配对的降级时段 | 正常室温 10 分钟专注里降级时长 ≤ 20%，逐段打印开始时间与时长 |
+| `log-header`（issue #8 AC1） | 每份 `session-*.jsonl` 的第一行 `log_header` 及其 `message` | `<版本> (<build>) <commit>`，commit 不能是 `unknown` |
+| `serious-cold-start`（AC2） | `perf-*.jsonl` 逐秒的 `thermal_state` / `window_s`（不用整场累计的 `serious_seconds`，它算不出前 10 分钟） | 冷启动前 600 秒里 `serious`/`critical` 占比 ≤ 20%；窗口没跑满 600 秒判数据不足 |
+| `calibration`（AC4/AC5） | 会话日志的 `calibration_done` / `calibration_incomplete` | 校准窗口 ≥ 3 秒；`baseline_roll_deg` 必须非 `null`；`baseline_head_height` 允许 `null`（肩线不够、如实未测）。只有 `calibration_incomplete` 或没有校准事件判数据不足 |
+| `head-tilt`（AC5） | `features` 行的 `feature_values.head_roll` 与 `status_changed` 的 good 窗口 | 坐正窗口合计 ≥ 180 秒；窗口里每个 `head_roll` ≤ 自己的阈值且落在折回区间 ±90° 内 |
+| `presence-path`（AC7） | `joints-*.jsonl` 的 `presence_path`、`face_detected`、`neck`/`left_shoulder`/`right_shoulder` | 逐帧用同一帧置信度按 `PresenceGate` 复算，必须与记录一致；缺字段或 <30 帧判数据不足 |
+| `unmeasured-quiet`（AC6） | `features` 行的 `feature_values` | `value: null` 的读数必须 `over: false`；一个未测读数都没有判数据不足 |
+| `pause-debounce`（AC9） | 会话日志的 `paused` / `resumed` | 严格交替，重复 `paused` 或孤立 `resumed` 判失败；一次完整的离开/回来都没有判数据不足 |
+| `pause-during-head-down`（AC8） | `head_down` 窗口与窗口里的 `paused` | 低头窗口合计 ≥30 秒时 `paused` 必须为 0；没有低头窗口判数据不足 |
+| `white-wall-absence`（AC8） | 有 `joints-*.jsonl` 时看 `presence_path`（0.6.8 (18) 的现行口径），没有时退回 `sample` 行的空距离读数 | 空画面里 0 帧判成有人、0 次体态；本轮的连续空镜不足 60 秒判数据不足 |
+
+`white-wall-absence` 与 `pause-during-head-down` **不读旧的背景/平滑规则**（深度背景点数、点云帧间隔、点数固定）：那些是 0.6.8 (15)/(17) 的口径，现行「有人/无人」只看 `PresenceGate` 的 `presence_path`、抖动只看连续静止 0.3 秒的静止帧（`keypoint-jitter` / `cloud-jitter`）。
 
 `REPORT right-shoulder: …` 不是判定：它打印 `perf-*.jsonl` 里 `right_shoulder_frames / shoulder_frames`
 的占比（没有 perf 计数时退回 `joints-*.jsonl` 逐帧的 `rightShoulder.v`），并写进 `verdict.json` 的
@@ -230,12 +241,16 @@ tmp/verify/<run-id>/
 | `MIN_DETECTED_FRAMES` | 30 帧 | 全轮 `joints-*.jsonl` 里 `detected: true` 少于 30 帧：整轮按「没人入镜」判数据不足 |
 | `MIN_BODY_FRAMES` | 30 帧（30 Hz 下 1 秒） | `cloud-*.jsonl` 里 `points > 0` 的帧太少：`cloud-smooth` 判数据不足（点数固定没有被验证过） |
 | `MIN_FACE_FRAMES` | 30 帧（30 Hz 下 1 秒） | `cloud-*.jsonl` 里 `face_detected: true` 的帧太少：`cloud-not-blank` 判数据不足（没有可判的空白对象） |
+| `COLD_START_SECONDS` | 600 秒 | `serious-cold-start` 的分母：冷启动窗口没跑满就判数据不足 |
+| `CALIBRATION_MIN_SECONDS` | 3 秒 | `calibration` 的窗口下限；短于 3 秒判失败 |
+| `STRAIGHT_WINDOW_MIN_SECONDS` | 180 秒 | `head-tilt` 需要一段 ≥3 分钟的坐正窗口，不足判数据不足 |
+| `WHITE_WALL_MIN_SECONDS` | 60 秒 | `white-wall-absence` 需要一段 ≥60 秒的连续空镜，不足判数据不足 |
 
 因此这些情形都返回 `INSUFFICIENT_DATA`：关节全部不可见、点云点数恒为 0（没有一帧有点云）、
 会话短于 600 秒、有人在画面的时段里可见关节帧过少。`cloud-smooth` 只读 `cloud-*.jsonl`：这个文件
 不存在就直接判数据不足（perf 的每秒汇总是趋势，不是逐帧证据）。
 
-自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（26 例，
+自测（不连真机）：`python3 .omp/skills/verify-posture-lab/scripts/test_device_logs.py`（49 例，
 覆盖三个状态：全合格、髋关节、肩在鼻上、间隔超限、降级 25%、没人入镜、点数全 0、短会话、
 可见帧过少、降级 10%、点数固定但不是 600、点数在帧之间变化、有点云帧过少、坐直段标记当窗口、
 没有段标记时退回 `status_changed`，以及 v0.6.8 (19) 的关键点/点云抖动超限与边界、抖动无样本、
