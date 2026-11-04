@@ -68,11 +68,15 @@ def feature_rows(seconds: int = DURATION, *, straight_roll: float = 3.0,
     return rows
 
 
-def null_sample_rows(seconds: int = 60, *, start: int = 0) -> list[dict]:
-    """10 Hz 的 sample 行：没有距离、没有俯仰——相机这一帧没量到任何脸（白墙）。"""
+def null_sample_rows(seconds: int = 60, *, start: int = 0, frames: int | None = None) -> list[dict]:
+    """10 Hz 的 sample 行：没有距离、没有俯仰——相机这一帧没量到任何脸（白墙）。
+
+    `frames` 用来造「最后一个样本在 59.8 s、专注在 60.0 s 结束」这种真机/模拟器都常见的收尾。
+    """
+    count = seconds * 10 if frames is None else frames
     return [{"ts": T0 + (start + index / 10) * 1000, "event": "sample",
              "distance_cm": None, "pitch_deg": None, "state": "no_person"}
-            for index in range(seconds * 10)]
+            for index in range(count)]
 
 
 def pause_rows(spans: list[tuple[int, int]]) -> list[dict]:
@@ -585,6 +589,13 @@ class DeviceLogsTests(unittest.TestCase):
                                  frames=frame_rows(DURATION))
         self.assertIn("PASS white-wall-absence", r.stdout)
         self.assertIn("60", r.stdout)
+
+    def test_a_blank_stretch_that_runs_to_the_session_end_counts_to_the_end(self):
+        # 59.8 s 的最后一个空样本、60.0 s 专注结束：这段空镜就是 60 秒，不能因为收尾少算一格判数据不足。
+        sessions = session_rows(second=60, states=[("no_person", 0, 60)]) + null_sample_rows(0, frames=599)
+        r = self.run_device_logs(joints=[], sessions=sessions, perf=perf_rows(DURATION),
+                                 frames=frame_rows(DURATION))
+        self.assertIn("PASS white-wall-absence", r.stdout)
 
     def test_a_posture_inside_the_blank_stretch_fails_the_white_wall_rule(self):
         sessions = (session_rows(states=[("near", 10, 20)]) + null_sample_rows(60))

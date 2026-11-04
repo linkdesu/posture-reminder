@@ -1858,6 +1858,8 @@ CALIBRATION_MIN_SECONDS = 3.0
 STRAIGHT_WINDOW_MIN_SECONDS = 180.0
 HEAD_ROLL_FOLD_LIMIT = 90.0
 WHITE_WALL_MIN_SECONDS = 60.0
+# 边界误差：10 Hz 采样下第一帧要等到 +0.1 s 才到，「60 秒白墙」允许少一个采样间隔。
+WHITE_WALL_TOLERANCE = 0.15
 PRESENCE_CONFIDENCE = 0.5
 
 
@@ -2166,7 +2168,7 @@ def judge_white_wall_absence(joints: list[dict], sessions: list[list[dict]]) -> 
         previous_t = t
     blank_frames = sum(1 for row in keyed if row.get("presence_path") == "none")
     detail = f"没有在场证据的帧 {blank_frames} 帧，最长连续空镜 {longest:.1f} s（要求 ≥60 s）"
-    if longest + 0.05 < WHITE_WALL_MIN_SECONDS:
+    if longest + WHITE_WALL_TOLERANCE < WHITE_WALL_MIN_SECONDS:
         return INSUFFICIENT, detail + "；本轮没有 60 秒白墙段，白墙不误报没有被验证过"
     return PASS, detail + "；这些帧没有一帧判成有人"
 
@@ -2191,13 +2193,20 @@ def _judge_white_wall_from_sessions(sessions: list[list[dict]]) -> tuple[str, st
         else:
             run_start = ts
         previous = ts
-    longest = max(longest, (previous - run_start) / 1000 + 0.1 if run_start is not None else 0)
+    if run_start is not None:
+        tail = (previous - run_start) / 1000 + 0.1
+        session_end = max((row["ts"] for row in rows if isinstance(row.get("ts"), (int, float))),
+                          default=None)
+        # 最后一段空镜可能一直持续到专注结束：结束时刻离最后一个样本不超过 500 ms 时，按结束时刻算。
+        if session_end is not None and session_end - previous <= 500:
+            tail = max(tail, (session_end - run_start) / 1000)
+        longest = max(longest, tail)
     postures = [row for row in rows
                 if row.get("event") == "status_changed"
                 and row.get("state") not in ("good", "no_person")]
     detail = (f"没有关节日志；{len(blank)}/{len(samples)} 行 sample 没有距离读数，"
               f"最长连续空镜 {longest:.1f} s（要求 ≥60 s），其间体态行 {len(postures)} 行")
-    if longest + 0.05 < WHITE_WALL_MIN_SECONDS:
+    if longest + WHITE_WALL_TOLERANCE < WHITE_WALL_MIN_SECONDS:
         return INSUFFICIENT, detail + "；本轮没有 60 秒白墙段"
     if postures:
         return FAIL, detail + "；空画面里却判出了体态"
