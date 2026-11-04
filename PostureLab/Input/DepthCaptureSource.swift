@@ -275,13 +275,18 @@ final class DepthCaptureSource: NSObject, SampleSource {
   private func calibratedRoll(joints: [JointID: JointSample],
                               fallback: Double?,
                               at t: TimeInterval) -> Double? {
-    guard let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
-      ?? VisionPoseMapping.earLineDegrees(joints) else { return fallback }
     let wasSettled = rollCalibrator.isSettled
-    // 头高（鼻点相对两肩中线）在同一个 3 秒窗口里取中位数；双肩不够时它是 nil，日志里如实写 null。
-    _ = rollCalibrator.observe(visionRoll,
-                               headHeight: PostureClassifier.headHeight(joints: joints),
-                               at: t)
+    let visionRoll = VisionPoseMapping.eyeLineDegrees(joints)
+      ?? VisionPoseMapping.earLineDegrees(joints)
+    if let visionRoll {
+      // 头高（鼻点相对两肩中线）在同一个 3 秒窗口里取中位数；双肩不够时它是 nil，日志里如实写 null。
+      _ = rollCalibrator.observe(visionRoll,
+                                 headHeight: PostureClassifier.headHeight(joints: joints),
+                                 at: t)
+    } else {
+      // 没有可用的面部连线时窗口仍然要按墙钟关闭：孩子还没坐下也要写「校准没完成」。
+      _ = rollCalibrator.tick(at: t)
+    }
     if !wasSettled, rollCalibrator.isSettled {
       let roll = rollCalibrator.baseline
       let headHeight = rollCalibrator.headHeightBaseline
@@ -289,7 +294,7 @@ final class DepthCaptureSource: NSObject, SampleSource {
         self?.onRollCalibration?(roll, headHeight)
       }
     }
-    return rollCalibrator.relative(visionRoll)
+    return visionRoll.map(rollCalibrator.relative) ?? fallback
   }
 
   private func joints(at t: TimeInterval) -> [JointID: JointSample] {

@@ -23,6 +23,19 @@ final class RollCalibratorTests: XCTestCase {
                    "without a baseline the angle is passed through unchanged")
   }
 
+  /// 3 秒窗口必须自己关闭：一帧有效横滚都没有时（孩子还没坐下/不在画面里）也要有结论，
+  /// 否则日志里既没有 calibration_done 也没有 calibration_incomplete，QA 无从判断校准试没试过。
+  func testTheWindowClosesAfterThreeSecondsWithoutASingleSample() {
+    var calibrator = RollCalibrator()
+    calibrator.tick(at: 0)
+    calibrator.tick(at: 2.9)
+    XCTAssertFalse(calibrator.isSettled)
+    calibrator.tick(at: 3.1)
+    XCTAssertTrue(calibrator.isSettled)
+    XCTAssertNil(calibrator.baseline)
+    XCTAssertNil(calibrator.headHeightBaseline)
+  }
+
   func testAnglesAfterSettlingDoNotChangeTheBaseline() {
     var calibrator = RollCalibrator()
     for step in 0...30 { calibrator.observe(0, at: Double(step) / 10) }

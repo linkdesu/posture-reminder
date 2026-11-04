@@ -36,6 +36,24 @@ struct RollCalibrator: Equatable {
     samples.append(angle)
     if let headHeight { headHeights.append(headHeight) }
     guard let start, t - start >= Self.duration else { return true }
+    settle()
+    return true
+  }
+
+  /// 只推进时钟、不收样本：3 秒窗口到点就关，一帧有效横滚都没有时也给出「没校准」的结论。
+  ///
+  /// 没有这一路，孩子还没坐下时校准既不会完成、也不会记为未完成，日志里两行都没有，QA 无法
+  /// 区分「没试过」和「试了没成」。
+  @discardableResult
+  mutating func tick(at t: TimeInterval) -> Bool {
+    guard !isSettled else { return false }
+    if start == nil { start = t }
+    guard let start, t - start >= Self.duration else { return false }
+    settle()
+    return true
+  }
+
+  private mutating func settle() {
     isSettled = true
     if samples.count >= Self.minimumSamples {
       let sorted = samples.sorted()
@@ -45,7 +63,6 @@ struct RollCalibrator: Equatable {
       let sorted = headHeights.sorted()
       headHeightBaseline = sorted[sorted.count / 2]
     }
-    return true
   }
 
   /// 把实测角度换成相对基线的角度；没有基线时原样返回。
