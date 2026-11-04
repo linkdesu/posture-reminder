@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import SwiftUI
 import UIKit
 
 /// The child-facing state of a pomodoro session, as one value type, so the main screen reads one
@@ -120,6 +121,9 @@ final class SessionController: ObservableObject {
   /// Whether the scene has reported its phase. The launch path runs before `UIApplicationMain`, so it
   /// must not touch the idle timer: the first write waits for the scene to say it is on screen.
   private var idleTimerArmed = false
+  /// Whether the scene has been in the background since it was last active. Coming back from there is
+  /// what sends the app to the child's screen (`scenePhaseChanged`).
+  private var leftForBackground = false
   /// 上一次常亮取证时的会话状态，用来判定四个记录时刻（`IdleTimerLogTrigger`）。
   private var idleTimerLogState: IdleTimerLogTrigger.State?
 
@@ -270,7 +274,20 @@ final class SessionController: ObservableObject {
   /// The scene's activity, reported by `RootView`'s `scenePhase`. The first report is what arms the
   /// idle timer: a backgrounded app never holds the screen awake, and coming back while a focus still
   /// counts holds it again.
-  func scenePhaseChanged(isActive: Bool) {
+  ///
+  /// It is also what makes the icon on the home screen open the app on `pomodoro_main` (ADR-0006): a
+  /// suspended app wakes up on whatever page it was showing, so a parent who left the report open
+  /// would hand the child the report instead of the timer. A return **from the background** therefore
+  /// goes back to the child's screen. Only a real background counts: the launch path reports
+  /// `inactive` before its first `active`, and a launch argument such as `-settings 1` or
+  /// `-report day` has to be able to open its page.
+  func scenePhaseChanged(_ phase: ScenePhase) {
+    let isActive = phase == .active
+    if phase == .background { leftForBackground = true }
+    if isActive {
+      if leftForBackground, self.phase != .pomodoro { showPomodoro() }
+      leftForBackground = false
+    }
     idleTimerArmed = true
     sceneActive = isActive
     syncIdleTimer()
@@ -312,17 +329,8 @@ final class SessionController: ObservableObject {
   /// the settings' own switch being heard, so it neither starts a focus nor writes a `cue_played`
   /// line: that line is evidence of the timer's sound, and a preview is not the timer.
   func previewEndSound() {
-    guard let cue = Self.cue(for: pomodoroSettings.settings.endSound) else { return }
+    guard let cue = pomodoroSettings.settings.endSound.cue else { return }
     player.preview(cue: cue)
-  }
-
-  /// The clip behind an end-sound choice; `none` is a real choice and has no clip.
-  private static func cue(for sound: EndSound) -> PomodoroCue? {
-    switch sound {
-    case .soft: return .endSoft
-    case .chime: return .endChime
-    case .none: return nil
-    }
   }
 
   /// A scripted run has nobody to tap 开始, so it starts its own first focus and ends when the script
@@ -367,7 +375,7 @@ final class SessionController: ObservableObject {
     let events = pomodoro.command(command)
     self.pomodoro = pomodoro
     syncPomodoroFocus()
-    for event in events { handlePomodoroEvent(event, at: pomodoroLastT) }
+    handlePomodoroEvents(events, at: pomodoroLastT)
     syncPomodoroPause()
     refreshPomodoroSnapshot()
   }
@@ -455,7 +463,7 @@ final class SessionController: ObservableObject {
     let events = pomodoro.tick()
     self.pomodoro = pomodoro
     syncPomodoroFocus()
-    for event in events { handlePomodoroEvent(event, at: t) }
+    handlePomodoroEvents(events, at: t)
     syncPomodoroPause()
     logPomodoroTickIfDue(at: t)
     refreshPomodoroSnapshot()
@@ -501,7 +509,7 @@ final class SessionController: ObservableObject {
     self.pomodoro = pomodoro
     syncPomodoroFocus()
     let clock = now()
-    for event in events { handlePomodoroEvent(event, at: clock) }
+    handlePomodoroEvents(events, at: clock)
     syncPomodoroPause()
     // An absence still feeds the engine, so its own no-face frame must not become the avatar's
     // subject: the child is not there, and the last frame is dropped exactly as before.
@@ -677,6 +685,18 @@ final class SessionController: ObservableObject {
     source.restartClock()
   }
 
+  /// One batch of engine events, in order, then the end-of-phase sound the batch calls for.
+  ///
+  /// The sound is decided from the batch instead of from the `.completed` case alone, because a
+  /// focus running out and a break running out are the same event to the child's ear
+  /// (`PhaseEndCue`, GLOSSARY「阶段提示音」).
+  private func handlePomodoroEvents(_ events: [PomodoroEvent], at t: TimeInterval) {
+    for event in events { handlePomodoroEvent(event, at: t) }
+    for cue in PhaseEndCue.cues(for: events, endSound: pomodoroSettings.settings.endSound) {
+      player.play(cue: cue)
+    }
+  }
+
   private func handlePomodoroEvent(_ event: PomodoroEvent, at t: TimeInterval) {
     switch event {
     case .phaseChanged(let to, _):
@@ -690,8 +710,6 @@ final class SessionController: ObservableObject {
     case .finishedAll:
       break
     case .completed(let record):
-      // The focus is over, which is the one moment the end sound exists for.
-      playEndSound()
       // Waits one beat: a skipped break is reported after the completion, and the flag belongs on this
       // record. The break that follows ends with a `phaseChanged(to: .focus)` that writes it.
       closePomodoroFocus(record: record, at: t)
@@ -712,15 +730,11 @@ final class SessionController: ObservableObject {
       // The engine marks the pomodoro whose break was skipped, and that record is the one still
       // waiting to be written, so the skip goes into the history with the rest of its evidence.
       pomodoroPending?.skippedBreak = true
+    case .phaseEnded:
+      // A break that ran out closes no record: the sound it is owed is played for the batch by
+      // `handlePomodoroEvents`, and the focus that follows is handled by its own `.phaseChanged`.
+      break
     }
-  }
-
-  /// The end-of-focus sound the settings name. `.none` is a real choice — a parent who wants a silent
-  /// timer — so it plays nothing and logs nothing rather than a cue nobody asked for. Whether the clip
-  /// really started, and hence whether a `cue_played` line is written at all, is the player's call.
-  private func playEndSound() {
-    guard let cue = Self.cue(for: pomodoroSettings.settings.endSound) else { return }
-    player.play(cue: cue)
   }
 
   /// Closes the focus: the timeline ends at `t` and the record takes the segments, the reminders and
@@ -774,7 +788,12 @@ final class SessionController: ObservableObject {
     let kind = FocusTimeline.bandKind(isPaused: pomodoroFocusPaused,
                                       isPausedByAbsence: pomodoro?.isPausedByAbsence ?? false,
                                       status: engine?.status.rawValue)
-    guard let kind else { return }
+    guard let kind else {
+      // Nobody in frame but the countdown still runs: the grace before a pause, or the tick after
+      // one. The stream is alive, and a pause that just ended closes its band here.
+      pomodoroTimeline.endPause(at: t)
+      return
+    }
     logBandSegment(pomodoroTimeline.observe(kind, at: t))
   }
 
@@ -819,7 +838,7 @@ final class SessionController: ObservableObject {
     let t = now()
     let events = pomodoro.finish()
     self.pomodoro = pomodoro
-    for event in events { handlePomodoroEvent(event, at: t) }
+    handlePomodoroEvents(events, at: t)
     flushPomodoroPending()
   }
 
