@@ -59,7 +59,7 @@
 - `depth_gap_ms` / `arrival_gap_ms`：与上一帧深度的呈现间隔、与上一帧的回调到达间隔（毫秒）。这两列是「深度链路本身有没有被挤」的第一手证据。
 - `vision_ms` / `vision_age_ms`：最近一次 Vision 推理耗时、那个结果距这一帧的年龄（毫秒）。Vision 与深度在两条串行队列上（`depthQueue` / `videoQueue`），若 Vision 挤占 CPU，会先看到 `vision_ms` 升高、`vision_age_ms` 变大、`depth_gap_ms` 跟着变成 66 ms。
 - `render_ms` / `render_latency_ms`：画布为这一帧花的重绘时间、从回调到上屏的延迟。
-- `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17），每秒汇总文件里是**整场累计**）：人形健全性计数。
+- `sanity_eye_below_mouth` / `sanity_shoulder_above_ear` / `sanity_points_without_person`（v0.6.8 (17)，每秒汇总文件里是**整场累计**）：人形健全性计数。v0.6.8 (25) 起 `sanity_points_without_person` 只数「模型报告画面里没有人（`detected: false`），却仍然画出了关节」的真正矛盾帧；只有鼻子过门槛的帧是「看到人、在场证据不足」，照常画点，不再计入（旧的「没有在场证据」口径会把正常帧记成缺陷）。
 - `serious_seconds` / `degraded_seconds`（v0.6.8 (17)，整场累计）：`serious` 及以上热状态的秒数与降级节流秒数；会话结束时另在标准输出打印 `[summary] serious=…s degraded=…s`。
 - `visible_points`：画布这一帧**实际画在屏幕上**的点数（投影后落在画面矩形内）；0 表示点被投影/裁剪吃掉了，不是采集层没有点（0.6.8 (16) 排查「凑近点云消失」用）。**没有人体时画布暂停（界面只有矢量轮廓，不重绘），这两个字段是 `null`，不是 0。**
 - `face_detected`（v0.6.8 (19)）：与这一帧配对（150 ms 内）的 Vision 结果是否看到了过 0.5 门槛的人脸；还没有可用结果、或结果过期时为 `null`（「不知道」，不是 false）。AC7 的「检测到脸时点云从不空白」用它与 `points`、`visible_points` 交叉判：有脸的帧里 `points > 0` 且已上屏的帧 `visible_points > 0`，一帧空白即失败。
@@ -101,7 +101,7 @@
 - `right_shoulder_frames` / `shoulder_frames`：Vision 帧里右肩过 0.5 门槛的累计帧数与总帧数。AC8 要求右肩可用帧 < 50% 时**记录并上报**，不改判定门槛。
 - `cloud_blank_with_face_frames`：检测到脸、但这一帧点云为空的累计帧数（AC7 的「从不空白」）。
 
-`verify.py device-logs` 的判定（按此顺序读输出）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 无人在场却画点的累计帧数超过 5 判 FAIL）、`upper-body-only`、`shoulders-not-on-head`、`shoulders-available-ratio`、`cloud-smooth`、`cloud-not-blank`（有脸的帧点云不得空白）、`keypoint-jitter`（滚动 p95 最大值 ≤ 1%）、`cloud-jitter`（≤ 2%）、`degradation`、`thermal`；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。右肩可用帧占比不参与判定，单独打印 `REPORT right-shoulder: …` 并写进 `verdict.json` 的 `rightShoulder`。
+`verify.py device-logs` 的判定（按此顺序读输出）：`figure-sanity`（有人入镜时，眼睛低于嘴 / 双肩高于耳 / 模型说没人却画出关节的累计帧数超过 5 判 FAIL；按 0.6.8 (25) 的现行口径）、`upper-body-only`、`shoulders-not-on-head`、`shoulders-available-ratio`、`cloud-smooth`、`cloud-not-blank`（有脸的帧点云不得空白）、`keypoint-jitter`（滚动 p95 最大值 ≤ 1%）、`cloud-jitter`（≤ 2%）、`degradation`、`thermal`；无人会话里「双肩可用占比」没有分母，改判 `INSUFFICIENT_DATA` 而不是 FAIL。右肩可用帧占比不参与判定，单独打印 `REPORT right-shoulder: …` 并写进 `verdict.json` 的 `rightShoulder`。
 
 `0.6.8 (15)` 的 `verify.py device-logs` 按这三份文件判 PASS / FAIL / **INSUFFICIENT_DATA**；数据不充分（关节全部不可见、点数为 0、会话短于 600 秒、有人时段的可见关节帧过少）时如实返回 `INSUFFICIENT_DATA`，不判 PASS。
 

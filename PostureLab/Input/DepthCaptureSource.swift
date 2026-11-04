@@ -556,7 +556,8 @@ extension DepthCaptureSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     // 人形健全性（0.6.8 (17)）：眼睛低于嘴、双肩高于耳朵各记一帧；有人形点却没有在场证据也记一帧。
     let eyeBelowMouth = Self.eyeBelowMouth(joints: joints, mouth: frame.mouth)
     let shoulderAboveEar = Self.shoulderAboveEar(joints: joints)
-    let pointsWithoutPerson = !joints.isEmpty && presencePath == .none
+    let pointsWithoutPerson = PresenceGate.drawsPointsWithoutPerson(joints: joints,
+                                                                    detected: paired.detected)
     #if DEBUG
     PerfMonitor.shared.recordSanity(eyeBelowMouth: eyeBelowMouth,
                                     shoulderAboveEar: shoulderAboveEar,

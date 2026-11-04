@@ -1902,9 +1902,10 @@ def judge_serious_cold_start(perf: list[dict]) -> tuple[str, str]:
     逐秒的 `thermal_state` 与 `window_s` 在 `perf-*.jsonl` 里；`serious_seconds` 是整场累计，
     不能用来算前 10 分钟，所以这里按秒重算。窗口没跑满 10 分钟时没有分母，判数据不足。
     """
-    rows = [row for row in perf if isinstance(row.get("t"), (int, float))]
+    rows = [row for row in perf
+            if isinstance(row.get("t"), (int, float)) and "window_s" in row]
     if not rows:
-        return INSUFFICIENT, "没有 perf-*.jsonl"
+        return INSUFFICIENT, "没有 perf-*.jsonl（或只有首行、没有逐秒汇总）"
     if "thermal_state" not in rows[0]:
         return INSUFFICIENT, "perf 里没有逐秒热状态（0.6.8 前的构建）"
     start = min(row["t"] for row in rows)
